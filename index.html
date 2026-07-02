@@ -1,0 +1,292 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tickers Overnight — Gold / SPX / NQ</title>
+<style>
+  :root{
+    --bg:#0e1116; --card:#171c24; --card2:#1e2530; --line:#2a323f;
+    --fg:#e8edf4; --mut:#8a95a5; --acc:#f5b301; --acc2:#3d8bfd;
+    --call:#2ec08a; --put:#ff6b6b; --chip:#232b37;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  body{padding:0 12px calc(40px + env(safe-area-inset-bottom))}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  header{position:sticky;top:0;z-index:20;background:var(--bg);
+    padding:12px 0 0;border-bottom:1px solid var(--line)}
+  h1{font-size:18px;margin:0 0 2px;letter-spacing:.2px}
+  .sub{font-size:11px;color:var(--mut)}
+  .badge{display:inline-block;font-size:10px;color:#0e1116;background:var(--call);
+    border-radius:20px;padding:1px 8px;font-weight:700;vertical-align:middle;margin-left:6px}
+  .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+  .tabs button{background:var(--card);border:1px solid var(--line);color:var(--mut);
+    padding:9px 4px;border-radius:10px 10px 0 0;font-size:14px;font-weight:700}
+  .tabs button small{display:block;font-size:9px;font-weight:600;opacity:.8}
+  .tabs button.on{background:var(--card2);color:var(--fg);border-bottom-color:var(--card2)}
+  .tabs button.on[data-p="gold"]{box-shadow:inset 0 3px 0 var(--acc)}
+  .tabs button.on[data-p="es"]{box-shadow:inset 0 3px 0 var(--acc2)}
+  .tabs button.on[data-p="nq"]{box-shadow:inset 0 3px 0 #a06bff}
+  .ctl{display:flex;align-items:center;gap:8px;padding:9px 0}
+  .lv{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 10px}
+  .lv label{display:block;font-size:10px;color:var(--mut)}
+  .lv input{width:100%;background:transparent;border:none;color:var(--fg);font-size:17px;font-weight:700;outline:none}
+  .lv input::-webkit-outer-spin-button,.lv input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;color:var(--mut);border:none;padding:8px 11px;font-size:12px;font-weight:700}
+  .seg button.on{background:var(--chip);color:var(--fg)}
+  #list{margin-top:12px}
+  .day{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+  .day.today{border-color:var(--acc)}
+  .dayhead{display:flex;align-items:center;gap:8px;padding:11px 13px;cursor:pointer;user-select:none}
+  .dayhead .dt{font-size:15px;font-weight:700}
+  .dayhead .wd{font-size:12px;color:var(--mut)}
+  .dayhead .lbl{font-size:11px;color:var(--mut);margin-left:2px}
+  .dayhead .tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;background:var(--chip);color:var(--mut)}
+  .dayhead .tag.hoje{background:var(--acc);color:#0e1116}
+  .dayhead .tag.amanha{background:var(--acc2);color:#fff}
+  .dayhead .caret{margin-left:auto;color:var(--mut);font-size:12px;transition:transform .15s}
+  .day.open .caret{transform:rotate(90deg)}
+  .body{display:none;padding:0 13px 11px}
+  .day.open .body{display:block}
+  .grp{padding:9px 0 2px}
+  .grp+.grp{border-top:1px solid var(--line)}
+  .grp .omon{font-size:10px;color:var(--mut);background:var(--chip);border-radius:6px;padding:2px 7px;display:inline-block;margin-bottom:4px}
+  .grp .omon b{color:var(--acc)}
+  .grp.quart .omon b{color:#a06bff}
+  .tk{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--line);
+    border-radius:9px;padding:10px 11px;margin-top:6px;cursor:pointer}
+  .tk:active{background:#28313f}
+  .cp{font-size:11px;font-weight:800;width:14px;text-align:center}
+  .cp.c{color:var(--call)} .cp.p{color:var(--put)}
+  .tk .t{font-size:15px;font-weight:600;letter-spacing:.3px;flex:1;word-break:break-all}
+  .tk .cpy{font-size:12px;color:var(--mut)}
+  details.legend{margin:14px 0;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  details.legend summary{padding:12px 13px;font-weight:700;font-size:13px;cursor:pointer}
+  .legend .in{padding:0 13px 13px;font-size:12px;color:var(--mut);line-height:1.6}
+  .legend code{background:var(--chip);padding:1px 5px;border-radius:5px;color:var(--fg)}
+  table.rules{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}
+  table.rules th,table.rules td{border:1px solid var(--line);padding:4px 6px;text-align:left}
+  table.rules th{color:var(--mut);font-weight:600}
+  #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    background:var(--call);color:#0e1116;font-weight:700;font-size:13px;padding:8px 16px;border-radius:24px;
+    opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+  #toast.show{opacity:1}
+  .foot{text-align:center;color:var(--mut);font-size:10px;margin:18px 0 6px}
+</style>
+
+<header>
+  <h1>Tickers Overnight <span class="badge">OFFLINE</span></h1>
+  <div class="sub" id="todayLbl"></div>
+  <div class="tabs" id="tabs">
+    <button data-p="gold" class="on">Gold<small>GCA · Comdty</small></button>
+    <button data-p="es">SPX<small>ESA · Index</small></button>
+    <button data-p="nq">NQ<small>NQA · Index</small></button>
+  </div>
+  <div class="ctl">
+    <div class="lv"><label id="lvlLbl">Nível</label><input id="lvl" type="number" inputmode="decimal"></div>
+    <span class="seg" id="cpseg">
+      <button data-cp="both" class="on">C+P</button>
+      <button data-cp="C">Call</button>
+      <button data-cp="P">Put</button>
+    </span>
+  </div>
+</header>
+
+<div id="list"></div>
+
+<details class="legend">
+  <summary>Regras de composição (fonte: CME Bloomberg Cheat Sheet — verificado no terminal)</summary>
+  <div class="in">
+    Formato: <code>ROOT + Mês + Ano + C/P [+ Semana]  Strike  YellowKey</code>.
+    Mês: F&nbsp;G&nbsp;H&nbsp;J&nbsp;K&nbsp;M&nbsp;N&nbsp;Q&nbsp;U&nbsp;V&nbsp;X&nbsp;Z (jan…dez).
+    Ano: último dígito (2026→<code>6</code>); algumas classes usam 2 dígitos (<code>26</code>).
+    Semana = enésima ocorrência daquele dia no mês.
+    <table class="rules">
+      <tr><th>Produto</th><th>Seg</th><th>Ter</th><th>Qua</th><th>Qui</th><th>Sex (wk n)</th></tr>
+      <tr><td>Gold · Comdty</td><td>XAWW·wk</td><td>XGI·wk</td><td>XATW·wk</td><td>XGR·wk</td><td>GCW·<b>2díg</b>·wk</td></tr>
+      <tr><td>SPX/ES · Index</td><td>IWWW·wk</td><td>IMBW·wk</td><td>ESW·<b>2díg</b>·wk</td><td>IMDW·wk</td><td>nE</td></tr>
+      <tr><td>NQ · Index</td><td>QNBW·wk</td><td>QETW·wk</td><td>QNCW·wk</td><td>QHTW·wk</td><td>nO</td></tr>
+    </table>
+    <div style="margin-top:8px">
+      Gold tem opção semanal em todos os dias úteis (Seg–Sex). A 3ª sexta de Mar/Jun/Set/Dez é a trimestral
+      (ES / NQ), não a semanal. EOM (último pregão) mostrado à parte para ES/NQ.
+      A composição é determinística; se a CME não listar um vencimento específico, o ticker não resolve no terminal.
+    </div>
+  </div>
+</details>
+
+<div class="foot">100% offline · relógio do aparelho · sem servidor · sem Bloomberg</div>
+<div id="toast">copiado</div>
+
+<script>
+(function(){
+"use strict";
+const MC=["F","G","H","J","K","M","N","Q","U","V","X","Z"];
+const WD=["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+const QUART_MONTHS=new Set([2,5,8,11]); // mar,jun,set,dez
+const OPEN_DEFAULT=10; // primeiros N vencimentos abertos
+
+const HOLIDAYS=new Set([
+ "2026-01-01","2026-01-19","2026-02-16","2026-04-03","2026-05-25","2026-06-19",
+ "2026-07-03","2026-09-07","2026-11-26","2026-12-25",
+ "2027-01-01","2027-01-18","2027-02-15","2027-03-26","2027-05-31","2027-06-18",
+ "2027-07-05","2027-09-06","2027-11-25","2027-12-24"
+]);
+
+const PRODUCTS={
+ gold:{name:"Gold", tag:"GCA", key:"Comdty", inc:25, def:4075,
+   days:{1:{style:"sfx",root:"XAWW",yd:1,omon:"XAWA"},
+         2:{style:"sfx",root:"XGI", yd:1,omon:"XGIA"},
+         3:{style:"sfx",root:"XATW",yd:1,omon:"XATA"},
+         4:{style:"sfx",root:"XGR", yd:1,omon:"XGRA"},
+         5:{style:"sfx",root:"GCW", yd:2,omon:"XGCA"}}},
+ es:{name:"SPX / E-mini S&P", tag:"ESA", key:"Index", inc:5, def:7550,
+   days:{1:{style:"sfx",root:"IWWW",yd:1,omon:"IWWA"},
+         2:{style:"sfx",root:"IMBW",yd:1,omon:"IMBA"},
+         3:{style:"sfx",root:"ESW", yd:2,omon:"IEWA"},
+         4:{style:"sfx",root:"IMDW",yd:1,omon:"IMDA"},
+         5:{style:"fri",letter:"E",yd:1}},
+   eom:{root:"SC",yd:1,omon:"SCA"}, quart:{root:"ES",yd:1,omon:"ESA"}},
+ nq:{name:"E-mini Nasdaq-100", tag:"NQA", key:"Index", inc:25, def:30000,
+   days:{1:{style:"sfx",root:"QNBW",yd:1,omon:"QNBA"},
+         2:{style:"sfx",root:"QETW",yd:1,omon:"QETA"},
+         3:{style:"sfx",root:"QNCW",yd:1,omon:"QNCA"},
+         4:{style:"sfx",root:"QHTW",yd:1,omon:"QHTA"},
+         5:{style:"fri",letter:"O",yd:1}},
+   eom:{root:"QNA",yd:1,omon:"QNAA"}, quart:{root:"NQ",yd:1,omon:"NQA"}}
+};
+
+let active="gold", CP="both";
+const levels={};
+
+function iso(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function isBiz(d){const w=d.getDay();return w>=1&&w<=5&&!HOLIDAYS.has(iso(d));}
+function yr(d,n){return n===2?String(d.getFullYear()%100).padStart(2,"0"):String(d.getFullYear()%10);}
+function weekNo(d){return Math.min(5,Math.ceil(d.getDate()/7));}
+function lastBiz(d){let x=new Date(d.getFullYear(),d.getMonth()+1,0);while(!isBiz(x))x.setDate(x.getDate()-1);return iso(x)===iso(d);}
+
+function strikeStr(p){
+  const v=levels[active];
+  if(v==null||isNaN(v)||v<=0) return "{K}";
+  return String(Math.round(v/p.inc)*p.inc);
+}
+
+function entriesFor(p,d){
+  const out=[]; const w=d.getDay(); const rule=p.days[w];
+  const K=strikeStr(p); const m=MC[d.getMonth()]; const wk=weekNo(d);
+  const is3rdFri=(w===5&&wk===3&&QUART_MONTHS.has(d.getMonth()));
+  if(rule){
+    if(rule.style==="fri"){
+      if(is3rdFri && p.quart){
+        const q=p.quart, base=q.root+m+yr(d,q.yd);
+        out.push({label:"Trimestral",omon:q.omon+" "+p.key,quart:true,
+          C:base+"C "+K+" "+p.key, P:base+"P "+K+" "+p.key});
+      }else{
+        const base=wk+rule.letter+m+yr(d,rule.yd);
+        out.push({label:"Sexta (semana "+wk+")",omon:wk+rule.letter+"A "+p.key,
+          C:base+"C "+K+" "+p.key, P:base+"P "+K+" "+p.key});
+      }
+    }else{
+      const pre=rule.root+m+yr(d,rule.yd);
+      out.push({label:WD[w]+" (semana "+wk+")",omon:rule.omon+" "+p.key,
+        C:pre+"C"+wk+" "+K+" "+p.key, P:pre+"P"+wk+" "+K+" "+p.key});
+    }
+  }
+  if(p.eom && lastBiz(d)){
+    const e=p.eom, base=e.root+m+yr(d,e.yd);
+    out.push({label:"Fim de mês (EOM)",omon:e.omon+" "+p.key,
+      C:base+"C "+K+" "+p.key, P:base+"P "+K+" "+p.key});
+  }
+  return out;
+}
+
+function tkRow(cp,cls,ticker){
+  return '<div class="tk" data-t="'+ticker+'"><span class="cp '+cls+'">'+cp+
+    '</span><span class="t mono">'+ticker+'</span><span class="cpy">⧉ copiar</span></div>';
+}
+
+function render(){
+  const p=PRODUCTS[active];
+  const list=document.getElementById("list");
+  const now=new Date(); now.setHours(0,0,0,0); const tIso=iso(now);
+  let nb=new Date(now); nb.setDate(nb.getDate()+1); const nbIso=iso(nb); // amanhã = dia seguinte de calendário
+
+  let html=""; let count=0; const cur=new Date(now); let guard=0;
+  while(count<50 && guard<600){
+    guard++;
+    if(isBiz(cur)){
+      const es=entriesFor(p,cur);
+      if(es.length){
+        const dIso=iso(cur), isToday=dIso===tIso, isTom=dIso===nbIso;
+        const open=count<OPEN_DEFAULT;
+        let inner="";
+        es.forEach(function(e){
+          inner+='<div class="grp'+(e.quart?' quart':'')+'"><span class="omon">OMON <b>'+e.omon+'</b> · '+e.label+'</span>';
+          if(CP==="both"||CP==="C") inner+=tkRow("C","c",e.C);
+          if(CP==="both"||CP==="P") inner+=tkRow("P","p",e.P);
+          inner+='</div>';
+        });
+        const tag=isToday?'<span class="tag hoje">HOJE</span>':(isTom?'<span class="tag amanha">AMANHÃ</span>':'');
+        const lbl=es[0].quart?'trimestral':(es.length>1?'semanal + EOM':'');
+        html+='<div class="day'+(open?' open':'')+(isToday?' today':'')+'">'+
+          '<div class="dayhead"><span class="dt">'+String(cur.getDate()).padStart(2,"0")+"/"+
+          String(cur.getMonth()+1).padStart(2,"0")+'</span><span class="wd">'+WD[cur.getDay()]+
+          '</span>'+(lbl?'<span class="lbl">· '+lbl+'</span>':'')+tag+'<span class="caret">▶</span></div>'+
+          '<div class="body">'+inner+'</div></div>';
+        count++;
+      }
+    }
+    cur.setDate(cur.getDate()+1);
+  }
+  list.innerHTML=html || '<div class="foot">sem vencimentos.</div>';
+}
+
+function syncCtl(){
+  const p=PRODUCTS[active];
+  document.getElementById("lvlLbl").textContent="Nível "+p.tag+" (→ strike, passo "+p.inc+")";
+  document.getElementById("lvl").value=(levels[active]!=null&&!isNaN(levels[active]))?levels[active]:"";
+}
+
+function toast(){const t=document.getElementById("toast");t.classList.add("show");
+  clearTimeout(toast._id);toast._id=setTimeout(function(){t.classList.remove("show");},900);}
+function copy(txt){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(toast,fallback);}else fallback();
+  function fallback(){const ta=document.createElement("textarea");ta.value=txt;ta.style.position="fixed";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand("copy");toast();}catch(e){}document.body.removeChild(ta);}
+}
+
+document.getElementById("list").addEventListener("click",function(e){
+  const tk=e.target.closest(".tk"); if(tk){copy(tk.getAttribute("data-t"));return;}
+  const h=e.target.closest(".dayhead"); if(h){h.parentNode.classList.toggle("open");}
+});
+document.getElementById("tabs").addEventListener("click",function(e){
+  const b=e.target.closest("button"); if(!b)return;
+  active=b.getAttribute("data-p");
+  [].forEach.call(this.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b);});
+  syncCtl(); render();
+});
+document.getElementById("cpseg").addEventListener("click",function(e){
+  const b=e.target.closest("button"); if(!b)return;
+  CP=b.getAttribute("data-cp");
+  [].forEach.call(this.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b);});
+  render();
+});
+document.getElementById("lvl").addEventListener("input",function(){
+  const v=parseFloat(this.value); levels[active]=v;
+  try{localStorage.setItem("lvl_"+active,this.value);}catch(e){}
+  render();
+});
+
+(function init(){
+  const now=new Date();
+  document.getElementById("todayLbl").textContent=
+    WD[now.getDay()]+", "+String(now.getDate()).padStart(2,"0")+"/"+
+    String(now.getMonth()+1).padStart(2,"0")+"/"+now.getFullYear()+" · "+OPEN_DEFAULT+" primeiros abertos · toque no ticker p/ copiar";
+  Object.keys(PRODUCTS).forEach(function(id){
+    let s=null; try{s=localStorage.getItem("lvl_"+id);}catch(e){}
+    levels[id]=(s!=null&&s!=="")?parseFloat(s):PRODUCTS[id].def;
+  });
+  syncCtl(); render();
+})();
+})();
+</script>
