@@ -1,0 +1,66 @@
+/* positions-v2.css — formatação da tela de Posições (escopada em html.theme-v2,
+   classe aplicada de forma fixa no <html> da positions.html).
+   Não toca o style.css compartilhado (usado pelos outros apps). */
+
+/* ═══ CORES + FONTE — paleta clara/neutra, sans atemporal ═══ */
+html.theme-v2 {
+  --bg:           #f6f8fb;  /* v1 #f4f6fb — fundo da página */
+  --bg-card:      #ffffff;  /* cards/painéis */
+  --bg-row-alt:   #eef2f8;  /* v1 #eaecf2 — zebra suave */
+  --border:       #dde3ec;  /* v1 #cdd5e8 — bordas mais leves */
+  --accent:       #2563eb;  /* v1 #3b82f6 — azul de ação */
+  --accent-hover: #1d4ed8;
+  --green:        #15803d;  /* positivo · preço BBG · check OK */
+  --red:          #dc2626;  /* negativo (parênteses) · preço D-1 · check fora */
+  --yellow:       #c2710c;  /* alerta · ~ laranja da boleta */
+  --text:         #1f2733;  /* v1 #1a2035 — texto principal */
+  --text-muted:   #71809a;
+  --text-dim:     #51607d;
+  --radius:       8px;       /* v1 6px — cantos um pouco mais suaves */
+  /* fonte sans-serif de sistema (sai do "terminal"); números seguem alinhados via .num/tabular-nums */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+}
+/* garante números alinhados mesmo com fonte proporcional */
+html.theme-v2 .data-table td, html.theme-v2 .num { font-variant-numeric: tabular-nums; }
+html.theme-v2 body { line-height: 1.55; }
+
+/* ═══ TABELAS — cabeçalho escuro (igual ao da Análise de Opções), zebra sutil, hover azul ═══ */
+/* v1: header navy #2a3a5e em caixa-alta. v2: slate escuro, sem caixa-alta agressiva,
+   fonte um pouco maior que o corpo (13px vs 12px) p/ chamar atenção */
+html.theme-v2 .data-table th {
+  background: #3b4a63; color: #eef2f8;
+  border: none;          /* sem linhas de contorno: a faixa escura sólida já separa do corpo */
+  text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 13px;
+}
+html.theme-v2 .data-table tbody tr.group-even { background: #eef4fd; } /* v1 #dce8f8 */
+html.theme-v2 .data-table tbody tr.group-odd  { background: #ffffff; }
+html.theme-v2 .data-table tbody tr:hover      { background: #e1ecfb; } /* v1 #c5d9f5 */
+html.theme-v2 .data-table td { border-bottom: 1px solid #eef1f6; }
+
+/* resultado/total em destaque — ajuda a bater o olho */
+html.theme-v2 .data-table td.col-final { font-weight: 600; }
+
+/* ═══ LAYOUT — abas espalhadas por toda a largura, rótulos centralizados ═══ */
+/* v1: abas concentradas à esquerda. v2: cada aba ocupa espaço igual e preenche a tela */
+html.theme-v2 .trader-tabs { width: 100%; }
+html.theme-v2 .trader-tab {
+  flex: 1 1 0;            /* todas com a mesma largura, preenchendo a barra */
+  justify-content: center; /* rótulo centralizado dentro da aba */
+  padding: 11px 12px;      /* menos padding lateral (a largura agora vem do flex) */
+}
+/* a aba com dropdown (PAlves ▾) mantém o chevron colado à direita sem desalinhar o rótulo */
+html.theme-v2 #tab-btn-other { position: relative; }
+html.theme-v2 #tab-btn-other .tab-chevron { margin-left: 6px; }
+
+/* ═══ DENSIDADE — respiro confortável p/ leitura ═══ */
+html.theme-v2 .data-table th,
+html.theme-v2 .data-table td { padding: 8px 12px; } /* v1 6px 10px */
+
+/* ═══ Cards / detalhe — sombra discreta, cantos suaves ═══ */
+html.theme-v2 .card { box-shadow: 0 1px 3px rgba(20,30,60,.06); }
+
+/* ═══ Edição inline / tooltips / Consolidado Dólar ═══ */
+html.theme-v2 [contenteditable="true"]:focus { background: #e3edfb; }
+html.theme-v2 td[data-bbg]:hover::after,
+html.theme-v2 td[data-swaps]:hover::after { background: #1f2733; color: #eef2f8; }
+html.theme-v2 .dc-table thead th { background: #3b4a63; color: #eef2f8; } /* v1 #1f3a5f */

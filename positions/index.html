@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="theme-v2">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Posições — JGP (snapshot)</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/positions-v2.css">
+  <!-- Bloco de estilos copiado de positions.html (mantém a aparência das tabelas) -->
+  <style>
+    .col-pnl { border-left: 2px solid var(--border); }
+    .data-table td.col-final:not(.num) { font-weight: 600; }
+    .alloc-table td:first-child { font-weight: 600; }
+    tr.area-divider td { border-top: 2px solid rgba(128,128,128,0.35); }
+    .col-final { border-left: 2px solid var(--border); border-right: 2px solid var(--border); }
+    .col-right { border-right: 2px solid var(--border); }
+    .section-copy-target { background: var(--bg-card); width: fit-content; }
+    td[data-bbg] { position: relative; cursor: help; }
+    td[data-bbg]:hover::after {
+      content: attr(data-bbg);
+      position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+      background: #1a1a2e; color: #e0e0e0; padding: 6px 10px; border-radius: 4px;
+      white-space: pre; font-size: 11px; z-index: 100; border: 1px solid var(--border);
+      min-width: 130px; pointer-events: none;
+    }
+    td[data-swaps] { position: relative; cursor: help; }
+    td[data-swaps]:hover::after {
+      content: attr(data-swaps);
+      position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+      background: #1a1a2e; color: #e0e0e0; padding: 6px 10px; border-radius: 4px;
+      white-space: pre; font-size: 11px; z-index: 100; border: 1px solid var(--border);
+      min-width: 160px; pointer-events: none;
+    }
+    .alloc-ok   { color: var(--green); }
+    .alloc-warn { color: #f0c040; }
+    .alloc-bad  { color: var(--red); }
+    .data-table th { font-weight: normal; }
+    .alloc-table th { font-size: 11px; white-space: nowrap; }
+    .block-header {
+      display: flex; align-items: center; gap: 12px; margin: 20px 0 8px 0;
+      color: var(--text-muted); font-size: 11px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .block-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    /* ── Ajustes do modo estático (read-only) ─────────────────────────────── */
+    /* Botões de edição/cópia e barras de filtro não fazem sentido no snapshot */
+    button[onclick^="copyCardImage"],
+    button[onclick^="copySummaryTable"],
+    [id^="filterBar-"] { display: none !important; }
+    /* Preço/#PL/qtd deixam de parecer clicáveis (edição está neutralizada) */
+    .data-table td[onclick] { cursor: default !important; }
+
+    /* Cabeçalho do snapshot */
+    .snap-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+    .snap-meta { color: var(--text-muted); font-size: 13px; }
+    .trader-title {
+      margin: 26px 0 4px; font-size: 18px; font-weight: 700; color: var(--text);
+      border-bottom: 2px solid var(--border); padding-bottom: 6px;
+    }
+
+    /* ── Gate de senha ────────────────────────────────────────────────────── */
+    #gate {
+      position: fixed; inset: 0; z-index: 9999; display: flex;
+      align-items: center; justify-content: center; background: var(--bg, #0f1420);
+    }
+    #gate .gate-box {
+      background: var(--bg-card, #171d2b); border: 1px solid var(--border, #2a3346);
+      border-radius: 10px; padding: 28px 26px; width: min(360px, 90vw);
+      box-shadow: 0 10px 40px rgba(0,0,0,.4);
+    }
+    #gate h2 { margin: 0 0 4px; font-size: 17px; color: var(--text, #e6edf7); }
+    #gate p  { margin: 0 0 16px; font-size: 13px; color: var(--text-muted, #8a97ad); }
+    #gate input {
+      width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px;
+      background: var(--bg, #0f1420); color: var(--text, #e6edf7);
+      border: 1px solid var(--border, #2a3346); border-radius: 6px; margin-bottom: 12px;
+    }
+    #gate button {
+      width: 100%; padding: 10px 12px; font-size: 15px; cursor: pointer;
+      background: #1f3a5f; color: #e6edf7; border: none; border-radius: 6px; font-weight: 600;
+    }
+    #gate button:disabled { opacity: .6; cursor: default; }
+    #gateMsg { margin-top: 10px; font-size: 13px; color: var(--red, #e5534b); min-height: 18px; }
+    body.locked { overflow: hidden; }
+  </style>
+</head>
+<body class="locked">
+
+<!-- Gate de senha (bloqueia até decriptar) -->
+<div id="gate">
+  <div class="gate-box">
+    <h2>Posições — JGP</h2>
+    <p>Snapshot protegido. Digite a senha para visualizar.</p>
+    <input type="password" id="gatePass" autocomplete="current-password" placeholder="Senha" autofocus>
+    <button id="gateBtn" type="button">Abrir</button>
+    <div id="gateMsg"></div>
+  </div>
+</div>
+
+<!-- Stubs OCULTOS da toolbar: positions.js referencia estes ids no auto-init.
+     Mantê-los evita null-deref (não são usados no modo estático). -->
+<div style="display:none">
+  <input type="date" id="refDate" value="">
+  <input type="date" id="forceOpening" value="">
+  <button id="btnLoad"></button>
+  <span id="refStatus"></span>
+  <span id="srcLabel"></span>
+</div>
+
+<main class="main-content">
+  <div class="page-header snap-header">
+    <h1>Posições — Abertura + Boletas</h1>
+    <span class="snap-meta" id="snapMeta"></span>
+  </div>
+
+  <!-- Uma seção por trader: título + (filterBar oculto) + bloco Posição.
+       ids IDÊNTICOS aos de positions.html para reusar renderSectionsForTab. -->
+  <div class="trader-title">EMota</div>
+  <div id="tab-emota">
+    <div id="filterBar-emota"></div>
+    <div class="block-header">Posição</div>
+    <div id="posContainer-emota"></div>
+  </div>
+
+  <div class="trader-title">ECotrim</div>
+  <div id="tab-ecotrim">
+    <div id="filterBar-ecotrim"></div>
+    <div class="block-header">Posição</div>
+    <div id="posContainer-ecotrim"></div>
+  </div>
+
+  <div class="trader-title">PortfolioRF</div>
+  <div id="tab-portfoliorf">
+    <div id="filterBar-portfoliorf"></div>
+    <div class="block-header">Posição</div>
+    <div id="posContainer-portfoliorf"></div>
+  </div>
+</main>
+
+<!-- Ordem importa: shim neutraliza a máquina ao vivo ANTES de positions.js;
+     data.js (gerado pelo build) traz os blobs criptografados; boot faz a fiação. -->
+<script src="static-shim.js"></script>
+<script src="positions.js"></script>
+<script src="pnl.js"></script>
+<script src="data.js"></script>
+<script src="static-boot.js"></script>
+</body>
+</html>
