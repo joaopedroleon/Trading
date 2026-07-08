@@ -14,8 +14,10 @@
   const PUBLIC_URL = 'https://joaopedroleon.github.io/Trading/positions/';
 
   // 1) Read-only: no-op nas funções que mexem em estado/servidor (se existirem).
+  //    'copyCardImage' NÃO entra aqui: é read-only (só gera imagem da tabela) e
+  //    precisa funcionar pra salvar/compartilhar o print no celular.
   const _noop = function () {};
-  for (const fn of ['copyCardImage', 'copySummaryTable', 'reloadActiveTab',
+  for (const fn of ['copySummaryTable', 'reloadActiveTab',
                     'prefetchOtherTabs', 'loadPositionsForTab',
                     'posPriceStartEdit', 'posPlStartEdit', 'swapStartEdit',
                     'optEditStart', 'pnlStartEdit', 'pnlStartSummaryEdit',

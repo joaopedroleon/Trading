@@ -1439,6 +1439,46 @@ function _ensureHtml2Canvas() {
   return _h2cPromise;
 }
 
+// Celular (Android/iOS, incl. iPadOS que se disfarça de Macintosh com touch).
+function _isMobileDevice() {
+  const ua = navigator.userAgent || '';
+  return /Android|iPhone|iPad|iPod/i.test(ua)
+      || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua));
+}
+
+// Entrega o print: celular → folha de compartilhamento (salvar em Fotos/WhatsApp);
+// desktop → clipboard (colar no WhatsApp Web); fallback universal → download do PNG.
+async function _deliverImageBlob(blob, btn, origText) {
+  const done = label => {
+    if (btn) { btn.textContent = label; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1800); }
+  };
+  const reset = () => { if (btn) { btn.textContent = origText; btn.disabled = false; } };
+
+  const file = new File([blob], 'posicoes.png', { type: 'image/png' });
+
+  // 1) Celular: compartilhar/salvar via folha nativa.
+  if (_isMobileDevice() && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); done('✓'); return; }
+    catch (err) { if (err && err.name === 'AbortError') { reset(); return; } /* senão cai pro fallback */ }
+  }
+
+  // 2) Desktop: copiar pro clipboard (comportamento original).
+  if (navigator.clipboard && window.ClipboardItem) {
+    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); done('✓ Copiado'); return; }
+    catch { /* cai pro download */ }
+  }
+
+  // 3) Fallback universal: baixar o arquivo.
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'posicoes.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    done('✓ Salvo');
+  } catch { reset(); }
+}
+
 async function copyElementAsImage(el, btn) {
   if (!el) return;
   const origText = btn?.textContent;
@@ -1451,17 +1491,7 @@ async function copyElementAsImage(el, btn) {
       logging: false,
       backgroundColor: null,
     });
-    canvas.toBlob(async blob => {
-      try {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        if (btn) {
-          btn.textContent = '✓ Copiado';
-          setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1800);
-        }
-      } catch {
-        if (btn) { btn.textContent = origText; btn.disabled = false; }
-      }
-    }, 'image/png');
+    canvas.toBlob(blob => { _deliverImageBlob(blob, btn, origText); }, 'image/png');
   } catch {
     if (btn) { btn.textContent = origText; btn.disabled = false; }
   }

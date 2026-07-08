@@ -56,8 +56,9 @@
     .block-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
     /* ── Ajustes do modo estático (read-only) ─────────────────────────────── */
-    /* Botões de edição/cópia e barras de filtro não fazem sentido no snapshot */
-    button[onclick^="copyCardImage"],
+    /* Barras de filtro e o "Copiar" do PnL (não renderizado aqui) não fazem
+       sentido no snapshot. O ⎘ Copiar da tabela (copyCardImage) FICA visível:
+       serve pra salvar/compartilhar o print da tabela do celular. */
     button[onclick^="copySummaryTable"],
     [id^="filterBar-"] { display: none !important; }
     /* Preço/#PL/qtd deixam de parecer clicáveis (edição está neutralizada) */
@@ -156,7 +157,7 @@
 <script src="static-shim.js"></script>
 <script src="positions.js"></script>
 <script src="pnl.js"></script>
-<script src="data.js?v=080720261845"></script>
+<script src="data.js?v=080720261849"></script>
 <script src="static-boot.js"></script>
 </body>
 </html>
