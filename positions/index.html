@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Evita o navegador servir uma versão antiga em cache após republicar -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Posições — JGP (snapshot)</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/positions-v2.css">
@@ -95,6 +99,7 @@
     <input type="password" id="gatePass" autocomplete="current-password" placeholder="Senha" autofocus>
     <button id="gateBtn" type="button">Abrir</button>
     <div id="gateMsg"></div>
+    <div id="gateStamp" style="margin-top:14px;font-size:12px;color:var(--text-muted,#8a97ad)"></div>
   </div>
 </div>
 
@@ -143,7 +148,7 @@
 <script src="static-shim.js"></script>
 <script src="positions.js"></script>
 <script src="pnl.js"></script>
-<script src="data.js"></script>
+<script src="data.js?v=080720261435"></script>
 <script src="static-boot.js"></script>
 </body>
 </html>

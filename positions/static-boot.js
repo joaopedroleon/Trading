@@ -113,4 +113,9 @@
 
   btn.addEventListener('click', unlock);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
+
+  // Mostra o horário de geração já na tela de senha (confirma que é a versão nova)
+  const stamp = document.getElementById('gateStamp');
+  const gen = window.__ENC__ && window.__ENC__.meta && window.__ENC__.meta.generated_at;
+  if (stamp && gen) stamp.textContent = 'Snapshot gerado em ' + gen;
 })();
