@@ -101,6 +101,18 @@
 
       document.body.classList.remove('locked');
       gate.style.display = 'none';
+
+      // Re-alinha as tabelas auxiliares (à direita) DEPOIS que o layout assenta:
+      // o gate sumiu e a regra CSS que esconde o MM Prev (:has) já recalculou o
+      // fluxo — só então as medições de posição do _alignAuxTables ficam corretas.
+      const realign = () => {
+        for (const [id] of TRADERS) {
+          try { if (typeof _alignAuxTables === 'function') _alignAuxTables(id); } catch (_) {}
+        }
+      };
+      requestAnimationFrame(() => requestAnimationFrame(realign));
+      setTimeout(realign, 250);
+      window.addEventListener('resize', realign);
     } catch (e) {
       msg.style.color = 'var(--red)';
       msg.textContent = (String(e.message || e).startsWith('missing:'))
