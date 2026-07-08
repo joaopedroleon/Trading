@@ -12,6 +12,12 @@
   <link rel="stylesheet" href="css/positions-v2.css">
   <!-- Bloco de estilos copiado de positions.html (mantém a aparência das tabelas) -->
   <style>
+    /* Botão ⧉ de copiar a referência do instrumento (1ª coluna de cada linha) */
+    .col-copy { width: 26px; text-align: center; color: var(--text-muted); cursor: pointer; user-select: none; padding: 3px 4px; font-size: 13px; }
+    .col-copy:hover { color: var(--accent); }
+    th.col-copy { cursor: default; }
+    /* Snapshot: esconder o card "MM Prev" (mostrar só a principal + auxiliar à direita) */
+    .card:has([id^="mmPrev_wrap_"]) { display: none; }
     .col-pnl { border-left: 2px solid var(--border); }
     .data-table td.col-final:not(.num) { font-weight: 600; }
     .alloc-table td:first-child { font-weight: 600; }
@@ -148,7 +154,7 @@
 <script src="static-shim.js"></script>
 <script src="positions.js"></script>
 <script src="pnl.js"></script>
-<script src="data.js?v=080720261439"></script>
+<script src="data.js?v=080720261445"></script>
 <script src="static-boot.js"></script>
 </body>
 </html>

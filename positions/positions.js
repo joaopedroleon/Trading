@@ -390,6 +390,7 @@ function sectionBodyId(s) {
 function thead() {
   const d = detailVisible ? '' : 'style="display:none"';
   return `<thead><tr>
+    <th class="col-copy" title="Copiar referência"></th>
     <th class="col-detail" ${d}>Área</th>
     <th class="col-detail" ${d}>Sub-área</th>
     <th class="col-detail" ${d}>Estratégia</th>
@@ -1355,7 +1356,9 @@ function renderTable(rows, tbodyId) {
             onclick="event.stopPropagation();swapStartEdit(this,'traded',this.dataset.swapkey,parseFloat(this.dataset.traded))">
            ${fmtTradedQty(effTraded)}</td>`;
 
+    const refCopy = (r.instrument_reference ?? r.instrument_name ?? '').replace(/"/g, '&quot;');
     return `<tr class="${rowClass} ${areaClass} ${tradedClass}" style="cursor:pointer" title="Clique para ocultar" onclick="hideRow('${key}')">
+      <td class="col-copy" data-ref="${refCopy}" title="Copiar referência do instrumento" onclick="event.stopPropagation();copyInstrumentRef(this)">⧉</td>
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
@@ -1390,6 +1393,33 @@ function renderTable(rows, tbodyId) {
       })()}
     </tr>`;
   }).join('');
+}
+
+/* ── Copiar a referência do instrumento (botão ⧉ no início de cada linha) ──── */
+function _copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).catch(() => _copyTextFallback(text));
+  }
+  _copyTextFallback(text);            // file:// / contexto não-seguro → execCommand
+  return Promise.resolve();
+}
+function _copyTextFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  try { document.execCommand('copy'); } catch (_) { /* melhor esforço */ }
+  document.body.removeChild(ta);
+}
+function copyInstrumentRef(td) {
+  const ref = td?.dataset?.ref || '';
+  if (!ref) return;
+  _copyText(ref);
+  const prev = td.textContent;       // feedback visual rápido
+  td.textContent = '✓';
+  td.style.color = 'var(--green)';
+  setTimeout(() => { td.textContent = prev; td.style.color = ''; }, 900);
 }
 
 
