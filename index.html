@@ -3,20 +3,21 @@
 <title>Tickers Overnight — Gold / SPX / NQ</title>
 <style>
   :root{
-    --bg:#0e1116; --card:#171c24; --card2:#1e2530; --line:#2a323f;
-    --fg:#e8edf4; --mut:#8a95a5; --acc:#f5b301; --acc2:#3d8bfd;
-    --call:#2ec08a; --put:#ff6b6b; --chip:#232b37;
+    /* paleta clara — espelha a tela de Posições (positions-v2.css) */
+    --bg:#f6f8fb; --card:#ffffff; --card2:#eef2f8; --line:#dde3ec;
+    --fg:#1f2733; --mut:#71809a; --acc:#f5b301; --acc-d:#a16207; --acc2:#2563eb;
+    --call:#15803d; --put:#dc2626; --chip:#eef2f8;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;background:var(--bg);color:var(--fg);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif}
   body{padding:0 12px calc(40px + env(safe-area-inset-bottom))}
   .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
   header{position:sticky;top:0;z-index:20;background:var(--bg);
     padding:12px 0 0;border-bottom:1px solid var(--line)}
   h1{font-size:18px;margin:0 0 2px;letter-spacing:.2px}
   .sub{font-size:11px;color:var(--mut)}
-  .badge{display:inline-block;font-size:10px;color:#0e1116;background:var(--call);
+  .badge{display:inline-block;font-size:10px;color:#fff;background:var(--call);
     border-radius:20px;padding:1px 8px;font-weight:700;vertical-align:middle;margin-left:6px}
   .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
   .tabs button{background:var(--card);border:1px solid var(--line);color:var(--mut);
@@ -35,14 +36,14 @@
   .seg button{background:transparent;color:var(--mut);border:none;padding:8px 11px;font-size:12px;font-weight:700}
   .seg button.on{background:var(--chip);color:var(--fg)}
   #list{margin-top:12px}
-  .day{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+  .day{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden;box-shadow:0 1px 3px rgba(20,30,60,.06)}
   .day.today{border-color:var(--acc)}
   .dayhead{display:flex;align-items:center;gap:8px;padding:11px 13px;cursor:pointer;user-select:none}
   .dayhead .dt{font-size:15px;font-weight:700}
   .dayhead .wd{font-size:12px;color:var(--mut)}
   .dayhead .lbl{font-size:11px;color:var(--mut);margin-left:2px}
   .dayhead .tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;background:var(--chip);color:var(--mut)}
-  .dayhead .tag.hoje{background:var(--acc);color:#0e1116}
+  .dayhead .tag.hoje{background:var(--acc);color:#1f2733}
   .dayhead .tag.amanha{background:var(--acc2);color:#fff}
   .dayhead .caret{margin-left:auto;color:var(--mut);font-size:12px;transition:transform .15s}
   .day.open .caret{transform:rotate(90deg)}
@@ -51,11 +52,11 @@
   .grp{padding:9px 0 2px}
   .grp+.grp{border-top:1px solid var(--line)}
   .grp .omon{font-size:10px;color:var(--mut);background:var(--chip);border-radius:6px;padding:2px 7px;display:inline-block;margin-bottom:4px}
-  .grp .omon b{color:var(--acc)}
-  .grp.quart .omon b{color:#a06bff}
+  .grp .omon b{color:var(--acc-d)}
+  .grp.quart .omon b{color:#7c3aed}
   .tk{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--line);
     border-radius:9px;padding:10px 11px;margin-top:6px;cursor:pointer}
-  .tk:active{background:#28313f}
+  .tk:active{background:#e1ecfb}
   .cp{font-size:11px;font-weight:800;width:14px;text-align:center}
   .cp.c{color:var(--call)} .cp.p{color:var(--put)}
   .tk .t{font-size:15px;font-weight:600;letter-spacing:.3px;flex:1;word-break:break-all}
@@ -68,7 +69,7 @@
   table.rules th,table.rules td{border:1px solid var(--line);padding:4px 6px;text-align:left}
   table.rules th{color:var(--mut);font-weight:600}
   #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
-    background:var(--call);color:#0e1116;font-weight:700;font-size:13px;padding:8px 16px;border-radius:24px;
+    background:var(--call);color:#fff;font-weight:700;font-size:13px;padding:8px 16px;border-radius:24px;
     opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
   #toast.show{opacity:1}
   .foot{text-align:center;color:var(--mut);font-size:10px;margin:18px 0 6px}
