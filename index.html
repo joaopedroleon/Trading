@@ -54,6 +54,7 @@
   .grp .omon{font-size:10px;color:var(--mut);background:var(--chip);border-radius:6px;padding:2px 7px;display:inline-block;margin-bottom:4px}
   .grp .omon b{color:var(--acc-d)}
   .grp.quart .omon b{color:#7c3aed}
+  .grp.mens .omon{background:#fff7e6;border:1px solid #f3d78a}
   .tk{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--line);
     border-radius:9px;padding:10px 11px;margin-top:6px;cursor:pointer}
   .tk:active{background:#e1ecfb}
@@ -135,7 +136,7 @@ const HOLIDAYS=new Set([
 ]);
 
 const PRODUCTS={
- gold:{name:"Gold", tag:"GCA", key:"Comdty", inc:25, def:4075,
+ gold:{name:"Gold", tag:"GCA", key:"Comdty", inc:25, def:4075, monthly:true,
    days:{1:{style:"sfx",root:"XAWW",yd:1,omon:"XAWA"},
          2:{style:"sfx",root:"XGI", yd:1,omon:"XGIA"},
          3:{style:"sfx",root:"XATW",yd:1,omon:"XATA"},
@@ -165,6 +166,23 @@ function isBiz(d){const w=d.getDay();return w>=1&&w<=5&&!HOLIDAYS.has(iso(d));}
 function yr(d,n){return n===2?String(d.getFullYear()%100).padStart(2,"0"):String(d.getFullYear()%10);}
 function weekNo(d){return Math.min(5,Math.ceil(d.getDate()/7));}
 function lastBiz(d){let x=new Date(d.getFullYear(),d.getMonth()+1,0);while(!isBiz(x))x.setDate(x.getDate()-1);return iso(x)===iso(d);}
+// n-ésimo último dia útil do mês (1 = último)
+function nthLastBiz(y,mo,n){let x=new Date(y,mo+1,0),c=0;
+  while(x.getMonth()===mo){if(isBiz(x)){if(++c===n)return x;}x.setDate(x.getDate()-1);}return null;}
+// d é véspera (dia de calendário seguinte) de feriado?
+function holEve(d){const n=new Date(d);n.setDate(n.getDate()+1);return HOLIDAYS.has(iso(n));}
+// Opção MENSAL padrão do gold (vértice tradicional do futuro, meses G/J/M/Q/V/Z = Fev..Dez).
+// Vence no 4º último dia útil do mês ANTERIOR à entrega; se cair numa sexta ou véspera de
+// feriado, recua um dia útil (regra CME/COMEX verificada vs LAST_TRADEABLE_DT no terminal).
+// Retorna {mc,y} do vértice se d for o dia do vencimento, senão null.
+function goldMonthly(d){
+  const m=d.getMonth();
+  if(m%2!==0) return null;                         // vencto só em Jan,Mar,Mai,Jul,Set,Nov
+  let e=nthLastBiz(d.getFullYear(),m,4); if(!e) return null;
+  while(e.getDay()===5||holEve(e)){do{e.setDate(e.getDate()-1);}while(!isBiz(e));}
+  if(iso(e)!==iso(d)) return null;
+  return {mc:MC[m+1], y:yr(d,1)};                  // vértice = mês seguinte (Fev..Dez), ano 1 dígito
+}
 
 function strikeStr(p){
   const v=levels[active];
@@ -176,6 +194,15 @@ function entriesFor(p,d){
   const out=[]; const w=d.getDay(); const rule=p.days[w];
   const K=strikeStr(p); const m=MC[d.getMonth()]; const wk=weekNo(d);
   const is3rdFri=(w===5&&wk===3&&QUART_MONTHS.has(d.getMonth()));
+  if(p.monthly){
+    const mo=goldMonthly(d);
+    if(mo){                                        // dia do vencto da mensal: a semanal NÃO existe → só a mensal
+      const base="GC"+mo.mc+mo.y;
+      out.push({label:"Mensal (vértice "+base+")",omon:base+" "+p.key,monthly:true,
+        C:base+"C "+K+" "+p.key, P:base+"P "+K+" "+p.key});
+      return out;
+    }
+  }
   if(rule){
     if(rule.style==="fri"){
       if(is3rdFri && p.quart){
@@ -222,13 +249,13 @@ function render(){
         const open=count<OPEN_DEFAULT;
         let inner="";
         es.forEach(function(e){
-          inner+='<div class="grp'+(e.quart?' quart':'')+'"><span class="omon">OMON <b>'+e.omon+'</b> · '+e.label+'</span>';
+          inner+='<div class="grp'+(e.quart?' quart':'')+(e.monthly?' mens':'')+'"><span class="omon">OMON <b>'+e.omon+'</b> · '+e.label+'</span>';
           if(CP==="both"||CP==="C") inner+=tkRow("C","c",e.C);
           if(CP==="both"||CP==="P") inner+=tkRow("P","p",e.P);
           inner+='</div>';
         });
         const tag=isToday?'<span class="tag hoje">HOJE</span>':(isTom?'<span class="tag amanha">AMANHÃ</span>':'');
-        const lbl=es[0].quart?'trimestral':(es.length>1?'semanal + EOM':'');
+        const lbl=es[0].monthly?'mensal':(es[0].quart?'trimestral':(es.length>1?'semanal + EOM':''));
         html+='<div class="day'+(open?' open':'')+(isToday?' today':'')+'">'+
           '<div class="dayhead"><span class="dt">'+String(cur.getDate()).padStart(2,"0")+"/"+
           String(cur.getMonth()+1).padStart(2,"0")+'</span><span class="wd">'+WD[cur.getDay()]+
