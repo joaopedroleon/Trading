@@ -17,6 +17,7 @@ const posDataByTab = {};   // tabId → positionsData
 const hiddenRows   = {};              // tabId → Set<rowKey>
 const swapOpeningOverrides = new Map(); // rowKey → number (override abertura SWAP)
 const swapTradedOverrides  = new Map(); // rowKey → number (override trades SWAP)
+const swapDv01Overrides    = new Map(); // rowKey → number (override DV01 total do SWAP → #PL segue)
 const plOverrides          = new Map(); // rowKey → number (override manual #PL, fração — só posição)
 const wdoUcAggregated      = new Set(); // tabIds com agregação WDO+UC ativa
 
@@ -390,7 +391,7 @@ function sectionBodyId(s) {
 function thead() {
   const d = detailVisible ? '' : 'style="display:none"';
   return `<thead><tr>
-    <th class="col-copy" title="Copiar referência"></th>
+    <th class="col-copy" title="Excluir linha"></th>
     <th class="col-detail" ${d}>Área</th>
     <th class="col-detail" ${d}>Sub-área</th>
     <th class="col-detail" ${d}>Estratégia</th>
@@ -407,8 +408,13 @@ function thead() {
 }
 
 /* ── SWAP manual override ────────────────────────────────────────────────── */
+function _swapOvrMap(field) {
+  return field === 'opening' ? swapOpeningOverrides
+       : field === 'traded'  ? swapTradedOverrides
+       : swapDv01Overrides;                         // 'dv01'
+}
 function swapStartEdit(td, field, key, currentVal) {
-  const map = field === 'opening' ? swapOpeningOverrides : swapTradedOverrides;
+  const map = _swapOvrMap(field);
   const input = document.createElement('input');
   input.type = 'text';
   input.style.cssText = 'width:90px;font:inherit;text-align:right;background:var(--bg);border:1px solid var(--accent);color:var(--text)';
@@ -428,7 +434,7 @@ function swapStartEdit(td, field, key, currentVal) {
 }
 
 function swapApplyEdit(input, field, key) {
-  const map = field === 'opening' ? swapOpeningOverrides : swapTradedOverrides;
+  const map = _swapOvrMap(field);
   const val = parseFloat(String(input.value).replace(/\./g, '').replace(',', '.'));
   if (!isNaN(val)) map.set(key, val);
   else map.delete(key);
@@ -904,6 +910,7 @@ function reloadActiveTab() {
   delete posDataByTab[ROLAGEM_TAB_ID];
   swapOpeningOverrides.clear();
   swapTradedOverrides.clear();
+  swapDv01Overrides.clear();
   plOverrides.clear();
   loadPositionsForTab(activeTraderTab, { fresh: true });   // botão "Atualizar" → preços ao vivo
 }
@@ -1323,14 +1330,17 @@ function renderTable(rows, tbodyId) {
     const nav        = r.nav ?? (posDataByTab[activeTraderTab] ?? positionsData)?.traders?.[r.trader];
     const hasOpenOvr = swapOpeningOverrides.has(rKeyFull);
     const hasTrdOvr  = swapTradedOverrides.has(rKeyFull);
-    const qtyOvr     = hasOpenOvr || hasTrdOvr;
+    const hasDv01Ovr = isSwap && swapDv01Overrides.has(rKeyFull);
+    const qtyOvr     = hasOpenOvr || hasTrdOvr || hasDv01Ovr;
     const effOpening = hasOpenOvr ? swapOpeningOverrides.get(rKeyFull) : r.opening_qty;
     const effTraded  = hasTrdOvr  ? swapTradedOverrides.get(rKeyFull)  : r.traded_qty;
-    const effFinal   = (qtyOvr || isSwap) ? (effOpening ?? 0) + (effTraded ?? 0) : r.final_qty;
+    const effFinal   = hasDv01Ovr ? swapDv01Overrides.get(rKeyFull)                  // marreta de DV01 domina
+                     : (qtyOvr || isSwap) ? (effOpening ?? 0) + (effTraded ?? 0)
+                     : r.final_qty;
 
     let effDv01, effPl, effPlType;
-    if (isSwap) {                        // SWAP: a "qtd" É o DV01 (comportamento atual)
-      effDv01   = effFinal || null;
+    if (isSwap) {                        // SWAP: a "qtd" É o DV01 — marreta direta (swapDv01Overrides) OU
+      effDv01   = effFinal || null;      //   abertura+operada; effFinal já reflete a marreta de DV01
       effPl     = (effDv01 != null && nav) ? effDv01 * 10_000 / nav : r.pl;
       effPlType = effDv01 != null ? 'nominal' : r.pl_type;
     } else if (qtyOvr && r.final_qty) {  // linha normal marretada: escala linear pela nova qtd
@@ -1357,8 +1367,8 @@ function renderTable(rows, tbodyId) {
            ${fmtTradedQty(effTraded)}</td>`;
 
     const refCopy = (r.instrument_reference ?? r.instrument_name ?? '').replace(/"/g, '&quot;');
-    return `<tr class="${rowClass} ${areaClass} ${tradedClass}" style="cursor:pointer" title="Clique para ocultar" onclick="hideRow('${key}')">
-      <td class="col-copy" data-ref="${refCopy}" title="Copiar referência do instrumento" onclick="event.stopPropagation();copyInstrumentRef(this)">⧉</td>
+    return `<tr class="${rowClass} ${areaClass} ${tradedClass}" data-ref="${refCopy}" style="cursor:pointer" title="Clique para copiar a referência" onclick="copyRowRef(this)">
+      <td class="col-copy" title="Excluir (ocultar) esta linha" onclick="event.stopPropagation();hideRow('${key}')">✕</td>
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
@@ -1380,7 +1390,11 @@ function renderTable(rows, tbodyId) {
           onclick="event.stopPropagation();posPriceStartEdit(this)">
           ${priceStr}</td>`;
       })()}
-      <td class="num"${tipAttr}>${fmtDv01(effDv01)}</td>
+      ${isSwap
+        ? `<td class="num" style="cursor:pointer" title="Clique para marretar o DV01 (o #PL segue)"${tipAttr}
+             data-swapkey="${safeKey}" data-dv01="${effDv01 ?? ''}"
+             onclick="event.stopPropagation();swapStartEdit(this,'dv01',this.dataset.swapkey,parseFloat(this.dataset.dv01))">${fmtDv01(effDv01)}</td>`
+        : `<td class="num"${tipAttr}>${fmtDv01(effDv01)}</td>`}
       ${(() => {
         const ov       = plOverrides.get(rKeyFull);
         const dispPl   = ov !== undefined ? ov    : effPl;
@@ -1395,7 +1409,7 @@ function renderTable(rows, tbodyId) {
   }).join('');
 }
 
-/* ── Copiar a referência do instrumento (botão ⧉ no início de cada linha) ──── */
+/* ── Copiar a referência do instrumento (clique na LINHA) ──────────────────── */
 function _copyText(text) {
   if (navigator.clipboard && window.isSecureContext) {
     return navigator.clipboard.writeText(text).catch(() => _copyTextFallback(text));
@@ -1412,14 +1426,12 @@ function _copyTextFallback(text) {
   try { document.execCommand('copy'); } catch (_) { /* melhor esforço */ }
   document.body.removeChild(ta);
 }
-function copyInstrumentRef(td) {
-  const ref = td?.dataset?.ref || '';
+function copyRowRef(tr) {
+  const ref = tr?.dataset?.ref || '';
   if (!ref) return;
   _copyText(ref);
-  const prev = td.textContent;       // feedback visual rápido
-  td.textContent = '✓';
-  td.style.color = 'var(--green)';
-  setTimeout(() => { td.textContent = prev; td.style.color = ''; }, 900);
+  tr.classList.add('row-copied');    // feedback visual rápido (flash na linha)
+  setTimeout(() => tr.classList.remove('row-copied'), 700);
 }
 
 
