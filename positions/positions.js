@@ -38,8 +38,15 @@ function rowKey(r) {
 
 /* ── Fonte única de preço/delta efetivos (por instrumento) ───────────────── */
 // Identidade do instrumento p/ marreta — independe de trader/aba (mesmo ticker → mesma marreta).
+// Referências "família" (FX forwards p/ value date; SWAPs por tenor) repetem a MESMA ref em
+// vencimentos diferentes → o maturity faz parte da identidade. Já um ticker único (ex.: futuro
+// "ODF31 Comdty") identifica sozinho — e o JRS às vezes traz maturity inconsistente para ele
+// (null p/ um trader, data p/ outro); incluir maturity aí quebraria a marreta compartilhada.
 function instKey(r) {
-  return (r.instrument_reference || r.instrument_name || '') + '||' + (r.maturity || '');
+  const ref = r.instrument_reference;
+  if (!ref) return (r.instrument_name || '') + '||' + (r.maturity || '');
+  const isFamily = r.is_fx || ref.startsWith('SWAP') || ref.includes('/');
+  return isFamily ? ref + '||' + (r.maturity || '') : ref;
 }
 // CALL → +1, PUT → -1, senão null. Procura em QUALQUER parte do nome (não só no
 // fim): há opções cadastradas com CALL/PUT no meio do nome.
