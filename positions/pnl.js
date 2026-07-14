@@ -159,9 +159,9 @@ function rerenderPnlValues() {
     if (!_isPnlGroup(s.group)) continue;
     const bodyId = pnlBodyId(s.group, s.trader);
     if (!document.getElementById(bodyId)) continue;
-    const rows = applyFilters(sortRows(
+    const rows = sortRows(   // tabRows já filtrado por _pnlTabFilterRows (ver renderPnlSections)
       tabRows.filter(r => r.group === s.group && r.trader === s.trader)
-    ));
+    );
     renderPnlTable(rows, bodyId);
   }
 }
@@ -175,9 +175,12 @@ function rerenderPnlSection(inputEl) {
     if (!_isPnlGroup(s.group)) continue;
     const bodyId = pnlBodyId(s.group, s.trader);
     if (bodyId === tbodyId) {
-      const rows = applyFilters(sortRows(
+      // tabRows já vem filtrado por _pnlTabFilterRows (mesmos filtros da tabela de
+      // Posição). NÃO reaplicar applyFilters (filtros globais) — isso derrubava Cash
+      // do PnL em abas cujo tab.filters não inclui no_cash.
+      const rows = sortRows(
         tabRows.filter(r => r.group === s.group && r.trader === s.trader)
-      ));
+      );
       renderPnlTable(rows, tbodyId);
       return;
     }
@@ -185,7 +188,7 @@ function rerenderPnlSection(inputEl) {
 }
 
 function rerenderPnlSummary() {
-  const mmRows    = applyFilters(_pnlTabFilterRows(pnlData.rows).filter(r => _isPnlGroup(r.group)));
+  const mmRows    = _pnlTabFilterRows(pnlData.rows).filter(r => _isPnlGroup(r.group));
   const container = document.getElementById(`pnlContainer-${activePnlTabId}`);
   if (!container) return;
   const tmp = document.createElement('div');
@@ -453,7 +456,7 @@ function renderPnlSections(data, tabId) {
   const traders   = data.traders || {};
   const container = document.getElementById(`pnlContainer-${tabId}`);
 
-  const mmRows = applyFilters(tabRows.filter(r => _isPnlGroup(r.group)));
+  const mmRows = tabRows.filter(r => _isPnlGroup(r.group));   // tabRows já filtrado (ver rerenderPnlValues)
 
   container.style.display       = 'inline-flex';
   container.style.flexDirection = 'column';
@@ -488,9 +491,9 @@ function renderPnlSections(data, tabId) {
 
   for (const s of sections) {
     const bodyId = pnlBodyId(s.group, s.trader);
-    const rows   = applyFilters(sortRows(
+    const rows   = sortRows(
       tabRows.filter(r => r.group === s.group && r.trader === s.trader)
-    ));
+    );
     renderPnlTable(rows, bodyId);
   }
 }

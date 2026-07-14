@@ -13,4 +13,13 @@
   const _blocked = () =>
     Promise.reject(new Error('snapshot estático: rede desabilitada'));
   try { window.fetch = _blocked; } catch (_) { /* ambiente sem fetch gravável */ }
+
+  // Blindagem extra: se o auto-init do positions.js algum dia trocar fetch por outro
+  // transporte, o snapshot NÃO pode disparar chamada ao servidor. Neutraliza XHR/
+  // WebSocket/EventSource também (os dados vêm de data.js, nunca da rede).
+  const _throw = function () { throw new Error('snapshot estático: rede desabilitada'); };
+  try { window.XMLHttpRequest = function () { this.open = _throw; this.send = _throw; }; } catch (_) {}
+  try { window.WebSocket = _throw; } catch (_) {}
+  try { window.EventSource = _throw; } catch (_) {}
+  try { if (navigator.sendBeacon) navigator.sendBeacon = function () { return false; }; } catch (_) {}
 })();

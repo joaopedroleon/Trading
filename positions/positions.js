@@ -164,6 +164,8 @@ function toggleFilter(id) {
     if (mark) mark.textContent = on ? '✕' : '+';
   });
   if (posDataByTab[activeTraderTab]) rerenderTables();
+  // O PnL da aba usa os mesmos filtros da Posição → re-renderiza junto p/ não dessincronizar.
+  if (typeof rerenderPnlValues === 'function') rerenderPnlValues();
 }
 
 function renderFilterBars() {
