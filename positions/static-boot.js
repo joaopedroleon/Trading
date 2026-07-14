@@ -13,6 +13,8 @@
   const TRADERS = [['emota', 'EMota'], ['ecotrim', 'ECotrim'], ['portfoliorf', 'PortfolioRF']];
   const PUBLIC_URL = 'https://joaopedroleon.github.io/Trading/positions/';
 
+  const _tabIdForTrader = (trader) => (TRADERS.find(([, label]) => label === trader) || [])[0];
+
   // 1) Read-only: no-op nas funções que mexem em estado/servidor (se existirem).
   //    'copyCardImage' NÃO entra aqui: é read-only (só gera imagem da tabela) e
   //    precisa funcionar pra salvar/compartilhar o print no celular.
@@ -25,6 +27,54 @@
                     'dolarSetTicker']) {
     try { if (typeof window[fn] === 'function') window[fn] = _noop; } catch (_) {}
   }
+
+  /* ── Excluir/restaurar linhas (ciente do trader) ──────────────────────────
+     positions.js prende hideRow/rerenderTables/renderRestoreBtn à global única
+     activeTraderTab. Como o snapshot empilha os 3 traders de uma vez, essa global
+     fica travada no último renderizado → o ✕ dos demais não funciona. Aqui
+     sobrescrevemos p/ resolver o trader a partir da própria rowKey. */
+  function _totalHidden() {
+    let n = 0;
+    for (const [id] of TRADERS) { try { n += _hiddenForTab(id).size; } catch (_) {} }
+    return n;
+  }
+  function updateRestoreBtn() {
+    const btn = document.getElementById('restoreBtn');
+    if (!btn) return;
+    const n = _totalHidden();
+    btn.textContent = `↩ Restaurar ocultas (${n})`;
+    btn.style.display = n > 0 ? '' : 'none';
+  }
+  window.renderRestoreBtn = updateRestoreBtn;  // caso positions.js a chame internamente
+
+  window.hideRow = function (key) {
+    const trader = String(key).split('||')[1];
+    const id = _tabIdForTrader(trader) || activeTraderTab;
+    activeTraderTab = id;                 // aponta o estado global p/ o trader da linha…
+    positionsData = posDataByTab[id];     // …antes de ocultar/re-renderizar
+    _hiddenForTab(id).add(key);
+    rerenderTables(key);                  // re-render só do tbody da seção da linha
+    updateRestoreBtn();
+  };
+
+  window.restoreHidden = function () {
+    for (const [id] of TRADERS) {
+      try { delete hiddenRows[id]; } catch (_) {}
+      const data = posDataByTab[id];
+      if (!data || !data.rows) continue;
+      activeTraderTab = id;
+      positionsData = data;
+      renderSectionsForTab(id, data.rows);
+    }
+    updateRestoreBtn();
+    // re-alinha as auxiliares após o layout assentar (mesmo padrão do unlock)
+    const realign = () => {
+      for (const [id] of TRADERS) {
+        try { if (typeof _alignAuxTables === 'function') _alignAuxTables(id); } catch (_) {}
+      }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(realign));
+  };
 
   /* ── WebCrypto: PBKDF2 → AES-GCM ──────────────────────────────────────────── */
   function b64ToBytes(b64) {
@@ -98,6 +148,12 @@
       if (first.opening_date) parts.push('Abertura: ' + fmtStamp(first.opening_date));
       if (first.ref_date)     parts.push('Boletas: ' + fmtStamp(first.ref_date));
       if (meta.generated_at)  parts.push('Gerado: ' + meta.generated_at);
+      // Aviso de cache: traders cujos preços vieram do último dado bom (BBG fora no run).
+      const sources = meta.sources || {};
+      const cached = TRADERS
+        .filter(([id]) => sources[id] && sources[id].live === false)
+        .map(([id, label]) => label + (sources[id].captured_at ? ` (${sources[id].captured_at})` : ''));
+      if (cached.length)      parts.push('⚠ preços em cache: ' + cached.join(', '));
       if (failed.length)      parts.push('⚠ falha ao renderizar: ' + failed.join(', '));
       document.getElementById('snapMeta').textContent = parts.join('  |  ');
 
