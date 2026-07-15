@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Posições — JGP (snapshot)</title>
+  <title>Posições & PnL — JGP (snapshot)</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/positions-v2.css">
   <!-- Bloco de estilos copiado de positions.html (mantém a aparência das tabelas) -->
@@ -67,6 +67,15 @@
     /* Cabeçalho do snapshot */
     .snap-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
     .snap-meta { color: var(--text-muted); font-size: 13px; }
+
+    /* Abas de topo (Posições | PnL) */
+    .snap-tabs { display: flex; gap: 6px; margin: 4px 0 8px; border-bottom: 1px solid var(--border); }
+    .snap-tab {
+      padding: 8px 18px; cursor: pointer; border: 1px solid transparent; border-bottom: none;
+      border-radius: 8px 8px 0 0; color: var(--text-muted); font-size: 14px; font-weight: 600;
+      background: transparent; user-select: none;
+    }
+    .snap-tab.active { color: var(--text); background: var(--bg-card); border-color: var(--border); margin-bottom: -1px; }
     .trader-title {
       margin: 26px 0 4px; font-size: 18px; font-weight: 700; color: var(--text);
       border-bottom: 2px solid var(--border); padding-bottom: 6px;
@@ -123,43 +132,73 @@
 </div>
 
 <main class="main-content">
-  <div class="page-header snap-header">
-    <h1>Posições — Abertura + Boletas</h1>
-    <span class="snap-meta" id="snapMeta"></span>
-    <button id="restoreBtn" type="button" onclick="restoreHidden()"
-            class="btn btn-secondary" style="display:none;padding:2px 10px;font-size:12px">↩ Restaurar ocultas</button>
+  <!-- Abas de topo: Posições (data.js) | PnL gerencial (data_pnl.js). Cada aba tem
+       seus dados/carimbo próprios; podem ser publicadas em horários diferentes. -->
+  <div class="snap-tabs">
+    <div class="snap-tab active" id="snapTab-positions" data-view="positions">Posições</div>
+    <div class="snap-tab" id="snapTab-pnl" data-view="pnl">PnL gerencial</div>
   </div>
 
-  <!-- Uma seção por trader: título + (filterBar oculto) + bloco Posição.
-       ids IDÊNTICOS aos de positions.html para reusar renderSectionsForTab. -->
-  <div class="trader-title">EMota</div>
-  <div id="tab-emota">
-    <div id="filterBar-emota"></div>
-    <div class="block-header">Posição</div>
-    <div id="posContainer-emota"></div>
+  <!-- ── VIEW: Posições ──────────────────────────────────────────────────── -->
+  <div id="view-positions">
+    <div class="page-header snap-header">
+      <h1>Posições — Abertura + Boletas</h1>
+      <span class="snap-meta" id="snapMeta"></span>
+      <button id="restoreBtn" type="button" onclick="restoreHidden()"
+              class="btn btn-secondary" style="display:none;padding:2px 10px;font-size:12px">↩ Restaurar ocultas</button>
+    </div>
+
+    <!-- Uma seção por trader: título + (filterBar oculto) + bloco Posição.
+         ids IDÊNTICOS aos de positions.html para reusar renderSectionsForTab. -->
+    <div class="trader-title">EMota</div>
+    <div id="tab-emota">
+      <div id="filterBar-emota"></div>
+      <div class="block-header">Posição</div>
+      <div id="posContainer-emota"></div>
+    </div>
+
+    <div class="trader-title">ECotrim</div>
+    <div id="tab-ecotrim">
+      <div id="filterBar-ecotrim"></div>
+      <div class="block-header">Posição</div>
+      <div id="posContainer-ecotrim"></div>
+    </div>
+
+    <div class="trader-title">PortfolioRF</div>
+    <div id="tab-portfoliorf">
+      <div id="filterBar-portfoliorf"></div>
+      <div class="block-header">Posição</div>
+      <div id="posContainer-portfoliorf"></div>
+    </div>
   </div>
 
-  <div class="trader-title">ECotrim</div>
-  <div id="tab-ecotrim">
-    <div id="filterBar-ecotrim"></div>
-    <div class="block-header">Posição</div>
-    <div id="posContainer-ecotrim"></div>
-  </div>
+  <!-- ── VIEW: PnL gerencial ─────────────────────────────────────────────── -->
+  <div id="view-pnl" style="display:none">
+    <div class="page-header snap-header">
+      <h1>PnL gerencial — preços de fechamento JRS</h1>
+      <span class="snap-meta" id="snapMetaPnl"></span>
+    </div>
+    <div class="trader-title">EMota</div>
+    <div class="block-header">Resumo PnL (MM)</div>
+    <div id="pnlSnapContainer-emota"></div>
 
-  <div class="trader-title">PortfolioRF</div>
-  <div id="tab-portfoliorf">
-    <div id="filterBar-portfoliorf"></div>
-    <div class="block-header">Posição</div>
-    <div id="posContainer-portfoliorf"></div>
+    <div class="trader-title">ECotrim</div>
+    <div class="block-header">Resumo PnL (MM)</div>
+    <div id="pnlSnapContainer-ecotrim"></div>
+
+    <div class="trader-title">PortfolioRF</div>
+    <div class="block-header">Resumo PnL (Todos)</div>
+    <div id="pnlSnapContainer-portfoliorf"></div>
   </div>
 </main>
 
 <!-- Ordem importa: shim neutraliza a máquina ao vivo ANTES de positions.js;
      data.js (gerado pelo build) traz os blobs criptografados; boot faz a fiação. -->
-<script src="static-shim.js?v=150720260600"></script>
-<script src="positions.js?v=150720260600"></script>
-<script src="pnl.js?v=150720260600"></script>
-<script src="data.js?v=150720260600"></script>
-<script src="static-boot.js?v=150720260600"></script>
+<script src="static-shim.js?v=150720261428"></script>
+<script src="positions.js?v=150720261428"></script>
+<script src="pnl.js?v=150720261428"></script>
+<script src="data.js?v=150720261428"></script>
+<script src="data_pnl.js?v=150720261428"></script>
+<script src="static-boot.js?v=150720261428"></script>
 </body>
 </html>

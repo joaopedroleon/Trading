@@ -23,6 +23,7 @@
                     'prefetchOtherTabs', 'loadPositionsForTab',
                     'posPriceStartEdit', 'posPlStartEdit', 'swapStartEdit',
                     'optEditStart', 'pnlStartEdit', 'pnlStartSummaryEdit',
+                    'hidePnlRow', 'restorePnlRows',
                     'consolSetDelta', 'dolarSetDelta', 'consolSetTicker',
                     'dolarSetTicker']) {
     try { if (typeof window[fn] === 'function') window[fn] = _noop; } catch (_) {}
@@ -120,57 +121,99 @@
   const btn = document.getElementById('gateBtn');
   const msg = document.getElementById('gateMsg');
 
+  /* ── Aba Posições (data.js / __ENC__) ─────────────────────────────────────── */
+  async function _unlockPositions(pass) {
+    const payloads = {};
+    for (const [id] of TRADERS) {
+      if (!window.__ENC__[id]) throw new Error('missing:' + id);
+      payloads[id] = await decryptBlob(pass, window.__ENC__[id]);   // lança se senha errada
+    }
+    for (const [id] of TRADERS) {
+      const el = document.getElementById('tab-' + id);
+      if (el) el.style.display = '';
+    }
+    const failed = [];
+    for (const [id, label] of TRADERS) {
+      try { renderTrader(id, payloads[id]); }
+      catch (err) { console.error('render falhou p/', id, err); failed.push(label); }
+    }
+
+    const first = payloads[TRADERS[0][0]] || {};
+    const meta = window.__ENC__.meta || {};
+    const parts = [];
+    if (first.opening_date) parts.push('Abertura: ' + fmtStamp(first.opening_date));
+    if (first.ref_date)     parts.push('Boletas: ' + fmtStamp(first.ref_date));
+    if (meta.generated_at)  parts.push('Gerado: ' + meta.generated_at);
+    // Procedência dos preços (campo `prices`): 'cache' (Oracle fora), 'd1' (BBG fora,
+    // fechamento D-1), 'bbg'/ausente (ao vivo). Fallback: sem `prices` → live===false ⇒ cache.
+    const sources = meta.sources || {};
+    const priceKind = (s) => s.prices || (s.live === false ? 'cache' : 'bbg');
+    const cached = TRADERS
+      .filter(([id]) => sources[id] && priceKind(sources[id]) === 'cache')
+      .map(([id, label]) => label + (sources[id].captured_at ? ` (${sources[id].captured_at})` : ''));
+    if (cached.length) parts.push('⚠ preços em cache: ' + cached.join(', '));
+    const d1 = TRADERS
+      .filter(([id]) => sources[id] && priceKind(sources[id]) === 'd1')
+      .map(([, label]) => label);
+    if (d1.length)     parts.push('⚠ preços de fechamento D-1 (Bloomberg indisponível): ' + d1.join(', '));
+    if (failed.length) parts.push('⚠ falha ao renderizar: ' + failed.join(', '));
+    document.getElementById('snapMeta').textContent = parts.join('  |  ');
+
+    // Re-alinha as tabelas auxiliares após o layout assentar.
+    const realign = () => {
+      for (const [id] of TRADERS) {
+        try { if (typeof _alignAuxTables === 'function') _alignAuxTables(id); } catch (_) {}
+      }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(realign));
+    setTimeout(realign, 250);
+    window.addEventListener('resize', realign);
+  }
+
+  /* ── Aba PnL gerencial (data_pnl.js / __ENC_PNL__) ────────────────────────────
+     Reusa renderPnlSummary de pnl.js: por trader seta os globais pnlData/activePnlTabId
+     (mesmo acoplamento sequencial das Posições) e injeta o HTML do resumo. */
+  async function _unlockPnl(pass) {
+    const meta = window.__ENC_PNL__.meta || {};
+    const sources = meta.sources || {};
+    let refStamp = null;
+    for (const [id, label] of TRADERS) {
+      const blob = window.__ENC_PNL__[id];
+      const container = document.getElementById('pnlSnapContainer-' + id);
+      if (!container) continue;
+      if (!blob) { container.innerHTML = '<div style="color:var(--text-muted);padding:8px">Sem dados para ' + label + '.</div>'; continue; }
+      let payload;
+      try { payload = await decryptBlob(pass, blob); }         // lança se senha errada
+      catch (e) { if (id === TRADERS[0][0]) throw e; console.error('decrypt PnL falhou p/', id, e); continue; }
+      try {
+        pnlData = payload;                 // globais lidos por renderPnlSummary/pnlFor
+        activePnlTabId = id;
+        container.innerHTML = renderPnlSummary(payload.rows || []);
+        if (!refStamp && payload.ref_date) refStamp = payload.ref_date;
+      } catch (err) {
+        console.error('render PnL falhou p/', id, err);
+        container.innerHTML = '<div style="color:var(--red);padding:8px">Falha ao renderizar ' + label + '.</div>';
+      }
+    }
+    const parts = [];
+    if (refStamp)          parts.push('Gerencial de ' + fmtStamp(refStamp));
+    if (meta.generated_at) parts.push('Gerado: ' + meta.generated_at);
+    const el = document.getElementById('snapMetaPnl');
+    if (el) el.textContent = parts.join('  |  ');
+  }
+
+  /* ── Desbloqueio (decripta as abas presentes; falha só se nenhuma existir) ─── */
   async function unlock() {
     const pass = input.value;
     if (!pass) { msg.textContent = 'Digite a senha.'; return; }
-    if (!window.__ENC__) { msg.textContent = 'Dados não encontrados (data.js).'; return; }
+    const hasPos = !!window.__ENC__, hasPnl = !!window.__ENC_PNL__;
+    if (!hasPos && !hasPnl) { msg.textContent = 'Dados não encontrados (data.js / data_pnl.js).'; return; }
     btn.disabled = true; msg.style.color = 'var(--text-muted)'; msg.textContent = 'Decriptando…';
     try {
-      const payloads = {};
-      for (const [id] of TRADERS) {
-        if (!window.__ENC__[id]) throw new Error('missing:' + id);
-        payloads[id] = await decryptBlob(pass, window.__ENC__[id]);   // lança se senha errada
-      }
-      // Sucesso: revela as seções (layout necessário p/ alinhamento das tabelas auxiliares)
-      for (const [id] of TRADERS) {
-        const el = document.getElementById('tab-' + id);
-        if (el) el.style.display = '';
-      }
-      const failed = [];
-      for (const [id, label] of TRADERS) {
-        try { renderTrader(id, payloads[id]); }
-        catch (err) { console.error('render falhou p/', id, err); failed.push(label); }
-      }
-
-      const first = payloads[TRADERS[0][0]] || {};
-      const meta = window.__ENC__.meta || {};
-      const parts = [];
-      if (first.opening_date) parts.push('Abertura: ' + fmtStamp(first.opening_date));
-      if (first.ref_date)     parts.push('Boletas: ' + fmtStamp(first.ref_date));
-      if (meta.generated_at)  parts.push('Gerado: ' + meta.generated_at);
-      // Aviso de cache: traders cujos preços vieram do último dado bom (BBG fora no run).
-      const sources = meta.sources || {};
-      const cached = TRADERS
-        .filter(([id]) => sources[id] && sources[id].live === false)
-        .map(([id, label]) => label + (sources[id].captured_at ? ` (${sources[id].captured_at})` : ''));
-      if (cached.length)      parts.push('⚠ preços em cache: ' + cached.join(', '));
-      if (failed.length)      parts.push('⚠ falha ao renderizar: ' + failed.join(', '));
-      document.getElementById('snapMeta').textContent = parts.join('  |  ');
-
+      if (hasPos) await _unlockPositions(pass);
+      if (hasPnl) await _unlockPnl(pass);
       document.body.classList.remove('locked');
       gate.style.display = 'none';
-
-      // Re-alinha as tabelas auxiliares (à direita) DEPOIS que o layout assenta:
-      // o gate sumiu e a regra CSS que esconde o MM Prev (:has) já recalculou o
-      // fluxo — só então as medições de posição do _alignAuxTables ficam corretas.
-      const realign = () => {
-        for (const [id] of TRADERS) {
-          try { if (typeof _alignAuxTables === 'function') _alignAuxTables(id); } catch (_) {}
-        }
-      };
-      requestAnimationFrame(() => requestAnimationFrame(realign));
-      setTimeout(realign, 250);
-      window.addEventListener('resize', realign);
     } catch (e) {
       msg.style.color = 'var(--red)';
       msg.textContent = (String(e.message || e).startsWith('missing:'))
@@ -184,8 +227,21 @@
   btn.addEventListener('click', unlock);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
 
+  /* ── Troca de aba (Posições ↔ PnL) ──────────────────────────────────────────── */
+  for (const tab of document.querySelectorAll('.snap-tab')) {
+    tab.addEventListener('click', () => {
+      const view = tab.dataset.view;
+      for (const t of document.querySelectorAll('.snap-tab')) t.classList.toggle('active', t === tab);
+      const vp = document.getElementById('view-positions');
+      const vn = document.getElementById('view-pnl');
+      if (vp) vp.style.display = view === 'positions' ? '' : 'none';
+      if (vn) vn.style.display = view === 'pnl' ? '' : 'none';
+    });
+  }
+
   // Mostra o horário de geração já na tela de senha (confirma que é a versão nova)
   const stamp = document.getElementById('gateStamp');
-  const gen = window.__ENC__ && window.__ENC__.meta && window.__ENC__.meta.generated_at;
+  const gen = (window.__ENC__ && window.__ENC__.meta && window.__ENC__.meta.generated_at)
+           || (window.__ENC_PNL__ && window.__ENC_PNL__.meta && window.__ENC_PNL__.meta.generated_at);
   if (stamp && gen) stamp.textContent = 'Snapshot gerado em ' + gen;
 })();
