@@ -187,8 +187,13 @@
       catch (e) { if (id === TRADERS[0][0]) throw e; console.error('decrypt PnL falhou p/', id, e); continue; }
       try {
         pnlData = payload;                 // globais lidos por renderPnlSummary/pnlFor
-        activePnlTabId = id;
-        container.innerHTML = renderPnlSummary(payload.rows || []);
+        activePnlTabId = id;               // _pnlTabFilterRows lê esta global p/ achar os filtros da aba
+        // MESMOS filtros da tela (por aba: no_hedge_cambial/no_fx_small; PortfolioRF: no_cash),
+        // aplicados via a MESMA função do app → o snapshot fica idêntico à tela.
+        const rows = payload.rows || [];
+        const filtered = (typeof _pnlTabFilterRows === 'function' ? _pnlTabFilterRows(rows) : rows)
+          .filter(r => (typeof _isPnlGroup === 'function' ? _isPnlGroup(r.group) : true));
+        container.innerHTML = renderPnlSummary(filtered);
         if (!refStamp && payload.ref_date) refStamp = payload.ref_date;
       } catch (err) {
         console.error('render PnL falhou p/', id, err);
