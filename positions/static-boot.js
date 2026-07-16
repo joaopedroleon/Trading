@@ -144,14 +144,28 @@
     if (first.opening_date) parts.push('Abertura: ' + fmtStamp(first.opening_date));
     if (first.ref_date)     parts.push('Boletas: ' + fmtStamp(first.ref_date));
     if (meta.generated_at)  parts.push('Gerado: ' + meta.generated_at);
-    // Procedência dos preços (campo `prices`): 'cache' (Oracle fora), 'd1' (BBG fora,
-    // fechamento D-1), 'bbg'/ausente (ao vivo). Fallback: sem `prices` → live===false ⇒ cache.
+    // Procedência dos preços (campo `prices`): 'cache' (Oracle fora → payload inteiro do
+    // cache), 'bbg-cache' (BBG fora → mercado do último fetch BBG bom + posição/datas
+    // frescas), 'd1' (BBG fora e sem cache de mercado → fechamento D-1), 'bbg'/ausente
+    // (ao vivo). Fallback: sem `prices` → live===false ⇒ cache.
     const sources = meta.sources || {};
     const priceKind = (s) => s.prices || (s.live === false ? 'cache' : 'bbg');
     const cached = TRADERS
       .filter(([id]) => sources[id] && priceKind(sources[id]) === 'cache')
       .map(([id, label]) => label + (sources[id].captured_at ? ` (${sources[id].captured_at})` : ''));
     if (cached.length) parts.push('⚠ preços em cache: ' + cached.join(', '));
+    // bbg_cache_time é ISO com hora (ex.: 2026-07-15T18:45:03) → mostra DD/MM HH:MM.
+    const fmtStampTime = (iso) => {
+      if (!iso) return '';
+      const s = String(iso);
+      const [y, m, d] = s.slice(0, 10).split('-');
+      const hm = s.slice(11, 16);
+      return `${d}/${m}${hm ? ' ' + hm : ''}`;
+    };
+    const bbgCache = TRADERS
+      .filter(([id]) => sources[id] && priceKind(sources[id]) === 'bbg-cache')
+      .map(([id, label]) => label + (sources[id].bbg_cache_time ? ` (${fmtStampTime(sources[id].bbg_cache_time)})` : ''));
+    if (bbgCache.length) parts.push('⚠ preços BBG em cache: ' + bbgCache.join(', '));
     const d1 = TRADERS
       .filter(([id]) => sources[id] && priceKind(sources[id]) === 'd1')
       .map(([, label]) => label);
