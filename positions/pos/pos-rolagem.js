@@ -539,7 +539,7 @@ function _renderBoletaPreview() {
   // Cobertura das EXECUÇÕES por ativo/lado (informativo; base nas execuções informadas)
   const execRows = (b.exec_reconciliation || []).map(e => {
     const diff = e.short ? `<span style="color:var(--red)">faltam ${fmtQty(e.short)}</span>`
-      : (e.leftover ? `<span style="color:#f0c040">sobram ${fmtQty(e.leftover)}</span>`
+      : (e.leftover ? `<span style="color:var(--yellow)">sobram ${fmtQty(e.leftover)}</span>`
       : `<span style="color:var(--green)">ok</span>`);
     return `<tr><td>${e.asset}</td><td>${e.side}</td><td class="num">${fmtQty(e.demand)}</td>
         <td class="num">${fmtQty(e.executed)}</td><td>${diff}</td></tr>`;

@@ -175,6 +175,12 @@ function renderSectionsForTab(tabId, allRows) {
 
   container.style.display       = 'inline-flex';
   container.style.flexDirection = 'column';
+
+  if (!sections.length) {
+    container.innerHTML = '<div class="card no-data">Não há posição para este trader.</div>';
+    return;
+  }
+
   container.innerHTML = sections.map((s, _i) => {
     const nav      = navMap[s.trader];
     const effDate  = tabId === 'portfoliorf' ? pnlNavDate : navDate;

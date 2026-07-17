@@ -99,7 +99,7 @@ function priceLiveStyle(source) {
   switch (source) {
     case 'bbg':       return 'color:var(--green)';
     case 'd1':        return 'color:var(--red)';
-    case 'boleta':    return 'color:#e8a020';
+    case 'boleta':    return 'color:var(--yellow)';
     case 'manual':    return 'color:var(--accent);font-style:italic';
     case 'marretado': return 'color:var(--accent);font-style:italic';
     default:          return '';
@@ -389,7 +389,7 @@ function renderPnlSummary(rows) {
     if (nav != null) {
       const base = `NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}`;
       const warn = (navDate && openingDate && navDate !== openingDate)
-        ? ` <span style="color:#f0c040;font-size:11px" title="NAV indisponível para ${openingDate} — usando ${navDate}">⚠ ${navDate}</span>`
+        ? ` <span style="color:var(--yellow);font-size:11px" title="NAV indisponível para ${openingDate} — usando ${navDate}">⚠ ${navDate}</span>`
         : '';
       navStr = `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${base}${warn}</span>`;
     }

@@ -201,10 +201,10 @@ function _dolarLimitStyle(pct) {
   if (pct == null) return 'color:var(--text-muted)';
   const a = Math.abs(pct);
   if (a < 0.15) return 'color:var(--green)';
-  if (a < 0.17) return 'color:#f0c040';
-  if (a < 0.19) return 'color:#e8853a';
-  if (a <= 0.20) return 'color:#fff;background:var(--red);font-weight:700';
-  return 'color:#fff;background:#8a0d0d;font-weight:700';
+  if (a < 0.17) return 'color:var(--alert-1)';
+  if (a < 0.19) return 'color:var(--alert-2)';
+  if (a <= 0.20) return 'color:#fff;background:var(--alert-3);font-weight:700';
+  return 'color:#fff;background:var(--alert-4);font-weight:700';
 }
 
 // Célula destacada Total/Final: a coluna mais relevante (exposição vs limite).

@@ -31,7 +31,7 @@
     td[data-bbg]:hover::after {
       content: attr(data-bbg);
       position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
-      background: #1a1a2e; color: #e0e0e0; padding: 6px 10px; border-radius: 4px;
+      background: var(--text); color: var(--bg-card); padding: 6px 10px; border-radius: 4px;
       white-space: pre; font-size: 11px; z-index: 100; border: 1px solid var(--border);
       min-width: 130px; pointer-events: none;
     }
@@ -39,12 +39,12 @@
     td[data-swaps]:hover::after {
       content: attr(data-swaps);
       position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
-      background: #1a1a2e; color: #e0e0e0; padding: 6px 10px; border-radius: 4px;
+      background: var(--text); color: var(--bg-card); padding: 6px 10px; border-radius: 4px;
       white-space: pre; font-size: 11px; z-index: 100; border: 1px solid var(--border);
       min-width: 160px; pointer-events: none;
     }
     .alloc-ok   { color: var(--green); }
-    .alloc-warn { color: #f0c040; }
+    .alloc-warn { color: var(--yellow); }
     .alloc-bad  { color: var(--red); }
     .data-table th { font-weight: normal; }
     .alloc-table th { font-size: 11px; white-space: nowrap; }
@@ -100,7 +100,7 @@
     }
     #gate button {
       width: 100%; padding: 10px 12px; font-size: 15px; cursor: pointer;
-      background: #1f3a5f; color: #e6edf7; border: none; border-radius: 6px; font-weight: 600;
+      background: var(--accent); color: #fff; border: none; border-radius: 6px; font-weight: 600;
     }
     #gate button:disabled { opacity: .6; cursor: default; }
     #gateMsg { margin-top: 10px; font-size: 13px; color: var(--red, #e5534b); min-height: 18px; }
@@ -194,22 +194,22 @@
 
 <!-- Ordem importa: shim neutraliza a máquina ao vivo ANTES de positions.js;
      data.js (gerado pelo build) traz os blobs criptografados; boot faz a fiação. -->
-<script src="static-shim.js?v=170720260600"></script>
+<script src="static-shim.js?v=170720261252"></script>
 <!-- positions.js dividido em módulos (ver REFACTOR.md); ordem = boot por último, antes do pnl.js -->
-<script src="pos/pos-state.js?v=170720260600"></script>
-<script src="pos/pos-helpers.js?v=170720260600"></script>
-<script src="pos/pos-format.js?v=170720260600"></script>
-<script src="pos/pos-edit.js?v=170720260600"></script>
-<script src="pos/pos-fundtables.js?v=170720260600"></script>
-<script src="pos/pos-tabs.js?v=170720260600"></script>
-<script src="pos/pos-render.js?v=170720260600"></script>
-<script src="pos/pos-misc.js?v=170720260600"></script>
-<script src="pos/pos-rolagem.js?v=170720260600"></script>
-<script src="pos/pos-dolar.js?v=170720260600"></script>
-<script src="pos/pos-boot.js?v=170720260600"></script>
-<script src="pnl.js?v=170720260600"></script>
-<script src="data.js?v=170720260600"></script>
-<script src="data_pnl.js?v=170720260600"></script>
-<script src="static-boot.js?v=170720260600"></script>
+<script src="pos/pos-state.js?v=170720261252"></script>
+<script src="pos/pos-helpers.js?v=170720261252"></script>
+<script src="pos/pos-format.js?v=170720261252"></script>
+<script src="pos/pos-edit.js?v=170720261252"></script>
+<script src="pos/pos-fundtables.js?v=170720261252"></script>
+<script src="pos/pos-tabs.js?v=170720261252"></script>
+<script src="pos/pos-render.js?v=170720261252"></script>
+<script src="pos/pos-misc.js?v=170720261252"></script>
+<script src="pos/pos-rolagem.js?v=170720261252"></script>
+<script src="pos/pos-dolar.js?v=170720261252"></script>
+<script src="pos/pos-boot.js?v=170720261252"></script>
+<script src="pnl.js?v=170720261252"></script>
+<script src="data.js?v=170720261252"></script>
+<script src="data_pnl.js?v=170720261252"></script>
+<script src="static-boot.js?v=170720261252"></script>
 </body>
 </html>

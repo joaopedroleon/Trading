@@ -99,7 +99,7 @@ function renderOptionsAnalysis() {
         ? m.delta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '—';
       const star     = m.edited ? '<span style="color:var(--accent);font-size:10px">★ </span>' : '';
       // origem do preço (igual ao PnL): BBG → boleta → D-1 → manual
-      const srcMap   = { bbg: ['BBG', 'var(--green)'], boleta: ['Boleta', '#e8a020'], d1: ['D-1', 'var(--red)'], manual: ['Manual', 'var(--accent)'] };
+      const srcMap   = { bbg: ['BBG', 'var(--green)'], boleta: ['Boleta', 'var(--yellow)'], d1: ['D-1', 'var(--red)'], manual: ['Manual', 'var(--accent)'] };
       const [srcLbl, srcColor] = srcMap[m.src] || ['—', ''];
       const priceStyle = `cursor:pointer;${srcColor ? `color:${srcColor}` : ''}`;
       return `<tr>

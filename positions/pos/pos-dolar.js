@@ -1,6 +1,6 @@
 const DOLAR_CONSOL_TAB_ID = 'dolarconsol';
 const UC_FACE_USD = 50_000;   // face do contrato de dólar cheio (UC)
-const DOLAR_CONSOL_TRADERS = ['EMota', 'ECotrim', 'PortfolioRF', 'PAlves', 'AJakurski', 'GBranquinho', 'LAguiar', 'PAbinader'];
+const DOLAR_CONSOL_TRADERS = ['EMota', 'ECotrim', 'PortfolioRF', 'PAlves', 'GBranquinho', 'LAguiar', 'PAbinader'];
 const dolarConsolData = {};   // trader → API response (cache próprio, não conflita com posDataByTab)
 let dolarConsolTrader = 'ECotrim';
 /* nº de contratos equivalentes (1 casa, verde +, vermelho entre parênteses) */
@@ -344,7 +344,7 @@ function renderDolarTable(data) {
   const usdbrlStr  = data.usdbrl != null
     ? data.usdbrl.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—';
   const navMismatch = data.nav_date && data.opening_date && data.nav_date !== data.opening_date;
-  const navInfo = `<span style="font-weight:400;color:${navMismatch ? '#f0c040' : 'var(--text-muted)'};font-size:12px">
+  const navInfo = `<span style="font-weight:400;color:${navMismatch ? 'var(--yellow)' : 'var(--text-muted)'};font-size:12px">
     ${navMismatch ? '⚠ ' : ''}NAV: ${navDateStr} &nbsp;·&nbsp; USDBRL (interno): ${usdbrlStr}</span>`;
 
   // Valor BRL de 1 contrato (mini=10, cheio=50) × preço do dólar (UCA PX_LAST)
@@ -429,10 +429,10 @@ function renderDolarTable(data) {
   const legend = `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">
     Limite 20%. <b>NET</b> (geral): operações de dólar netam contra o FIM IE. <b>GROSS</b> (Sulamerica): |operações| + |FIM IE|.
     &nbsp;Cor: <span style="color:var(--green)">&lt;15%</span> ·
-    <span style="color:#f0c040">15–17%</span> ·
-    <span style="color:#e8853a">17–19%</span> ·
-    <span style="color:#fff;background:var(--red);padding:0 4px">19–20%</span> ·
-    <span style="color:#fff;background:#8a0d0d;padding:0 4px">&gt;20%</span></div>`;
+    <span style="color:var(--alert-1)">15–17%</span> ·
+    <span style="color:var(--alert-2)">17–19%</span> ·
+    <span style="color:#fff;background:var(--alert-3);padding:0 4px">19–20%</span> ·
+    <span style="color:#fff;background:var(--alert-4);padding:0 4px">&gt;20%</span></div>`;
 
   const mainTable = `
     <div class="card">
@@ -540,10 +540,10 @@ function _fimLimitStyle(pct) {
   if (pct == null) return 'color:var(--text-muted)';
   const a = Math.abs(pct);
   if (a < 0.75) return 'color:var(--green)';
-  if (a < 0.90) return 'color:#f0c040';
-  if (a < 1.00) return 'color:#e8853a';
-  if (a <= 1.01) return 'color:#fff;background:var(--red);font-weight:700';
-  return 'color:#fff;background:#8a0d0d;font-weight:700';
+  if (a < 0.90) return 'color:var(--alert-1)';
+  if (a < 1.00) return 'color:var(--alert-2)';
+  if (a <= 1.01) return 'color:#fff;background:var(--alert-3);font-weight:700';
+  return 'color:#fff;background:var(--alert-4);font-weight:700';
 }
 
 const _CAT_LABEL = { mini: 'Mini (WDO)', cheio: 'Cheio (UC)', option: 'Opção DOL' };

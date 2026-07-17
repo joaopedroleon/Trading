@@ -34,7 +34,7 @@ function fmtNav(v, navDate, openingDate) {
   if (v == null) return '';
   const base = `NAV: USD ${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   if (navDate && openingDate && navDate !== openingDate)
-    return `${base} <span style="color:#f0c040;font-size:11px" title="NAV indisponível para ${fmtDate(openingDate)} — usando ${fmtDate(navDate)}">⚠ ${fmtDate(navDate)}</span>`;
+    return `${base} <span style="color:var(--yellow);font-size:11px" title="NAV indisponível para ${fmtDate(openingDate)} — usando ${fmtDate(navDate)}">⚠ ${fmtDate(navDate)}</span>`;
   return base;
 }
 

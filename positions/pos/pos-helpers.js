@@ -227,7 +227,7 @@ function renderWdoUcToggle(tabId) {
   const chip = document.createElement('span');
   chip.id        = `wdoUcChip-${tabId}`;
   chip.className = `filter-chip ${on ? 'on' : 'off'}`;
-  chip.style.cssText = on ? 'color:#f0c040;border-color:#f0c040;background:rgba(240,192,64,0.12)' : '';
+  chip.style.cssText = on ? 'color:var(--yellow);border-color:var(--yellow);background:rgba(255,165,0,0.12)' : '';
   chip.title     = on ? 'Posição agregada — não é a posição real. Clique para reverter.' : 'Concentrar WDO e UC em uma única linha WDO equivalente (1 UC = 5 WDO)';
   chip.textContent = on ? '⚡ WDO+UC Agregado ✕' : '⚡ Agregar WDO+UC';
   chip.onclick   = () => toggleWdoUcAggregation(tabId);
