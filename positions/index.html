@@ -81,6 +81,21 @@
       border-bottom: 2px solid var(--border); padding-bottom: 6px;
     }
 
+    /* ── Identidade editorial JGP (self-contained; sem navbar — pagina gated/offline) ── */
+    .snap-eyebrow { font-size: .7rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+      color: var(--text-muted); margin: 2px 0 8px; display: flex; align-items: center; gap: .6rem; }
+    .snap-eyebrow .tag { padding: .16rem .5rem; background: var(--text); color: var(--bg-card);
+      letter-spacing: .1em; font-weight: 700; }
+    .page-header.snap-header { position: relative; border-bottom: 1px solid var(--text);
+      padding-bottom: 14px; margin-bottom: 18px; }
+    .page-header.snap-header::after { content: ''; position: absolute; bottom: -1px; left: 0;
+      width: 64px; height: 3px; background: var(--green); }
+    .snap-footer { margin: 42px 0 22px; padding-top: 14px; border-top: 1px solid var(--text);
+      position: relative; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+      font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted); }
+    .snap-footer::before { content: ''; position: absolute; top: -1px; left: 0; width: 64px; height: 3px; background: var(--green); }
+    .snap-footer strong { color: var(--text); }
+
     /* ── Gate de senha ────────────────────────────────────────────────────── */
     #gate {
       position: fixed; inset: 0; z-index: 9999; display: flex;
@@ -141,6 +156,7 @@
 
   <!-- ── VIEW: Posições ──────────────────────────────────────────────────── -->
   <div id="view-positions">
+    <div class="snap-eyebrow"><span class="tag">POSIÇÕES & P&L</span> Snapshot · somente leitura</div>
     <div class="page-header snap-header">
       <h1>Posições — Abertura + Boletas</h1>
       <span class="snap-meta" id="snapMeta"></span>
@@ -174,6 +190,7 @@
 
   <!-- ── VIEW: PnL gerencial ─────────────────────────────────────────────── -->
   <div id="view-pnl" style="display:none">
+    <div class="snap-eyebrow"><span class="tag">POSIÇÕES & P&L</span> PnL gerencial · snapshot</div>
     <div class="page-header snap-header">
       <h1>PnL gerencial — preços de fechamento JRS</h1>
       <span class="snap-meta" id="snapMetaPnl"></span>
@@ -190,26 +207,31 @@
     <div class="block-header">Resumo PnL (Todos)</div>
     <div id="pnlSnapContainer-portfoliorf"></div>
   </div>
+
+  <footer class="snap-footer">
+    <div>Elaboração · <strong>JGP Macro</strong></div>
+    <div>Snapshot · somente leitura</div>
+  </footer>
 </main>
 
 <!-- Ordem importa: shim neutraliza a máquina ao vivo ANTES de positions.js;
      data.js (gerado pelo build) traz os blobs criptografados; boot faz a fiação. -->
-<script src="static-shim.js?v=200720261813"></script>
+<script src="static-shim.js?v=200720261845"></script>
 <!-- positions.js dividido em módulos (ver REFACTOR.md); ordem = boot por último, antes do pnl.js -->
-<script src="pos/pos-state.js?v=200720261813"></script>
-<script src="pos/pos-helpers.js?v=200720261813"></script>
-<script src="pos/pos-format.js?v=200720261813"></script>
-<script src="pos/pos-edit.js?v=200720261813"></script>
-<script src="pos/pos-fundtables.js?v=200720261813"></script>
-<script src="pos/pos-tabs.js?v=200720261813"></script>
-<script src="pos/pos-render.js?v=200720261813"></script>
-<script src="pos/pos-misc.js?v=200720261813"></script>
-<script src="pos/pos-rolagem.js?v=200720261813"></script>
-<script src="pos/pos-dolar.js?v=200720261813"></script>
-<script src="pos/pos-boot.js?v=200720261813"></script>
-<script src="pnl.js?v=200720261813"></script>
-<script src="data.js?v=200720261813"></script>
-<script src="data_pnl.js?v=200720261813"></script>
-<script src="static-boot.js?v=200720261813"></script>
+<script src="pos/pos-state.js?v=200720261845"></script>
+<script src="pos/pos-helpers.js?v=200720261845"></script>
+<script src="pos/pos-format.js?v=200720261845"></script>
+<script src="pos/pos-edit.js?v=200720261845"></script>
+<script src="pos/pos-fundtables.js?v=200720261845"></script>
+<script src="pos/pos-tabs.js?v=200720261845"></script>
+<script src="pos/pos-render.js?v=200720261845"></script>
+<script src="pos/pos-misc.js?v=200720261845"></script>
+<script src="pos/pos-rolagem.js?v=200720261845"></script>
+<script src="pos/pos-dolar.js?v=200720261845"></script>
+<script src="pos/pos-boot.js?v=200720261845"></script>
+<script src="pnl.js?v=200720261845"></script>
+<script src="data.js?v=200720261845"></script>
+<script src="data_pnl.js?v=200720261845"></script>
+<script src="static-boot.js?v=200720261845"></script>
 </body>
 </html>
