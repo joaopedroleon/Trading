@@ -2,6 +2,17 @@ function rowKey(r) {
   return [r.group, r.trader, r.instrument_reference, r.area, r.subarea, r.strategy, r.maturity].join('||');
 }
 
+// Quantidades EFETIVAS de um SWAP (a "qtd" É o DV01) aplicando as marretas de abertura/
+// operada/dv01-total — MESMA regra da tabela de Posição (pos-render). Usado também pelo PnL
+// para refletir a marreta no ESTOQUE (=DV01 de abertura × Δtaxa) e na qtd exibida.
+function swapEffQty(r) {
+  const k = rowKey(r);
+  const opening = swapOpeningOverrides.has(k) ? swapOpeningOverrides.get(k) : (r.opening_qty ?? 0);
+  const traded  = swapTradedOverrides.has(k)  ? swapTradedOverrides.get(k)  : (r.traded_qty ?? 0);
+  const final   = swapDv01Overrides.has(k)    ? swapDv01Overrides.get(k)    : (opening + traded);
+  return { opening, traded, final };
+}
+
 /* ── Fonte única de preço/delta efetivos (por instrumento) ───────────────── */
 // Identidade do instrumento p/ marreta — independe de trader/aba (mesmo ticker → mesma marreta).
 // Referências "família" (FX forwards p/ value date; SWAPs por tenor) repetem a MESMA ref em

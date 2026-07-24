@@ -37,7 +37,9 @@ function reloadActiveTab() {
   deltaOverrides.clear();
   if (activeTraderTab === DOLAR_TAB_ID) {
     delete posDataByTab[DOLAR_TAB_ID];
+    delete posDataByTab[ENQ_RF_TAB_KEY];
     loadDolarExposure();
+    loadEnquadramentoRF();
     return;
   }
   if (activeTraderTab === DOLAR_CONSOL_TAB_ID) {
@@ -61,6 +63,7 @@ function reloadActiveTab() {
   // senão, ao abri-las após Atualizar, serviriam dados em cache de uma data anterior.
   for (const t of Object.keys(dolarConsolData)) delete dolarConsolData[t];
   delete posDataByTab[DOLAR_TAB_ID];
+  delete posDataByTab[ENQ_RF_TAB_KEY];
   delete posDataByTab[ROLAGEM_TAB_ID];
   swapOpeningOverrides.clear();
   swapTradedOverrides.clear();

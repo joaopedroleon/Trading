@@ -27,8 +27,9 @@ const priceOverrides = new Map();  // instKey → preço manual (marreta)
 const deltaOverrides = new Map();  // instKey → delta manual (marreta)
 const _dirtyTabs     = new Set();  // abas carregadas que precisam re-render após uma marreta
 
-/* ── Check Dólar Exposure (aba por fundo) ────────────────────────────────── */
+/* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */
 const DOLAR_TAB_ID        = 'dolar';
+const ENQ_RF_TAB_KEY      = 'enqrf';    // chave de cache do check de derivativos RF (não é aba nova)
 let   dolarOptTickers     = {};         // optKey → ticker BBG (cache do backend; cadastro de DOL)
 
 /* ── Hidden rows helpers ─────────────────────────────────────────────────── */

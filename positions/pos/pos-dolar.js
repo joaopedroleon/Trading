@@ -664,3 +664,204 @@ async function dolarSetTicker(optKey, ticker) {
   }
 }
 
+/* ── Check Enquadramento — derivativos dos fundos RF (limite 100% NAV/caixinha) ── */
+async function loadEnquadramentoRF() {
+  const container = document.getElementById('enqRfContainer');
+  if (!container) return;
+  container.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
+  try {
+    const params = new URLSearchParams();
+    const refDate = document.getElementById('refDate').value;
+    if (refDate) params.set('ref_date', refDate);
+    const forceOpening = document.getElementById('forceOpening').value;
+    if (forceOpening) params.set('force_opening', forceOpening);
+    const data = await (await fetch(`${API_BASE}/api/positions/enquadramento-rf?${params}`)).json();
+    if (data.error) { container.innerHTML = `<div class="card no-data">${data.error}</div>`; return; }
+    posDataByTab[ENQ_RF_TAB_KEY] = data;
+    noteBbgSource(data);   // estado global (BBG viva/cache)
+    renderEnquadramentoRF(data);
+  } catch (e) {
+    container.innerHTML = `<div class="card no-data">Erro ao conectar: ${e.message}</div>`;
+  }
+}
+
+// Formatadores locais (qtd inteira · PU/preço 2 casas · taxa 3 casas).
+function _enqQty(v)  { return (v == null) ? '—' : Math.round(v).toLocaleString('pt-BR'); }
+function _enqNum(v, d = 2) { return (v == null || !isFinite(v)) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+
+const _ENQ_DOL_CAT = { mini: 'Mini (WDO)', cheio: 'Cheio (UC)', option: 'Opção' };
+
+// Rótulo curto do ativo (cabeçalho de coluna): tira o sufixo " Comdty"/" Curncy".
+function _enqInstLabel(bucketKey, inst) {
+  const ref = inst.instrument_reference || '';
+  if (bucketKey === 'di') return ref.replace(/\s*Comdty$/i, '') || inst.instrument_name || '—';
+  return ref.replace(/\s*Curncy$/i, '') || inst.instrument_name || '—';
+}
+
+// Tooltip com os internos (PU/taxa p/ DI; preço/delta p/ dólar).
+function _enqInstTitle(bucketKey, inst) {
+  const venc = inst.maturity ? fmtDate(inst.maturity) : '—';
+  const nm = inst.instrument_name || inst.instrument_reference || '';
+  if (bucketKey === 'di')
+    return `${nm} · venc ${venc} · DU ${inst.du ?? '—'} · taxa ${inst.rate != null ? _enqNum(inst.rate, 3) + '%' : '—'} · PU ${_enqNum(inst.pu, 2)}`;
+  return `${nm} · ${_ENQ_DOL_CAT[inst.category] || inst.category || ''} · venc ${venc} · preço ${_enqNum(inst.px, 2)} · delta ${inst.delta != null ? _enqNum(inst.delta, 2) : '—'}`;
+}
+
+// Colunas = união dos ativos entre os fundos, por caixinha; ordenadas por DU (DI) / ref.
+function _enqInstCols(funds, bucketKey) {
+  const seen = new Map();
+  for (const f of funds) {
+    const bk = (f.buckets || []).find(b => b.key === bucketKey);
+    for (const i of ((bk && bk.instruments) || [])) {
+      const ck = i.instrument_reference || i.instrument_name;
+      if (ck && !seen.has(ck)) seen.set(ck, i);
+    }
+  }
+  const arr = [...seen.entries()].map(([ck, inst]) => ({ ck, inst }));
+  arr.sort((a, b) => ((a.inst.du ?? 1e9) - (b.inst.du ?? 1e9)) || String(a.ck).localeCompare(String(b.ck)));
+  return arr.map(({ ck, inst }) => ({ ck, label: _enqInstLabel(bucketKey, inst), title: _enqInstTitle(bucketKey, inst) }));
+}
+
+// Célula (fundo × ativo): % do NAV em cima, (quantidade final) embaixo. lb = borda de início do grupo.
+function _enqMatrixCell(inst, nav, lb) {
+  const bl = lb ? 'border-left:2px solid var(--border);' : '';
+  if (!inst) return `<td class="num" style="${bl}color:var(--text-muted)">—</td>`;
+  const pctStr = (inst.exp != null && nav) ? fmtPct(inst.exp / nav) : '—';
+  const qty = Math.round(inst.final_qty || 0).toLocaleString('pt-BR');
+  return `<td class="num" style="${bl}">${pctStr}<br><span style="font-size:11px;color:var(--text-muted)">(${qty})</span></td>`;
+}
+
+let enqDiTarget = 0.80;   // target de reenquadramento da caixinha DI (default 80% do NAV)
+
+// Ajusta o target e re-renderiza a partir do cache (aceita "80" ou "0.80").
+function enqSetDiTarget(v) {
+  const p = parseFloat(String(v).replace(',', '.'));
+  if (!isFinite(p) || p <= 0) return;
+  enqDiTarget = p > 1.5 ? p / 100 : p;
+  const cached = posDataByTab[ENQ_RF_TAB_KEY];
+  if (cached) renderEnquadramentoRF(cached);
+}
+
+// Linha de ajuste da caixinha DI: quantos contratos do 1º vencimento (front do MERCADO)
+// operar p/ trazer |exposição DI| ao target. net = Σ(qtd×PU) com sinal; reduz operando o front.
+function _enqDiAdjust(fund, front) {
+  const di  = (fund.buckets || []).find(b => b.key === 'di');
+  const nav = fund.nav;
+  const curPctStr = (di && di.pct != null) ? fmtPct(di.pct) : '—';
+  if (!di || nav == null)
+    return `<tr><td>${fund.fund_label}</td><td class="num" colspan="3" style="color:var(--text-muted)">—</td></tr>`;
+  if (!front || !front.pu)
+    return `<tr><td>${fund.fund_label}</td><td class="num" style="${_enqLimitStyle(di.pct)}">${curPctStr}</td>
+      <td colspan="2" style="color:var(--text-muted)">front de DI indisponível</td></tr>`;
+
+  const net       = di.net_exp || 0;
+  const pu        = front.pu;
+  const targetExp = enqDiTarget * nav;
+  const diff      = Math.abs(net) - targetExp;    // >0 precisa reduzir; <0 folga
+
+  let action;
+  if (diff > 0) {
+    const n     = Math.ceil(diff / pu);
+    const verb  = net > 0 ? 'vender' : 'comprar';       // net long PU → vende; short → compra
+    const color = net > 0 ? 'var(--red)' : 'var(--green)';
+    action = `<span style="color:${color};font-weight:600">${verb} ${n.toLocaleString('pt-BR')}</span>`;
+  } else {
+    const n = Math.floor(Math.abs(diff) / pu);
+    action = `<span style="color:var(--green)">dentro do target · folga ${n.toLocaleString('pt-BR')}</span>`;
+  }
+  return `<tr><td>${fund.fund_label}</td>
+    <td class="num" style="${_enqLimitStyle(di.pct)}">${curPctStr}</td>
+    <td class="num">${_fmtBrl(targetExp)}<br><span style="font-size:11px;color:var(--text-muted)">${fmtPct(enqDiTarget)}</span></td>
+    <td class="num">${action}</td></tr>`;
+}
+
+function renderEnquadramentoRF(data) {
+  const container = document.getElementById('enqRfContainer');
+  if (!container) return;
+  const funds   = data.funds || [];
+  const buckets = (funds[0] && funds[0].buckets) ? funds[0].buckets : [];
+  // colunas de ativos (união entre fundos) por caixinha
+  const cols = buckets.map(b => ({ key: b.key, label: b.label, insts: _enqInstCols(funds, b.key) }));
+
+  const navDateStr  = data.nav_date ? fmtDate(data.nav_date) : '—';
+  const navMismatch = data.nav_date && data.opening_date && data.nav_date !== data.opening_date;
+  const usdbrlStr   = data.usdbrl != null
+    ? data.usdbrl.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—';
+
+  const warn = (data.warnings && data.warnings.length)
+    ? `<div style="margin:6px 0 10px 0;padding:8px 12px;background:var(--bg-row-alt);border-left:3px solid var(--yellow);border-radius:4px;font-size:12px;color:var(--yellow)">
+         ${data.warnings.map(w => `⚠ ${w}`).join('<br>')}</div>`
+    : '';
+
+  // Cabeçalho: linha 1 = grupos (caixinhas); linha 2 = ativos + Total por grupo.
+  const grpHead = cols.map(c =>
+    `<th class="num" colspan="${c.insts.length + 1}" style="border-left:2px solid var(--border)">${c.label}</th>`).join('');
+  const instHead = cols.map(c =>
+    c.insts.map((ic, j) =>
+      `<th class="num"${j === 0 ? ' style="border-left:2px solid var(--border)"' : ''} title="${ic.title}">${ic.label}</th>`).join('')
+    + `<th class="num" style="border-left:1px solid var(--border);font-weight:700">Total</th>`).join('');
+
+  const body = funds.map(f => {
+    const nav = f.nav;
+    const navStr = nav != null
+      ? `BRL ${nav.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
+      : '<span style="color:var(--red)">—</span>';
+    const groupCells = cols.map(c => {
+      const bk  = (f.buckets || []).find(b => b.key === c.key);
+      const lut = {};
+      for (const i of ((bk && bk.instruments) || [])) lut[i.instrument_reference || i.instrument_name] = i;
+      const instCells = c.insts.map((ic, j) => _enqMatrixCell(lut[ic.ck], nav, j === 0)).join('');
+      const totStr = (bk && bk.pct != null) ? fmtPct(bk.pct) + (bk.over ? ' ⚠' : '') : '—';
+      const totCell = `<td class="num" style="border-left:1px solid var(--border);font-weight:700;${_enqLimitStyle(bk ? bk.pct : null)}">${totStr}</td>`;
+      return instCells + totCell;
+    }).join('');
+    // Total geral = soma dos MÓDULOS das caixinhas (não se compensam) — é a regra dos 100%.
+    let totExp = 0, haveAny = false;
+    for (const b of (f.buckets || [])) if (b.net_exp != null) { totExp += Math.abs(b.net_exp); haveAny = true; }
+    const totPct  = (haveAny && nav) ? totExp / nav : null;
+    const totOver = (totPct != null && totPct > 1.0);
+    const totalGeral = `<td class="num" style="border-left:2px double var(--border);font-weight:700;${_enqLimitStyle(totPct)}">${totPct != null ? fmtPct(totPct) + (totOver ? ' ⚠' : '') : '—'}</td>`;
+    const status = totOver
+      ? '<td class="num" style="color:#fff;background:var(--alert-4);font-weight:700">ESTOURO</td>'
+      : (totPct != null ? '<td class="num" style="color:var(--green)">OK</td>' : '<td class="num" style="color:var(--text-muted)">—</td>');
+    return `<tr><td>${f.fund_label}</td><td class="num">${navStr}</td>${groupCells}${totalGeral}${status}</tr>`;
+  }).join('');
+
+  container.innerHTML = `<div class="card">
+    <div class="section-title" style="padding:8px 0 6px 0">
+      Enquadramento de derivativos — Fundos RF
+      <span style="font-weight:400;color:${navMismatch ? 'var(--yellow)' : 'var(--text-muted)'};font-size:12px">
+        ${navMismatch ? '⚠ ' : ''}Abertura: ${fmtDate(data.opening_date)} · Boletas: ${fmtDate(data.ref_date)} · NAV: ${navDateStr} · USDBRL (interno): ${usdbrlStr} · limite 100% do NAV por caixinha</span>
+    </div>
+    ${warn}
+    <div style="overflow-x:auto">
+      <table class="data-table" style="white-space:nowrap;width:auto">
+        <thead>
+          <tr><th rowspan="2">Fundo</th><th class="num" rowspan="2">NAV</th>${grpHead}<th class="num" rowspan="2">Total geral</th><th rowspan="2">Status</th></tr>
+          <tr>${instHead}</tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
+      Cada célula: <b>% do NAV</b> e <b>(quantidade final)</b> por ativo. "Total" de cada caixinha = exposição líquida (netada com sinal, em módulo). <b>Total geral</b> = soma dos módulos das caixinhas (não se compensam entre si) — é o número da regra: <b>≤ 100% do NAV</b>. Ex.: 2% de DI + 108% de dólar = 110% (estouro). DI por PU (ao vivo BBG); dólar por nocional (valor-do-ponto × preço [× delta p/ opção]).</div>
+
+    <div class="section-title" style="padding:14px 0 4px 0;font-size:14px">
+      Ajuste da caixinha DI — operar o 1º vencimento
+      <span style="font-weight:400;font-size:12px;color:var(--text-muted)">&nbsp;· target
+        <input type="number" step="1" min="0" value="${Math.round(enqDiTarget * 1000) / 10}"
+          onchange="enqSetDiTarget(this.value)"
+          style="width:58px;padding:3px 6px;font-size:12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px"> % do NAV
+        ${data.di_front ? `&nbsp;· front: <b>${(data.di_front.instrument_reference || '').replace(/\s*Comdty$/i, '')}</b> (venc ${data.di_front.maturity ? fmtDate(data.di_front.maturity) : '—'} · PU ${_enqNum(data.di_front.pu, 2)}${data.di_front.rate != null ? ' · taxa ' + _enqNum(data.di_front.rate, 3) + '%' : ''})` : ''}
+      </span>
+    </div>
+    <table class="data-table" style="white-space:nowrap;width:auto">
+      <thead><tr><th>Fundo</th><th class="num">Exp. DI atual</th>
+        <th class="num">Exp. alvo</th><th class="num">Ação p/ ajustar</th></tr></thead>
+      <tbody>${funds.map(f => _enqDiAdjust(f, data.di_front)).join('')}</tbody>
+    </table>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+      Operando o DI mais curto <b>listado no mercado</b> (front): nº de contratos p/ trazer |exposição DI| ao target (arredonda p/ cima na correção). Vende se a exposição líquida do PU está comprada, compra se vendida.</div>
+  </div>`;
+}
+

@@ -17,7 +17,7 @@ function swapStartEdit(td, field, key, currentVal) {
   input.select();
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter')  input.blur();
-    if (e.key === 'Escape') { map.delete(key); rerenderTables(); }
+    if (e.key === 'Escape') { map.delete(key); _markTabsDirtyAndRerender(); }
   });
   input.addEventListener('blur', () => swapApplyEdit(input, field, key));
   input.addEventListener('click', e => e.stopPropagation());
@@ -28,7 +28,9 @@ function swapApplyEdit(input, field, key) {
   const val = parseFloat(String(input.value).replace(/\./g, '').replace(',', '.'));
   if (!isNaN(val)) map.set(key, val);
   else map.delete(key);
-  rerenderTables();
+  // abertura/operada/dv01: TODOS alteram a qtd (DV01) e o RESULTADO do swap no PnL
+  // (estoque = DV01_abertura × Δtaxa; final = abertura + operada) → re-render Posição E PnL.
+  _markTabsDirtyAndRerender();
 }
 
 /* ── #PL manual override ─────────────────────────────────────────────────── */

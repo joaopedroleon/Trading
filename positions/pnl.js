@@ -129,10 +129,35 @@ function buildPnlRowMap(rows) {
   for (const r of rows) pnlRowMap[pnlRowKey(r)] = r;
 }
 
+// Abertura EFETIVA (DV01) de um SWAP live p/ o PnL: aplica as marretas via swapEffQty
+// (abertura/operada/dv01). Fora de swap ou sem o helper → null (usa o backend).
+function _swapEff(r) {
+  if (r.swap_trade_usd == null || typeof swapEffQty !== 'function') return null;
+  return swapEffQty(r);
+}
+
 // PnL derivado (PURO — não muta a row) a partir do preço efetivo (marreta → live → boleta → D-1).
 // Sem marreta e com preço == price_pnl, reproduz exatamente o breakdown que o backend mandou.
 function pnlFor(r) {
   const cf = r.calc_factor, nav = r.nav;
+  // SWAP da tela LIVE (consolidado): total = ESTOQUE por TAXA (DV01×Δtaxa) + resultado das
+  // BOLETAS (preço médio × marcação, já em USD no backend, campo swap_trade_usd). O estoque
+  // escala pela marreta de DV01 (corrige o Oracle); as boletas NÃO escalam. Discrimina pelo
+  // swap_trade_usd != null — o swap do SNAPSHOT não seta esse campo e cai no genérico abaixo.
+  if (r.swap_trade_usd != null) {
+    if (cf == null || nav == null) {   // sem curva (ex. ZAR) → total pronto do backend
+      return { estoque: r.estoque_usd, compra: r.compra_usd, venda: r.venda_usd,
+               total: r.total_usd, bps: r.result_bps };
+    }
+    const sp1 = effectivePrice(r);              // taxa live (ou marreta de taxa)
+    const sp0 = r.price != null ? r.price : null;   // taxa D-1
+    const eff = _swapEff(r);                    // abertura EFETIVA (marreta de abertura/dv01)
+    const oq = eff ? eff.opening : (r.opening_qty ?? 0);   // estoque = DV01_abertura × Δtaxa
+    const est = (sp0 != null && sp1 != null) ? oq * cf * (sp1 - sp0) : 0;
+    const tot = est + (r.swap_trade_usd || 0);
+    return { estoque: est, compra: r.compra_usd, venda: r.venda_usd, total: tot,
+             bps: tot / nav * 10_000 };
+  }
   const p1 = effectivePrice(r);
   if (cf == null || nav == null || p1 == null) {
     return { estoque: r.estoque_usd, compra: r.compra_usd, venda: r.venda_usd,
@@ -286,14 +311,15 @@ function renderPnlSummary(rows) {
                      swap_detail: r.swap_detail ?? null,
                      rowKeys: [], summaryKey: key });
     }
-    const e  = map.get(key);
-    const pf = pnlFor(r);
-    e.opening_qty    += r.opening_qty ?? 0;
+    const e   = map.get(key);
+    const pf  = pnlFor(r);
+    const eff = _swapEff(r);   // swap: abertura/final EFETIVAS (marretas); null p/ o resto
+    e.opening_qty    += eff ? eff.opening : (r.opening_qty ?? 0);
     e.buy_qty        += r.buy_qty     ?? 0;
     e.sell_qty       += r.sell_qty    ?? 0;
     e.buy_price_sum  += (r.buy_qty  ?? 0) * (r.avg_buy_price  ?? 0);
     e.sell_price_sum += (r.sell_qty ?? 0) * (r.avg_sell_price ?? 0);
-    e.final_qty  += r.final_qty  ?? 0;
+    e.final_qty  += eff ? eff.final : (r.final_qty ?? 0);
     e.total_usd  += pf.total ?? 0;
     e.result_bps += pf.bps   ?? 0;
     e.rowKeys.push(pnlRowKey(r));
@@ -528,22 +554,26 @@ function renderPnlTable(rows, tbodyId) {
     const pf  = pnlFor(r);
     const ep  = effectivePrice(r);
     const src = priceSrc(r);
+    const eff = _swapEff(r);                     // swap: abertura EFETIVA (marreta) p/ a qtd
+    const oq  = eff ? eff.opening : (r.opening_qty ?? 0);
+    const bq  = r.buy_qty  ?? 0;
+    const sq  = r.sell_qty ?? 0;
     return `<tr class="${rowClass} ${areaClass}">
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
       <td${swapAttr}>${r.instrument_name ?? '—'}</td>
       <td>${fmtDate(r.maturity)}</td>
-      <td class="num">${fmtQty(r.opening_qty)}</td>
+      <td class="num">${fmtQty(oq)}</td>
       <td class="num">${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
       <td class="num" data-key="${pnlRowKey(r).replace(/"/g, '&quot;')}"
           title="Fonte: ${SOURCE_LABELS[src] || '—'}"
           onclick="pnlStartEdit(this)"
           style="cursor:pointer;${priceLiveStyle(src)}"
       >${r.option_subtype === 'fx' ? fmtPricePct(ep) : fmtPrice(ep)}</td>
-      <td class="num">${r.buy_qty  ? fmtQty(r.buy_qty)  : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="num">${bq ? fmtQty(bq)  : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="num">${r.avg_buy_price  != null ? (r.option_subtype === 'fx' ? fmtPricePct(r.avg_buy_price)  : fmtPrice(r.avg_buy_price))  : '<span style="color:var(--text-muted)">—</span>'}</td>
-      <td class="num">${r.sell_qty ? fmtQty(r.sell_qty) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="num">${sq ? fmtQty(sq) : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="num">${r.avg_sell_price != null ? (r.option_subtype === 'fx' ? fmtPricePct(r.avg_sell_price) : fmtPrice(r.avg_sell_price)) : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="col-pnl num">${fmtUSD(pf.estoque)}</td>
       <td class="col-pnl num">${fmtUSD(pf.compra)}</td>

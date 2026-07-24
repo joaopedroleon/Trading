@@ -207,6 +207,17 @@ function _dolarLimitStyle(pct) {
   return 'color:#fff;background:var(--alert-4);font-weight:700';
 }
 
+// Gradação de cor do limite de enquadramento RF (limite 100% do NAV por caixinha).
+//  < 80% verde · 80–95% amarelo · 95–100% laranja · > 100% estouro (vermelho forte)
+function _enqLimitStyle(pct) {
+  if (pct == null) return 'color:var(--text-muted)';
+  const a = Math.abs(pct);
+  if (a < 0.80) return 'color:var(--green)';
+  if (a < 0.95) return 'color:var(--alert-1)';
+  if (a <= 1.00) return 'color:var(--alert-2)';
+  return 'color:#fff;background:var(--alert-4);font-weight:700';
+}
+
 // Célula destacada Total/Final: a coluna mais relevante (exposição vs limite).
 function _totalFinalCell(brl, pct) {
   const warn = (pct != null && Math.abs(pct) >= 0.19) ? ' ⚠' : '';
@@ -253,6 +264,9 @@ function showDolarTab() {
   _hideRolagemTab();
   if (!posDataByTab[DOLAR_TAB_ID]) loadDolarExposure();
   else { _dirtyTabs.delete(DOLAR_TAB_ID); renderDolarTable(posDataByTab[DOLAR_TAB_ID]); }
+  // Segundo check da aba: enquadramento de derivativos dos fundos RF (container próprio).
+  if (!posDataByTab[ENQ_RF_TAB_KEY]) loadEnquadramentoRF();
+  else renderEnquadramentoRF(posDataByTab[ENQ_RF_TAB_KEY]);
 }
 
 /* ── Rolagem Dólar (posição do vencimento a rolar + geração de boletas) ───── */
