@@ -10,6 +10,10 @@ let activePnlTabId  = null;
 
 const SOURCE_LABELS = { bbg: 'BBG', boleta: 'Boleta', d1: 'D-1', manual: 'Marretado', marretado: 'Marretado' };
 
+// HTML do resultado da última busca de PX_SETTLE D0 (persiste entre rerenders;
+// limpo no "Atualizar" via resetPnlForTab). NÃO altera fallback/prioridade da tela.
+let _pxSettleMsg = '';
+
 /* ── Render PnL for a trader tab (uses data from posDataByTab) ───────────── */
 function loadPnlForTab(tabId) {
   const data = posDataByTab[tabId];
@@ -31,6 +35,78 @@ function loadPnlForTab(tabId) {
 function resetPnlForTab(tabId) {
   delete hiddenPnlRows[tabId];
   _pnlRendered.delete(tabId);
+  _pxSettleMsg = '';   // resultado da busca de settle é do run anterior → some no Atualizar
+}
+
+/* ── Buscar PX_SETTLE do dia (D0) para os ativos com preço BBG ─────────────── */
+// SÓ para este botão: aplica o settle D0 como preço efetivo (via priceOverrides, a mesma
+// marreta de sempre → top da prioridade), avisando os ativos cujo settle ainda não saiu.
+// Não toca no fluxo normal (BBG live → boleta → D-1) das demais linhas.
+function _pxSettleCandidates() {
+  const rows = (pnlData && pnlData.rows) || [];
+  // Alvo: instrumentos de BOLSA cujo ticker BBG é o PRÓPRIO instrument_reference — os que
+  // "usamos preço da BBG como fonte". Identificado pelo sufixo do ticker (Comdty/Curncy/
+  // Index): futuros DI/dólar/US/índice E opções SOBRE FUTURO (ex.: 'IMBWN6P4 7420 PUT' →
+  // ref 'IMBWN6P4 7420 Index'; ouro 'GC..C .. Comdty').
+  // IMPORTANTE: NÃO filtra por price_live_source — o botão serve justamente para quando a
+  // BBG está sem spread agora (preço caiu no fallback boleta/D-1) mas o SETTLE do dia já saiu.
+  // Exclui: FX fwd, SWAP (curva), ações cash/crédito/CDS (Equity/Corp/sem sufixo), e opções
+  // de ticker especial DOL/FX/US-equity/IBOV/digital (resolvidas à parte no /reference).
+  return rows.filter(r => {
+    const ref = r.instrument_reference || '';
+    if (!ref || r.is_fx || ref.startsWith('SWAP')) return false;
+    if (!/ (Comdty|Curncy|Index)$/.test(ref)) return false;
+    if (r.is_option) {
+      const sub = r.option_subtype;
+      if (sub === 'dol' || sub === 'fx' || sub === 'us_equity' || sub === 'digital') return false;
+      if ((r.instrument_name || '').toUpperCase().startsWith('IBOV')) return false;
+    }
+    return true;
+  });
+}
+
+async function fetchPxSettleD0(btn) {
+  const cands = _pxSettleCandidates();
+  if (!cands.length) {
+    _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:var(--text-muted)">Nenhum ativo com preço BBG nesta aba.</span>`;
+    rerenderPnlSummary();
+    return;
+  }
+  const tickers = [...new Set(cands.map(r => r.instrument_reference))];
+  const refDate = document.getElementById('refDate').value;
+  const oldTxt  = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Buscando…';
+  try {
+    const params = new URLSearchParams();
+    if (refDate) params.set('ref_date', refDate);
+    params.set('tickers', tickers.join(','));
+    const resp = await fetch(`${API_BASE}/api/positions/px-settle?${params}`);
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:var(--red)">⚠ ${data.error || 'Erro ao buscar settle.'}</span>`;
+      rerenderPnlSummary();
+      return;
+    }
+    const settle  = data.settle  || {};
+    const missing = data.missing || [];
+    for (const r of cands) {
+      const px = settle[r.instrument_reference];
+      if (px != null) priceOverrides.set(instKey(r), px);   // vira o preço efetivo (live) no PnL
+    }
+    const appliedN = tickers.filter(t => settle[t] != null).length;
+    const parts = [`✓ settle D0 (${fmtDate(data.ref_date)}) aplicado: ${appliedN} ativo(s)`];
+    if (missing.length) parts.push(`<span style="color:var(--yellow)">⚠ settle do dia ainda não saiu: ${missing.map(t => t.replace(/\s+(Comdty|Curncy|Index|Equity)$/i, '')).join(', ')}</span>`);
+    _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:${missing.length ? 'var(--text-muted)' : 'var(--green)'}">${parts.join(' · ')}</span>`;
+    if (typeof _markTabsDirtyAndRerender === 'function') _markTabsDirtyAndRerender();
+    else rerenderPnlSummary();
+  } catch (e) {
+    _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:var(--red)">⚠ Erro de conexão: ${e.message}</span>`;
+    rerenderPnlSummary();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldTxt;
+  }
 }
 
 /* ── Formatters específicos do PnL ───────────────────────────────────────── */
@@ -432,6 +508,8 @@ function renderPnlSummary(rows) {
       <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
         <span>MM ${traderBadges}</span>
         ${restoreBtn}
+        <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" title="Busca o PX_SETTLE do dia (D0) na BBG p/ os ativos com preço BBG e aplica como preço efetivo; avisa os que ainda não saíram." onclick="fetchPxSettleD0(this)">⤓ Buscar Settle D0</button>
+        ${_pxSettleMsg}
         <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px;margin-left:auto" onclick="copySummaryTable(this)">⎘ Copiar</button>
       </div>
       <table class="data-table pnl-summary-table" style="white-space:nowrap;width:auto">
