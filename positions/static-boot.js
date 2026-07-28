@@ -264,9 +264,15 @@
     });
   }
 
-  // Mostra o horário de geração já na tela de senha (confirma que é a versão nova)
+  // Mostra o horário de geração de CADA aba já na tela de senha (Posições e PnL são
+  // pipelines independentes, rodam em horários diferentes) — confirma a versão de cada uma.
   const stamp = document.getElementById('gateStamp');
-  const gen = (window.__ENC__ && window.__ENC__.meta && window.__ENC__.meta.generated_at)
-           || (window.__ENC_PNL__ && window.__ENC_PNL__.meta && window.__ENC_PNL__.meta.generated_at);
-  if (stamp && gen) stamp.textContent = 'Snapshot gerado em ' + gen;
+  if (stamp) {
+    const posGen = window.__ENC__     && window.__ENC__.meta     && window.__ENC__.meta.generated_at;
+    const pnlGen = window.__ENC_PNL__ && window.__ENC_PNL__.meta && window.__ENC_PNL__.meta.generated_at;
+    const lines = [];
+    if (posGen) lines.push('Posições: ' + posGen);
+    if (pnlGen) lines.push('PnL: ' + pnlGen);
+    if (lines.length) stamp.textContent = 'Último snapshot — ' + lines.join('  ·  ');
+  }
 })();
