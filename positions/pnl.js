@@ -8,7 +8,19 @@ const hiddenPnlRows = {};  // tabId → Set<rowKey>
 const _pnlRendered  = new Set();  // tabIds com PnL já renderizado (DOM presente)
 let activePnlTabId  = null;
 
-const SOURCE_LABELS = { bbg: 'BBG', boleta: 'Boleta', d1: 'D-1', manual: 'Marretado', marretado: 'Marretado' };
+const SOURCE_LABELS = { bbg: 'BBG', boleta: 'Boleta', d1: 'D-1', jrs: 'JRS gerencial', manual: 'Marretado', marretado: 'Marretado' };
+
+// Rótulo da fonte do preço p/ o hover (title), distinguindo BBG mid vs último preço (PX_LAST)
+// vs PU do yield. `kind` = r.price_live_kind ('mid'|'last'|'pu'|null), setado pelo backend.
+function priceSrcLabel(src, kind) {
+  if (src === 'bbg') {
+    return kind === 'mid'  ? 'BBG live — mid (PX_MID)'
+         : kind === 'last' ? 'BBG live — último preço (PX_LAST; sem mid two-sided)'
+         : kind === 'pu'   ? 'PU calculado do yield live (título)'
+         :                   'BBG live';
+  }
+  return SOURCE_LABELS[src] || '—';
+}
 
 // HTML do resultado da última busca de PX_SETTLE D0 (persiste entre rerenders;
 // limpo no "Atualizar" via resetPnlForTab). NÃO altera fallback/prioridade da tela.
@@ -176,6 +188,7 @@ function priceLiveStyle(source) {
     case 'bbg':       return 'color:var(--green)';
     case 'd1':        return 'color:var(--red)';
     case 'boleta':    return 'color:var(--yellow)';
+    case 'jrs':       return 'color:var(--green-dark)';
     case 'manual':    return 'color:var(--accent);font-style:italic';
     case 'marretado': return 'color:var(--accent);font-style:italic';
     default:          return '';
@@ -383,6 +396,7 @@ function renderPnlSummary(rows) {
                      buy_price_sum: 0, sell_price_sum: 0,
                      final_qty: 0, total_usd: 0, result_bps: 0,
                      eff_price: effectivePrice(r), price_src: priceSrc(r),
+                     price_live_kind: r.price_live_kind ?? null,
                      option_subtype: r.option_subtype ?? null,
                      swap_detail: r.swap_detail ?? null,
                      rowKeys: [], summaryKey: key });
@@ -430,7 +444,7 @@ function renderPnlSummary(rows) {
       <td class="col-pnl"></td>
     </tr>`;
     for (const e of entries) {
-      const srcLabel   = SOURCE_LABELS[e.price_src] || '—';
+      const srcLabel   = priceSrcLabel(e.price_src, e.price_live_kind);
       const priceColor = priceLiveStyle(e.price_src);
       const rowKeysJson = JSON.stringify(e.rowKeys).replace(/"/g, '&quot;');
       const sk          = e.summaryKey.replace(/'/g, "\\'");
@@ -645,7 +659,7 @@ function renderPnlTable(rows, tbodyId) {
       <td class="num">${fmtQty(oq)}</td>
       <td class="num">${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
       <td class="num" data-key="${pnlRowKey(r).replace(/"/g, '&quot;')}"
-          title="Fonte: ${SOURCE_LABELS[src] || '—'}"
+          title="Fonte: ${priceSrcLabel(src, r.price_live_kind)}"
           onclick="pnlStartEdit(this)"
           style="cursor:pointer;${priceLiveStyle(src)}"
       >${r.option_subtype === 'fx' ? fmtPricePct(ep) : fmtPrice(ep)}</td>

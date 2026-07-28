@@ -217,6 +217,12 @@
     const parts = [];
     if (refStamp)          parts.push('Gerencial de ' + fmtStamp(refStamp));
     if (meta.generated_at) parts.push('Gerado: ' + meta.generated_at);
+    // Instrumentos zerados por falta de calc_factor (campo estrutural BBG never-cached no
+    // replay): avisa em vez de zerar em silêncio. Com o cache íntegro deve ser 0.
+    const zeroed = TRADERS
+      .filter(([id]) => sources[id] && sources[id].cf_missing > 0)
+      .map(([id, label]) => `${label} (${sources[id].cf_missing})`);
+    if (zeroed.length) parts.push('⚠ instrumentos zerados por falta de dado estrutural BBG: ' + zeroed.join(', '));
     const el = document.getElementById('snapMetaPnl');
     if (el) el.textContent = parts.join('  |  ');
   }
