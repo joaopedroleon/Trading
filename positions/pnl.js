@@ -10,6 +10,13 @@ let activePnlTabId  = null;
 
 const SOURCE_LABELS = { bbg: 'BBG', boleta: 'Boleta', d1: 'D-1', jrs: 'JRS gerencial', manual: 'Marretado', marretado: 'Marretado' };
 
+// Preços da tabela de PnL em 4 casas (médios + live) — versões locais, NÃO mexem no fmtPrice
+// compartilhado (tabela de Posição segue em 2 casas).
+const fmtPrice4 = v =>
+  v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+const fmtPricePct4 = v =>
+  v == null ? '—' : (v * 100).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + '%';
+
 // Rótulo da fonte do preço p/ o hover (title), distinguindo BBG mid vs último preço (PX_LAST)
 // vs PU do yield. `kind` = r.price_live_kind ('mid'|'last'|'pu'|null), setado pelo backend.
 function priceSrcLabel(src, kind) {
@@ -177,6 +184,15 @@ function copySummaryTable(btn) {
   for (const row of clone.querySelectorAll('.pnl-summary-table tr')) {
     while (row.children.length > 6) row.removeChild(row.lastElementChild);
   }
+  clone.style.cssText = 'position:fixed;top:-9999px;left:-9999px;background:var(--bg-card)';
+  document.body.appendChild(clone);
+  copyElementAsImage(clone, btn).finally(() => document.body.removeChild(clone));
+}
+
+/* ── Copiar resumo COM as colunas de preço (Preço Médio + Price Live) ─────── */
+function copySummaryTableWithPrices(btn) {
+  const src = btn.closest('.card')?.querySelector('.section-copy-target') ?? btn.closest('.card');
+  const clone = src.cloneNode(true);   // sem remover colunas — mantém Preço Médio + Price Live
   clone.style.cssText = 'position:fixed;top:-9999px;left:-9999px;background:var(--bg-card)';
   document.body.appendChild(clone);
   copyElementAsImage(clone, btn).finally(() => document.body.removeChild(clone));
@@ -459,13 +475,13 @@ function renderPnlSummary(rows) {
       } else if (tradedQty === 0) {
         const abp  = e.buy_qty  > 0 ? e.buy_price_sum  / e.buy_qty  : null;
         const asp  = e.sell_qty > 0 ? e.sell_price_sum / e.sell_qty : null;
-        const bStr = abp != null ? (e.option_subtype === 'fx' ? fmtPricePct(abp) : fmtPrice(abp)) : '—';
-        const sStr = asp != null ? (e.option_subtype === 'fx' ? fmtPricePct(asp) : fmtPrice(asp)) : '—';
+        const bStr = abp != null ? (e.option_subtype === 'fx' ? fmtPricePct4(abp) : fmtPrice4(abp)) : '—';
+        const sStr = asp != null ? (e.option_subtype === 'fx' ? fmtPricePct4(asp) : fmtPrice4(asp)) : '—';
         avgPriceCell = `${bStr}&nbsp;/&nbsp;${sStr}`;
       } else {
         // posição líquida: custo líquido = (notional compra − notional venda) / qtd líquida
         const avgPrice = (e.buy_price_sum - e.sell_price_sum) / tradedQty;
-        avgPriceCell = e.option_subtype === 'fx' ? fmtPricePct(avgPrice) : fmtPrice(avgPrice);
+        avgPriceCell = e.option_subtype === 'fx' ? fmtPricePct4(avgPrice) : fmtPrice4(avgPrice);
       }
       tbody += `<tr onclick="hidePnlRow('${sk}')" title="Clique para ocultar" style="cursor:pointer">
         <td style="padding-left:16px"${swapAttr}>${e.instrument_name ?? '—'}</td>
@@ -479,7 +495,7 @@ function renderPnlSummary(rows) {
             title="Fonte: ${srcLabel}"
             onclick="event.stopPropagation();pnlStartSummaryEdit(this)"
             style="cursor:pointer;${priceColor}"
-        >${e.option_subtype === 'fx' ? fmtPricePct(e.eff_price) : fmtPrice(e.eff_price)}</td>
+        >${e.option_subtype === 'fx' ? fmtPricePct4(e.eff_price) : fmtPrice4(e.eff_price)}</td>
       </tr>`;
     }
   }
@@ -525,6 +541,7 @@ function renderPnlSummary(rows) {
         <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" title="Busca o PX_SETTLE do dia (D0) na BBG p/ os ativos com preço BBG e aplica como preço efetivo; avisa os que ainda não saíram." onclick="fetchPxSettleD0(this)">⤓ Buscar Settle D0</button>
         ${_pxSettleMsg}
         <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px;margin-left:auto" onclick="copySummaryTable(this)">⎘ Copiar</button>
+        <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" onclick="copySummaryTableWithPrices(this)">⎘ Copy w/ Prices</button>
       </div>
       <table class="data-table pnl-summary-table" style="white-space:nowrap;width:auto">
         <thead><tr>
@@ -657,16 +674,16 @@ function renderPnlTable(rows, tbodyId) {
       <td${swapAttr}>${r.instrument_name ?? '—'}</td>
       <td>${fmtDate(r.maturity)}</td>
       <td class="num">${fmtQty(oq)}</td>
-      <td class="num">${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
+      <td class="num">${r.option_subtype === 'fx' ? fmtPricePct4(r.price) : fmtPrice4(r.price)}</td>
       <td class="num" data-key="${pnlRowKey(r).replace(/"/g, '&quot;')}"
           title="Fonte: ${priceSrcLabel(src, r.price_live_kind)}"
           onclick="pnlStartEdit(this)"
           style="cursor:pointer;${priceLiveStyle(src)}"
-      >${r.option_subtype === 'fx' ? fmtPricePct(ep) : fmtPrice(ep)}</td>
+      >${r.option_subtype === 'fx' ? fmtPricePct4(ep) : fmtPrice4(ep)}</td>
       <td class="num">${bq ? fmtQty(bq)  : '<span style="color:var(--text-muted)">—</span>'}</td>
-      <td class="num">${r.avg_buy_price  != null ? (r.option_subtype === 'fx' ? fmtPricePct(r.avg_buy_price)  : fmtPrice(r.avg_buy_price))  : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="num">${r.avg_buy_price  != null ? (r.option_subtype === 'fx' ? fmtPricePct4(r.avg_buy_price)  : fmtPrice4(r.avg_buy_price))  : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="num">${sq ? fmtQty(sq) : '<span style="color:var(--text-muted)">—</span>'}</td>
-      <td class="num">${r.avg_sell_price != null ? (r.option_subtype === 'fx' ? fmtPricePct(r.avg_sell_price) : fmtPrice(r.avg_sell_price)) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="num">${r.avg_sell_price != null ? (r.option_subtype === 'fx' ? fmtPricePct4(r.avg_sell_price) : fmtPrice4(r.avg_sell_price)) : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="col-pnl num">${fmtUSD(pf.estoque)}</td>
       <td class="col-pnl num">${fmtUSD(pf.compra)}</td>
       <td class="col-pnl num">${fmtUSD(pf.venda)}</td>
