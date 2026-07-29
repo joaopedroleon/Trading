@@ -32,6 +32,41 @@ const rolagemConfig = {
   cheio: { execs: [] },
 };
 
+// ── Cache local da config + execuções digitadas (qtd/preço/broker/base) ──────
+// Persiste em localStorage p/ sobreviver a refresh da página. NÃO salva as boletas
+// (rolagemBoletas) — essas são sempre regeradas via "Gerar boletas".
+const LS_ROLAGEM_CFG = 'jgp_rolagem_cfg_v1';
+let _rolagemCfgLoaded = false;
+const _ROLAGEM_CFG_SCALARS = ['deal_date', 'counterparty_gerencial', 'giveup', 'deal_type',
+  'value_date', 'fixing_date', 'fo_remark', 'bo_remark', 'obs_reserved', 'ignore_previous'];
+
+function saveRolagemConfig() {
+  try {
+    localStorage.setItem(LS_ROLAGEM_CFG, JSON.stringify({
+      ..._ROLAGEM_CFG_SCALARS.reduce((o, k) => (o[k] = rolagemConfig[k], o), {}),
+      mini:  { execs: rolagemConfig.mini.execs },
+      cheio: { execs: rolagemConfig.cheio.execs },
+    }));
+  } catch (_) {}
+}
+function loadRolagemConfig() {
+  if (_rolagemCfgLoaded) return;   // só na 1ª montagem (não sobrescreve edições em memória)
+  _rolagemCfgLoaded = true;
+  try {
+    const raw = localStorage.getItem(LS_ROLAGEM_CFG);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object') return;
+    for (const k of _ROLAGEM_CFG_SCALARS) if (typeof d[k] === 'string') rolagemConfig[k] = d[k];
+    for (const asset of ['mini', 'cheio']) {
+      const execs = d[asset] && Array.isArray(d[asset].execs) ? d[asset].execs : null;
+      if (execs) rolagemConfig[asset].execs = execs.map(e => ({
+        qty: e.qty ?? '', price: e.price ?? '', broker: e.broker || ROLAGEM_BROKERS[0], base: e.base ?? '',
+      }));
+    }
+  } catch (_) {}
+}
+
 function _hideRolagemTab() {
   const el = document.getElementById('tab-rolagem');
   if (el) el.style.display = 'none';
@@ -338,6 +373,7 @@ function setRolagemCfg(path, val) {
   let o = rolagemConfig;
   while (parts.length > 1) o = o[parts.shift()];
   o[parts[0]] = val;
+  saveRolagemConfig();
 }
 
 function _cfgInput(label, path, cur, ph = '') {
@@ -374,14 +410,17 @@ function _rollSpreadTicker(asset, ym) {
 function setExecCell(asset, i, field, val) {
   const e = rolagemConfig[asset].execs[i];
   if (e) e[field] = val;
+  saveRolagemConfig();
 }
 function addExecRow(asset) {
   // broker default = 1º da lista (sem opção vazia no droplist)
   rolagemConfig[asset].execs.push({ qty: '', price: '', broker: ROLAGEM_BROKERS[0], base: '' });
+  saveRolagemConfig();
   _renderExecRows(asset);
 }
 function removeExecRow(asset, i) {
   rolagemConfig[asset].execs.splice(i, 1);
+  saveRolagemConfig();
   _renderExecRows(asset);
 }
 function _renderExecRows(asset) {
@@ -412,6 +451,8 @@ function _renderExecRows(asset) {
 function _rolagemRenderBoletaPanel(data) {
   const panel = document.getElementById('rolagemBoletaPanel');
   if (!panel) return;
+
+  loadRolagemConfig();   // restaura config/execuções cacheadas (só na 1ª montagem)
 
   // (Re)monta a config só quando o vencimento muda (os tickers dependem dele);
   // os valores digitados persistem em rolagemConfig.
@@ -599,6 +640,14 @@ function setBoletaQty(i, val) {
   _renderBoletaPreview();
 }
 
+// Colunas de data do layout JDS — no paste elas vão em mm/dd/aaaa (a config é digitada
+// em dd/mm/aaaa, formato BR). Converte só o que casa exatamente dd/mm/aaaa.
+const _ROLAGEM_DATE_COLS = new Set(['Deal Date', 'Value date', 'Fixing date']);
+function _ddmm2mmdd(s) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(s).trim());
+  return m ? `${m[2]}/${m[1]}/${m[3]}` : s;
+}
+
 // Linhas do export, só com as colunas JDS na ordem (usa a qtd EFETIVA). includeHeader
 // controla o cabeçalho. Colunas sempre-vazias entram como '' (contam no paste).
 function _boletasMatrix(includeHeader) {
@@ -607,7 +656,8 @@ function _boletasMatrix(includeHeader) {
   rolagemBoletas.boletas.forEach((bo, i) => {
     lines.push(cols.map(c => {
       if (c === 'Quantity') return _effBoletaQty(i);
-      return bo[c] == null ? '' : bo[c];
+      const v = bo[c] == null ? '' : bo[c];
+      return _ROLAGEM_DATE_COLS.has(c) ? _ddmm2mmdd(v) : v;   // datas → mm/dd/aaaa no paste
     }));
   });
   return { cols, lines };
