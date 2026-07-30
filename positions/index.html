@@ -56,10 +56,9 @@
     .block-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
     /* ── Ajustes do modo estático (read-only) ─────────────────────────────── */
-    /* Barras de filtro e o "Copiar" do PnL (não renderizado aqui) não fazem
-       sentido no snapshot. O ⎘ Copiar da tabela (copyCardImage) FICA visível:
-       serve pra salvar/compartilhar o print da tabela do celular. */
-    button[onclick^="copySummaryTable"],
+    /* Só as barras de FILTRO somem (edição/filtro não fazem sentido no snapshot).
+       Os botões de COPIAR (⎘ Copiar / ⎘ Copy w/ Prices do PnL e da tabela) FICAM
+       visíveis — mesmos da página live, p/ salvar/compartilhar o print. */
     [id^="filterBar-"] { display: none !important; }
     /* Preço/#PL/qtd deixam de parecer clicáveis (edição está neutralizada) */
     .data-table td[onclick] { cursor: default !important; }
@@ -216,22 +215,22 @@
 
 <!-- Ordem importa: shim neutraliza a máquina ao vivo ANTES de positions.js;
      data.js (gerado pelo build) traz os blobs criptografados; boot faz a fiação. -->
-<script src="static-shim.js?v=300720260600"></script>
+<script src="static-shim.js?v=300720261014"></script>
 <!-- positions.js dividido em módulos (ver REFACTOR.md); ordem = boot por último, antes do pnl.js -->
-<script src="pos/pos-state.js?v=300720260600"></script>
-<script src="pos/pos-helpers.js?v=300720260600"></script>
-<script src="pos/pos-format.js?v=300720260600"></script>
-<script src="pos/pos-edit.js?v=300720260600"></script>
-<script src="pos/pos-fundtables.js?v=300720260600"></script>
-<script src="pos/pos-tabs.js?v=300720260600"></script>
-<script src="pos/pos-render.js?v=300720260600"></script>
-<script src="pos/pos-misc.js?v=300720260600"></script>
-<script src="pos/pos-rolagem.js?v=300720260600"></script>
-<script src="pos/pos-dolar.js?v=300720260600"></script>
-<script src="pos/pos-boot.js?v=300720260600"></script>
-<script src="pnl.js?v=300720260600"></script>
-<script src="data.js?v=300720260600"></script>
-<script src="data_pnl.js?v=300720260600"></script>
-<script src="static-boot.js?v=300720260600"></script>
+<script src="pos/pos-state.js?v=300720261014"></script>
+<script src="pos/pos-helpers.js?v=300720261014"></script>
+<script src="pos/pos-format.js?v=300720261014"></script>
+<script src="pos/pos-edit.js?v=300720261014"></script>
+<script src="pos/pos-fundtables.js?v=300720261014"></script>
+<script src="pos/pos-tabs.js?v=300720261014"></script>
+<script src="pos/pos-render.js?v=300720261014"></script>
+<script src="pos/pos-misc.js?v=300720261014"></script>
+<script src="pos/pos-rolagem.js?v=300720261014"></script>
+<script src="pos/pos-dolar.js?v=300720261014"></script>
+<script src="pos/pos-boot.js?v=300720261014"></script>
+<script src="pnl.js?v=300720261014"></script>
+<script src="data.js?v=300720261014"></script>
+<script src="data_pnl.js?v=300720261014"></script>
+<script src="static-boot.js?v=300720261014"></script>
 </body>
 </html>
