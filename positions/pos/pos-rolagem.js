@@ -67,26 +67,9 @@ function loadRolagemConfig() {
   } catch (_) {}
 }
 
-function _hideRolagemTab() {
-  const el = document.getElementById('tab-rolagem');
-  if (el) el.style.display = 'none';
-  document.getElementById('tab-btn-rolagem')?.classList.remove('active');
-}
-
 function showRolagemTab() {
   activeTraderTab = ROLAGEM_TAB_ID;
-  for (const tab of TRADER_TABS) {
-    const el = document.getElementById(`tab-${tab.id}`);
-    if (el) el.style.display = 'none';
-    document.getElementById(`tab-btn-${tab.id}`)?.classList.remove('active');
-  }
-  document.getElementById('tab-dolar').style.display = 'none';
-  document.getElementById('tab-btn-dolar')?.classList.remove('active');
-  document.getElementById('tab-dolarconsol').style.display = 'none';
-  document.getElementById('tab-btn-dolarconsol')?.classList.remove('active');
-  const el = document.getElementById('tab-rolagem');
-  if (el) el.style.display = '';
-  document.getElementById('tab-btn-rolagem')?.classList.add('active');
+  _showPanel(ROLAGEM_TAB_ID);
   if (!posDataByTab[ROLAGEM_TAB_ID]) loadRolagem();
   else renderRolagem();
 }

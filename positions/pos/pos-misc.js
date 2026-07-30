@@ -250,18 +250,7 @@ function _reframeCell(totF, opsF, nav, isSula, miniVal, fullVal) {
 
 function showDolarTab() {
   activeTraderTab = DOLAR_TAB_ID;
-  for (const tab of TRADER_TABS) {
-    const el = document.getElementById(`tab-${tab.id}`);
-    if (el) el.style.display = 'none';
-    document.getElementById(`tab-btn-${tab.id}`)?.classList.remove('active');
-  }
-  const dolarEl = document.getElementById('tab-dolar');
-  if (dolarEl) dolarEl.style.display = '';
-  document.getElementById('tab-btn-dolar')?.classList.add('active');
-  const consolEl = document.getElementById('tab-dolarconsol');
-  if (consolEl) consolEl.style.display = 'none';
-  document.getElementById('tab-btn-dolarconsol')?.classList.remove('active');
-  _hideRolagemTab();
+  _showPanel(DOLAR_TAB_ID);
   if (!posDataByTab[DOLAR_TAB_ID]) loadDolarExposure();
   else { _dirtyTabs.delete(DOLAR_TAB_ID); renderDolarTable(posDataByTab[DOLAR_TAB_ID]); }
   // Segundo check da aba: enquadramento de derivativos dos fundos RF (container próprio).

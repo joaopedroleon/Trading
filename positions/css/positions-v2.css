@@ -61,15 +61,30 @@ html.theme-v2 .data-table td { border-bottom: 1px solid var(--border); }
 /* resultado/total em destaque — ajuda a bater o olho */
 html.theme-v2 .data-table td.col-final { font-weight: 600; }
 
-/* ═══ LAYOUT — abas espalhadas por toda a largura, rótulos centralizados ═══ */
-html.theme-v2 .trader-tabs { width: 100%; }
-html.theme-v2 .trader-tab {
-  flex: 1 1 0;
-  justify-content: center;
-  padding: 11px 12px;
+/* ═══ Abas in-page — padrão Monitor RF (sticky sob a navbar global, sublinhado verde) ═══
+   Classes próprias (.tabbar/.tabbtn/.tab) — NÃO reusa .trader-tab do style.css compartilhado
+   (aquele é azul/--accent e vale p/ todas as telas de RF). Troca via listener delegado. */
+html.theme-v2 .tabbar {
+  position: sticky; top: calc(var(--jgp-nav-h, 46px) + 3px); z-index: 30;
+  display: flex; gap: 2px;
+  background: var(--bg-card); border-bottom: 1px solid var(--border);   /* faixa branca (igual Monitor RF) */
+  margin: 0 0 16px; padding: 0;
+  backdrop-filter: saturate(140%) blur(12px); -webkit-backdrop-filter: saturate(140%) blur(12px);
 }
+/* abas espalhadas por toda a largura — cada uma cresce proporcionalmente */
+html.theme-v2 .tabbtn {
+  flex: 1 1 0;
+  padding: 11px 12px; font-size: 13px; font-weight: 600; color: var(--text-muted);
+  background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
+  font-family: var(--font); transition: color .18s ease;
+  display: flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap;
+}
+html.theme-v2 .tabbtn:hover { color: var(--text); }
+html.theme-v2 .tabbtn.on { color: var(--text); border-bottom: 2px solid var(--green); }
 html.theme-v2 #tab-btn-other { position: relative; }
 html.theme-v2 #tab-btn-other .tab-chevron { margin-left: 6px; }
+html.theme-v2 .tab { display: none; }
+html.theme-v2 .tab.on { display: block; }
 
 /* ═══ DENSIDADE — respiro confortável p/ leitura ═══ */
 html.theme-v2 .data-table th,

@@ -34,18 +34,7 @@ const _DOLLAR_KIND_LABEL = {
 
 function showDolarConsolTab() {
   activeTraderTab = DOLAR_CONSOL_TAB_ID;
-  for (const tab of TRADER_TABS) {
-    const el = document.getElementById(`tab-${tab.id}`);
-    if (el) el.style.display = 'none';
-    document.getElementById(`tab-btn-${tab.id}`)?.classList.remove('active');
-  }
-  const dolarEl = document.getElementById('tab-dolar');
-  if (dolarEl) dolarEl.style.display = 'none';
-  document.getElementById('tab-btn-dolar')?.classList.remove('active');
-  const consolEl = document.getElementById('tab-dolarconsol');
-  if (consolEl) consolEl.style.display = '';
-  document.getElementById('tab-btn-dolarconsol')?.classList.add('active');
-  _hideRolagemTab();
+  _showPanel(DOLAR_CONSOL_TAB_ID);
 
   // popula o seletor de trader uma vez
   const sel = document.getElementById('dolarConsolTraderSelect');

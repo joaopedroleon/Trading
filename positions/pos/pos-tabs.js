@@ -1,19 +1,38 @@
+/* ── Casca de abas unificada (padrão Monitor RF) ──────────────────────────────
+   Um ÚNICO controlador delegado no #tabbar troca as 7 abas. _showPanel faz a
+   parte comum (toggle .on no botão + no painel, via CSS .tab/.tab.on); cada
+   show*Tab mantém só o seu despacho (lazy-load / prefetch / dirty-state).
+   No snapshot estático (sem #tabbar nem painéis .tab) _showPanel é inócuo. */
+function _showPanel(key) {
+  document.querySelectorAll('#tabbar .tabbtn').forEach(b =>
+    b.classList.toggle('on', b.dataset.tab === key));
+  document.querySelectorAll('.tab').forEach(p =>
+    p.classList.toggle('on', p.id === 'tab-' + key));
+}
+
+// Roteia data-tab → o despacho específico da aba (preserva lazy-load/prefetch/dirty).
+function activateTab(key) {
+  switch (key) {
+    case 'dolarconsol': showDolarConsolTab(); break;
+    case 'dolar':       showDolarTab();       break;
+    case 'rolagem':     showRolagemTab();     break;
+    default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
+  }
+}
+
+// Listener delegado único. #tabbar existe (scripts no fim do <body>); ausente no snapshot.
+(function initTabbar() {
+  const bar = document.getElementById('tabbar');
+  if (!bar) return;
+  bar.addEventListener('click', e => {
+    const btn = e.target.closest('.tabbtn');
+    if (btn && bar.contains(btn)) activateTab(btn.dataset.tab);
+  });
+})();
+
 function showTraderTab(tabId) {
   activeTraderTab = tabId;
-  for (const tab of TRADER_TABS) {
-    const el  = document.getElementById(`tab-${tab.id}`);
-    const btn = document.getElementById(`tab-btn-${tab.id}`);
-    if (el)  el.style.display  = tab.id === tabId ? '' : 'none';
-    if (btn) btn.classList.toggle('active', tab.id === tabId);
-  }
-  // esconde as abas que não fazem parte de TRADER_TABS (dólar e consolidado dólar)
-  const dolarEl = document.getElementById('tab-dolar');
-  if (dolarEl) dolarEl.style.display = 'none';
-  document.getElementById('tab-btn-dolar')?.classList.remove('active');
-  const consolEl = document.getElementById('tab-dolarconsol');
-  if (consolEl) consolEl.style.display = 'none';
-  document.getElementById('tab-btn-dolarconsol')?.classList.remove('active');
-  _hideRolagemTab();
+  _showPanel(tabId);
   if (!posDataByTab[tabId]) {
     loadPositionsForTab(tabId);
   } else {
