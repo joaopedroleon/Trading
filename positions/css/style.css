@@ -33,6 +33,10 @@
   --d1: var(--jgp-verde-claro); --d2: var(--jgp-azul-claro); --d3: var(--jgp-laranja);
   --green-tint: rgba(0,176,80,.08);
   --chart-grid: #EBEBEB; --chart-axis: #000000;
+  /* aliases lidos pela camada Plotly-JGP (shared-web/plotly-jgp.js) — apontam p/ tokens
+     já theme-aware, então flipam sozinhos no dark. NÃO renomear. */
+  --surface: var(--bg-card); --ink: var(--text); --muted: var(--text-muted);
+  --chart-zero: var(--jgp-cinza); --chart-legend: var(--text-dim); --jgp-green-tint: var(--green-tint);
 
   /* escada de alerta graduada (todos os degraus) — pronta p/ telas com heatmap */
   --alert-ok: var(--green); --alert-1: #E8B22E; --alert-2: var(--jgp-laranja);

@@ -223,8 +223,18 @@
       .filter(([id]) => sources[id] && sources[id].cf_missing > 0)
       .map(([id, label]) => `${label} (${sources[id].cf_missing})`);
     if (zeroed.length) parts.push('⚠ instrumentos zerados por falta de dado estrutural BBG: ' + zeroed.join(', '));
+    // D0 provisório: o run da noite mira o dia corrente (D0), mas o fechamento gerencial
+    // oficial do JRS ainda não tinha saído neste horário → marca caiu p/ boleta/D-1. O run
+    // das 20:45 e o de 6h refazem com o fechamento oficial e o aviso some.
+    const d0pend = TRADERS.some(([id]) => sources[id] && sources[id].d0_pending);
+    if (d0pend) parts.push('⚠ D0 PROVISÓRIO — fechamento gerencial de '
+      + (refStamp ? fmtStamp(refStamp) : 'hoje')
+      + ' ainda não disponível no JRS neste horário (marcado por boleta/D-1); atualiza no próximo run (20:45 / 6h)');
     const el = document.getElementById('snapMetaPnl');
-    if (el) el.textContent = parts.join('  |  ');
+    if (el) {
+      el.textContent = parts.join('  |  ');
+      el.style.color = d0pend ? 'var(--red)' : '';   // provisório → destaque
+    }
   }
 
   /* ── Desbloqueio (decripta as abas presentes; falha só se nenhuma existir) ─── */
