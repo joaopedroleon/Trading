@@ -100,7 +100,7 @@ function renderRestoreBtn() {
 const GROUP_ORDER = ['MM', 'MM Prev'];
 
 /* ── Allocation targets ──────────────────────────────────────────────────── */
-const ALLOC_TARGETS = { EMota: 0.80, ECotrim: 0.60, PAbinader: 0.30, LAguiar: 0.30 };
+const ALLOC_TARGETS = { EMota: 0.70, ECotrim: 0.60, PAbinader: 0.30, LAguiar: 0.30 };
 const ALLOC_TOL     = 0.02;
 
 /* ── Filters ─────────────────────────────────────────────────────────────── */
