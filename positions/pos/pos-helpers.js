@@ -103,6 +103,43 @@ const GROUP_ORDER = ['MM', 'MM Prev'];
 const ALLOC_TARGETS = { EMota: 0.70, ECotrim: 0.60, PAbinader: 0.30, LAguiar: 0.30 };
 const ALLOC_TOL     = 0.02;
 
+/* ── Short de bolsa BR: target reduzido no grupo Prev ─────────────────────
+   Um fundo do grupo Prev (Sulamérica) não pode ficar vendido em bolsa brasileira, então
+   nesses trades a boleta do Prev sai proporcionalmente menor — só entram os demais fundos.
+   Target = ALLOC_TARGET × (NAV do grupo ex-bloqueados / NAV do grupo). O fator vem do
+   backend (`prev_short_br_equity_factor`, calculado com o NAV do dia); sem ele, o check
+   mantém o target cheio e a tabela avisa. */
+function isBrEquity(r) {
+  const area = r.area    ?? '';
+  const sub  = r.subarea ?? '';
+  if (sub === 'Hedge_Cambial') return false;                     // WDO dentro de Equities
+  if (area === 'Equities' && /bra[sz]il/i.test(sub)) return true;
+  const name = (r.instrument_name ?? '').toUpperCase();
+  return name.startsWith('IBOV') || name.includes('BOVESPA');    // opção/futuro de índice
+}
+
+// −1 short · +1 long · 0 indefinido. Opção: direção = qtd × delta (put comprada = short).
+// Âncora na posição FINAL; zerada (ex.: short coberto no dia), usa a ABERTURA.
+function brEquityDirection(r) {
+  const qty = (r.final_qty ?? 0) || (r.opening_qty ?? 0);
+  if (!qty) return 0;
+  if (r.is_option) {
+    const d = effectiveDelta(r);
+    return d == null || d === 0 ? 0 : Math.sign(qty * d);
+  }
+  return Math.sign(qty);
+}
+
+function isBrEquityShort(r) {
+  return isBrEquity(r) && brEquityDirection(r) < 0;
+}
+
+// Fator do rateio (ex.: 0.71) da aba ativa; null quando o backend não conseguiu o NAV do grupo.
+function prevShortBrEquityFactor() {
+  const f = posDataByTab[activeTraderTab]?.prev_short_br_equity_factor;
+  return typeof f === 'number' && f > 0 && f <= 1 ? f : null;
+}
+
 /* ── Filters ─────────────────────────────────────────────────────────────── */
 const FILTERS = [
   {

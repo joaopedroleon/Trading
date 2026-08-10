@@ -68,6 +68,11 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   let prevSubarea = null;
   let subareaIdx  = -1;
 
+  // Short de bolsa BR: o Sulamérica não entra → target proporcional ao NAV do resto do grupo.
+  const shortFactor  = prevShortBrEquityFactor();
+  let   usedReduced  = false;   // alguma linha usou o target reduzido
+  let   missingFactor = false;  // linha de short de bolsa BR sem o NAV do grupo (target cheio)
+
   const rows = visRows.map((mm, i) => {
     const newArea    = mm.area    !== prevArea;
     const newSubarea = mm.subarea !== prevSubarea;
@@ -79,6 +84,16 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     prevSubarea = mm.subarea;
 
     const prev = lookupPrev(mm);
+
+    // Target da linha: reduzido quando é short de bolsa BR (Sulamérica fora do trade)
+    const isShortBr = target != null && isBrEquityShort(mm);
+    if (isShortBr && shortFactor == null) missingFactor = true;
+    const rowTarget = isShortBr && shortFactor != null ? target * shortFactor : target;
+    if (isShortBr && shortFactor != null) usedReduced = true;
+    const shortMark = isShortBr
+      ? ` <span class="alloc-short-br" title="Short de bolsa BR — Sulamérica não entra. Target ${
+          shortFactor != null ? fmtPct(rowTarget) : fmtPct(target) + ' (NAV do grupo Prev indisponível)'}">↓</span>`
+      : '';
 
     // Abert. MM Prev
     const prevQty = prev?.opening_qty ?? null;
@@ -100,15 +115,15 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
         if (buyPct === null && sellPct === null) {
           dealCell = '<td class="num" style="color:var(--text-muted)">0 líq.</td>';
         } else {
-          const buyDelta  = target != null && buyPct  != null ? buyPct  - target : null;
-          const sellDelta = target != null && sellPct != null ? sellPct - target : null;
+          const buyDelta  = rowTarget != null && buyPct  != null ? buyPct  - rowTarget : null;
+          const sellDelta = rowTarget != null && sellPct != null ? sellPct - rowTarget : null;
           const bStr = buyPct  != null ? `<span class="${allocClass(buyDelta)}" title="Compra">C:${fmtPct(buyPct)}</span>`  : '';
           const sStr = sellPct != null ? `<span class="${allocClass(sellDelta)}" title="Venda">V:${fmtPct(sellPct)}</span>` : '';
           dealCell = `<td class="num">${[bStr, sStr].filter(Boolean).join(' / ')}</td>`;
         }
       } else {
         const dealPct   = (prev?.traded_qty ?? 0) / mm.traded_qty;
-        const dealDelta = target != null ? dealPct - target : null;
+        const dealDelta = rowTarget != null ? dealPct - rowTarget : null;
         dealCell = `<td class="num ${allocClass(dealDelta)}">${fmtPct(dealPct)}</td>`;
       }
     }
@@ -117,7 +132,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     const mmFinal   = mm.final_qty ?? 0;
     const prevFinal = prev?.final_qty ?? null;
     const finalPct  = mmFinal !== 0 && prevFinal != null ? prevFinal / mmFinal : null;
-    const finalCls  = allocClass(finalPct != null && target != null ? finalPct - target : null);
+    const finalCls  = allocClass(finalPct != null && rowTarget != null ? finalPct - rowTarget : null);
     const finalCell = `<td class="num ${finalCls}">${fmtPct(finalPct)}</td>`;
 
     // Total MM + MM Prev
@@ -125,7 +140,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     const totalCell = `<td class="num">${fmtFinalQty(total)}</td>`;
 
     return `<tr class="${rowClass} ${areaClass} ${tradedClass}">
-      <td>${mm.instrument_name ?? '—'}</td>
+      <td>${mm.instrument_name ?? '—'}${shortMark}</td>
       ${prevQtyCell}
       ${tradedCell}
       ${totalCell}
@@ -151,6 +166,20 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     ? `<tr class="area-divider"><td colspan="6" style="font-weight:600;color:var(--text-muted)">Somente MM Prev</td></tr>${orphanTr}`
     : '';
 
+  // Nota de rodapé: qual target valeu para as linhas marcadas com ↓ (e aviso se faltou o NAV).
+  let footTr = '';
+  if (usedReduced || missingFactor) {
+    const blocked = (posDataByTab[activeTraderTab]?.prev_no_br_equity_short_funds ?? [])
+      .map(fl => fl.replace(/-A$/, '')).join(', ') || 'Sulamérica';
+    const note = usedReduced
+      ? `↓ short de bolsa BR: target ${fmtPct(target * shortFactor)} (= ${fmtPct(target)} × ${
+          fmtPct(shortFactor)}) — ${blocked} não pode ficar vendido em bolsa BR e fica fora do trade.`
+      : `↓ short de bolsa BR: target deveria ser reduzido (${blocked} fica fora), mas o NAV do grupo Prev `
+        + `não veio — check usando o target cheio de ${fmtPct(target)}.`;
+    const color = usedReduced ? 'var(--text-muted)' : 'var(--red)';
+    footTr = `<tr><td colspan="6" style="white-space:normal;font-size:11px;color:${color}">${note}</td></tr>`;
+  }
+
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead><tr>
       <th>Instrumento</th>
@@ -160,7 +189,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
       <th>Check Boleta</th>
       <th>% Alloc Final</th>
     </tr></thead>
-    <tbody>${rows}${orphanSection}</tbody>
+    <tbody>${rows}${orphanSection}${footTr}</tbody>
   </table>`;
 }
 
