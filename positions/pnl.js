@@ -322,7 +322,7 @@ function rerenderPnlSummary() {
   const container = document.getElementById(`pnlContainer-${activePnlTabId}`);
   if (!container) return;
   const tmp = document.createElement('div');
-  tmp.innerHTML = renderPnlSummary(mmRows);
+  tmp.innerHTML = renderPnlSummaryBlock(mmRows);
   container.replaceChild(tmp.firstElementChild, container.firstElementChild);
 }
 
@@ -400,14 +400,25 @@ function pnlApplySummaryEdit(input, rowKeys) {
   else rerenderPnlValues();
 }
 
-/* ── Tabela de resumo (pivot por sub-área) ───────────────────────────────── */
-function renderPnlSummary(rows) {
-  // agrupa por (subarea, instrument_name, maturity) somando financeiros
+/* ── Tabela de resumo (pivot por sub-área + estratégia) ──────────────────── */
+// O bloco do resumo quebra por **sub-área + estratégia**, não só sub-área: "Fixed Rates
+// Brazil - Directional" e "Fixed Rates Brazil - Inclinação" são livros diferentes e viram
+// dois blocos com subtotal próprio. Por isso a estratégia entra TAMBÉM na chave da entry —
+// senão o mesmo instrumento em duas estratégias colapsaria numa linha só, presa ao bloco
+// da primeira que aparecesse.
+// (quando a estratégia repete o nome da sub-área o sufixo é ruído — "Directional -
+// Directional" — então some.)
+const _pnlGroupLabel = e => (e.subarea ?? '—')
+  + (e.strategy && e.strategy !== e.subarea ? ` - ${e.strategy}` : '');
+
+// Agrega as rows por (sub-área, estratégia, instrumento, vencimento). `pnlFn` calcula o PnL
+// de cada row: `pnlFor` no consolidado, `_pnlForFund` nas tabelas por fundo do PortfolioRF.
+function _pnlAggregate(rows, pnlFn = pnlFor) {
   const map = new Map();
   for (const r of rows) {
-    const key = `${r.subarea ?? ''}||${r.instrument_name ?? ''}||${r.maturity ?? ''}`;
+    const key = `${r.subarea ?? ''}||${r.strategy ?? ''}||${r.instrument_name ?? ''}||${r.maturity ?? ''}`;
     if (!map.has(key)) {
-      map.set(key, { subarea: r.subarea, instrument_name: r.instrument_name,
+      map.set(key, { subarea: r.subarea, strategy: r.strategy, instrument_name: r.instrument_name,
                      opening_qty: 0, buy_qty: 0, sell_qty: 0,
                      buy_price_sum: 0, sell_price_sum: 0,
                      final_qty: 0, total_usd: 0, result_bps: 0,
@@ -418,7 +429,7 @@ function renderPnlSummary(rows) {
                      rowKeys: [], summaryKey: key });
     }
     const e   = map.get(key);
-    const pf  = pnlFor(r);
+    const pf  = pnlFn(r);
     const eff = _swapEff(r);   // swap: abertura/final EFETIVAS (marretas); null p/ o resto
     e.opening_qty    += eff ? eff.opening : (r.opening_qty ?? 0);
     e.buy_qty        += r.buy_qty     ?? 0;
@@ -428,30 +439,34 @@ function renderPnlSummary(rows) {
     e.final_qty  += eff ? eff.final : (r.final_qty ?? 0);
     e.total_usd  += pf.total ?? 0;
     e.result_bps += pf.bps   ?? 0;
-    e.rowKeys.push(pnlRowKey(r));
+    if (!e.rowKeys.includes(pnlRowKey(r))) e.rowKeys.push(pnlRowKey(r));
   }
+  return map;
+}
 
-  // agrupa por subarea, excluindo linhas ocultas
-  const subareas = new Map();
+// Corpo da tabela de resumo a partir das entries agregadas: blocos de sub-área+estratégia
+// com subtotal, linhas de instrumento e o Total Geral. Devolve também os totais p/ o header.
+function _pnlSummaryBody(map) {
+  const groups = new Map();
   for (const e of map.values()) {
     if (_hiddenPnlForTab(activePnlTabId).has(e.summaryKey)) continue;
-    const sa = e.subarea ?? '—';
-    if (!subareas.has(sa)) subareas.set(sa, []);
-    subareas.get(sa).push(e);
+    const g = _pnlGroupLabel(e);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(e);
   }
 
   let tbody = '';
   let grandUsd = 0, grandBps = 0;
 
-  for (const [sa, entries] of subareas) {
+  for (const [g, entries] of groups) {
     let subUsd = 0, subBps = 0;
     for (const e of entries) { subUsd += e.total_usd ?? 0; subBps += e.result_bps ?? 0; }
     grandUsd += subUsd;
     grandBps += subBps;
 
-    // linha da sub-área já traz o subtotal inline
+    // linha do bloco (sub-área + estratégia) já traz o subtotal inline
     tbody += `<tr style="font-weight:600;background:var(--border);border-top:2px solid var(--border)">
-      <td style="padding:5px 8px">${sa}</td>
+      <td style="padding:5px 8px">${g}</td>
       <td></td><td></td>
       <td></td>
       <td class="num">${fmtUSD(subUsd)}</td>
@@ -463,7 +478,7 @@ function renderPnlSummary(rows) {
       const srcLabel   = priceSrcLabel(e.price_src, e.price_live_kind);
       const priceColor = priceLiveStyle(e.price_src);
       const rowKeysJson = JSON.stringify(e.rowKeys).replace(/"/g, '&quot;');
-      const sk          = e.summaryKey.replace(/'/g, "\\'");
+      const sk          = e.summaryKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const swapAttr    = e.swap_detail
         ? ` data-swaps="${e.swap_detail.map(s => `${s.name}: ${fmtQty(s.qty)}`).join('\n').replace(/"/g, '&quot;')}"`
         : '';
@@ -510,6 +525,42 @@ function renderPnlSummary(rows) {
     <td class="col-pnl"></td>
   </tr>`;
 
+  return { tbody, grandUsd, grandBps };
+}
+
+function _pnlSummaryTableHtml(tbody) {
+  return `<table class="data-table pnl-summary-table" style="white-space:nowrap;width:auto">
+        <thead><tr>
+          <th>Ativo</th>
+          <th class="num">Qtd Abertura</th>
+          <th class="num">Qtd Operada</th>
+          <th class="num">Qtd Final</th>
+          <th class="num">Resultado USD</th>
+          <th class="num">Result Bps</th>
+          <th class="num">Preço Médio</th>
+          <th class="col-pnl num">Price Live</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>`;
+}
+
+// Botões que valem p/ a aba inteira (não por tabela) — no split por fundo eles saem
+// UMA vez, numa barra acima das duas tabelas.
+function _pnlSummaryTools() {
+  const _hpCount = _hiddenPnlForTab(activePnlTabId).size;
+  const restoreBtn = _hpCount > 0
+    ? `<button class="btn" data-html2canvas-ignore="true" style="background:var(--red);color:#fff;padding:2px 10px;font-size:12px" onclick="restorePnlRows()">↩ Restaurar (${_hpCount})</button>`
+    : '';
+  const settleBtn = `<button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" title="Busca o PX_SETTLE do dia (D0) na BBG p/ os ativos com preço BBG e aplica como preço efetivo; avisa os que ainda não saíram." onclick="fetchPxSettleD0(this)">⤓ Buscar Settle D0</button>`;
+  return { restoreBtn, settleBtn };
+}
+
+const _pnlCopyBtns = `<button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px;margin-left:auto" onclick="copySummaryTable(this)">⎘ Copiar</button>
+        <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" onclick="copySummaryTableWithPrices(this)">⎘ Copy w/ Prices</button>`;
+
+function renderPnlSummary(rows) {
+  const { tbody } = _pnlSummaryBody(_pnlAggregate(rows));
+
   // build header: unique traders with NAV, same style as positions
   const traders     = pnlData?.traders || {};
   const navDate     = pnlData?.nav_date;
@@ -528,36 +579,160 @@ function renderPnlSummary(rows) {
     return `<span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${t}</span> ${navStr}`;
   }).join('<span style="color:var(--border);margin:0 8px">|</span>');
 
-  const _hpCount = _hiddenPnlForTab(activePnlTabId).size;
-  const restoreBtn = _hpCount > 0
-    ? `<button class="btn" data-html2canvas-ignore="true" style="background:var(--red);color:#fff;padding:2px 10px;font-size:12px" onclick="restorePnlRows()">↩ Restaurar (${_hpCount})</button>`
-    : '';
+  const { restoreBtn, settleBtn } = _pnlSummaryTools();
 
   return `<div class="card">
     <div class="section-copy-target" style="background:var(--bg-card)">
       <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
         <span>MM ${traderBadges}</span>
         ${restoreBtn}
-        <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" title="Busca o PX_SETTLE do dia (D0) na BBG p/ os ativos com preço BBG e aplica como preço efetivo; avisa os que ainda não saíram." onclick="fetchPxSettleD0(this)">⤓ Buscar Settle D0</button>
+        ${settleBtn}
         ${_pxSettleMsg}
-        <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px;margin-left:auto" onclick="copySummaryTable(this)">⎘ Copiar</button>
-        <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" onclick="copySummaryTableWithPrices(this)">⎘ Copy w/ Prices</button>
+        ${_pnlCopyBtns}
       </div>
-      <table class="data-table pnl-summary-table" style="white-space:nowrap;width:auto">
-        <thead><tr>
-          <th>Ativo</th>
-          <th class="num">Qtd Abertura</th>
-          <th class="num">Qtd Operada</th>
-          <th class="num">Qtd Final</th>
-          <th class="num">Resultado USD</th>
-          <th class="num">Result Bps</th>
-          <th class="num">Preço Médio</th>
-          <th class="col-pnl num">Price Live</th>
-        </tr></thead>
-        <tbody>${tbody}</tbody>
-      </table>
+      ${_pnlSummaryTableHtml(tbody)}
     </div>
   </div>`;
+}
+
+/* ── PnL quebrado por FUNDO (PortfolioRF) ────────────────────────────────── */
+// Os dois fundos do PortfolioRF passaram a operar diferente entre si → o consolidado deixou
+// de bastar. Cada tabela repete a de resumo, mas com a QUANTIDADE, as BOLETAS e o NAV
+// daquele fundo. Preço (live/marreta), preço D-1 e calc_factor são propriedades do
+// INSTRUMENTO — vêm da row principal, não do fundo — então marretar preço em qualquer uma
+// das tabelas vale para as duas (mesmo `instKey`), como no resto da tela.
+// Config (ordem, rótulo, quais fund_labels entram) vem do backend em `pnl_fund_tables`.
+function _pnlFundConfig() {
+  const cfg = pnlData?.pnl_fund_tables;
+  if (!Array.isArray(cfg) || !cfg.length)       return null;
+  if (!pnlData?.fund_rows?.length)              return null;
+  if (!pnlData?.fund_navs)                      return null;
+  return cfg;
+}
+
+// Mesma matemática do `pnlFor`, mas tolerante a NAV ausente: o USD sai igual e só os bps
+// ficam vazios. (O `pnlFor` cairia no fallback do backend, que é o número CONSOLIDADO —
+// errado para um fundo isolado.)
+function _pnlForFund(r) {
+  const cf = r.calc_factor;
+  const p1 = effectivePrice(r);
+  if (cf == null || p1 == null) return { estoque: null, compra: null, venda: null, total: null, bps: null };
+  const p0 = r.price          != null ? r.price          : null;
+  const ab = r.avg_buy_price  != null ? r.avg_buy_price  : null;
+  const av = r.avg_sell_price != null ? r.avg_sell_price : null;
+  const oq = r.opening_qty ?? 0, bq = r.buy_qty ?? 0, sq = r.sell_qty ?? 0;
+  const est  = p0 != null ? oq * cf * (p1 - p0) : 0;
+  const comp = ab != null ? bq * cf * (p1 - ab) : 0;
+  const vend = av != null ? sq * cf * (av - p1) : 0;
+  const tot  = est + comp + vend;
+  return { estoque: est, compra: comp, venda: vend, total: tot,
+           bps: r.nav ? tot / r.nav * 10_000 : null };
+}
+
+// Índice das rows por fundo: rowKey → (fund_label → fund row). Só entram as chaves que
+// existem nas rows principais visíveis (mesma filtragem de aba/chips).
+function _pnlFundIndex(mainRows) {
+  const mainByKey = new Map(mainRows.map(r => [pnlRowKey(r), r]));
+  const idx = new Map();
+  for (const fr of (pnlData.fund_rows || [])) {
+    const k = pnlRowKey(fr);
+    if (!mainByKey.has(k)) continue;
+    let m = idx.get(k);
+    if (!m) idx.set(k, m = new Map());
+    m.set(fr.fund_label, fr);
+  }
+  return { mainByKey, idx };
+}
+
+// Rows sintéticas de um fundo = qtd/boletas somadas dos `includes` + todo o resto (preço,
+// calc_factor, classificação) da row principal, com o NAV do fundo.
+function _pnlSynthFundRows(mainByKey, idx, includes, nav) {
+  const out = [];
+  for (const [k, byFund] of idx) {
+    let oq = 0, tq = 0, bq = 0, sq = 0, bn = 0, sn = 0, hit = false;
+    for (const fl of includes) {
+      const fr = byFund.get(fl);
+      if (!fr) continue;
+      hit = true;
+      oq += fr.opening_qty ?? 0;
+      tq += fr.traded_qty  ?? 0;
+      bq += fr.buy_qty     ?? 0;
+      sq += fr.sell_qty    ?? 0;
+      bn += (fr.buy_qty  ?? 0) * (fr.avg_buy_price  ?? 0);
+      sn += (fr.sell_qty ?? 0) * (fr.avg_sell_price ?? 0);
+    }
+    if (!hit) continue;
+    out.push({ ...mainByKey.get(k), nav,
+               opening_qty: oq, traded_qty: tq, final_qty: oq + tq,
+               buy_qty: bq, sell_qty: sq,
+               avg_buy_price:  bq ? bn / bq : null,
+               avg_sell_price: sq ? sn / sq : null });
+  }
+  return out;
+}
+
+function renderPnlSummaryByFund(mainRows) {
+  const cfg   = _pnlFundConfig();
+  const navs  = pnlData.fund_navs || {};
+  const { mainByKey, idx } = _pnlFundIndex(mainRows);
+
+  // Cobertura: row principal sem NENHUMA linha de fundo não aparece em tabela alguma —
+  // avisar em vez de sumir com o resultado (ex.: SWAP consolidado, cuja chave não existe
+  // no break por fundo).
+  const orphans = mainRows.filter(r => !idx.has(pnlRowKey(r)));
+  const orphanUsd = orphans.reduce((s, r) => s + (pnlFor(r).total ?? 0), 0);
+
+  const cards = cfg.map(t => {
+    const nav   = navs[t.fund] ?? null;
+    const rows  = _pnlSynthFundRows(mainByKey, idx, t.includes, nav);
+    const { tbody, grandUsd } = _pnlSummaryBody(_pnlAggregate(rows, _pnlForFund));
+    const navStr = nav != null
+      ? `NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}`
+      : `<span style="color:var(--red)">⚠ NAV indisponível — bps em branco</span>`;
+    const sleeves = t.includes.filter(fl => fl !== t.fund);
+    const sleeveStr = sleeves.length
+      ? ` <span style="font-weight:400;color:var(--text-muted);font-size:10px" title="Veículo sem NAV próprio; suas posições entram nesta tabela">+ ${sleeves.map(s => s.replace(/-[A-Z]$/, '')).join(', ')}</span>`
+      : '';
+    return `<div class="card" style="flex:0 0 auto">
+      <div class="section-copy-target" style="background:var(--bg-card)">
+        <div class="section-title" style="padding:4px 0 8px 0;font-size:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <span>${t.label}
+            <span style="font-weight:400;color:var(--text-muted);font-size:11px">— ${t.fund.replace(/-[A-Z]$/, '')}</span>${sleeveStr}
+            <span style="font-weight:400;color:var(--text-muted);font-size:11px;margin-left:6px">${navStr}</span>
+          </span>
+          ${_pnlCopyBtns}
+        </div>
+        ${_pnlSummaryTableHtml(tbody)}
+      </div>
+    </div>`;
+  }).join('');
+
+  const { restoreBtn, settleBtn } = _pnlSummaryTools();
+  const navDate = pnlData?.portfoliorf_nav_date;
+  const navWarn = (navDate && pnlData?.opening_date && navDate !== pnlData.opening_date)
+    ? `<span style="color:var(--yellow);font-size:11px" title="NAV por fundo indisponível para ${pnlData.opening_date}">⚠ NAV de ${navDate}</span>`
+    : '';
+  const orphanWarn = orphans.length
+    ? `<span style="color:var(--yellow);font-size:11px" title="${[...new Set(orphans.map(r => r.instrument_name))].join(', ')}">⚠ ${orphans.length} posição(ões) sem break por fundo (${fmtUSD(orphanUsd)}) — fora das duas tabelas</span>`
+    : '';
+
+  return `<div class="pnl-fund-split">
+    <div class="section-title" style="padding:4px 0 8px 0;font-size:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <span>PnL por fundo <span style="font-weight:400;color:var(--text-muted);font-size:11px">— PortfolioRF</span></span>
+      ${navWarn}
+      ${orphanWarn}
+      ${restoreBtn}
+      ${settleBtn}
+      ${_pxSettleMsg}
+    </div>
+    <div class="pnl-fund-row">${cards}</div>
+  </div>`;
+}
+
+// Bloco de resumo da aba: split por fundo no PortfolioRF, consolidado no resto.
+// SEMPRE devolve UM elemento raiz — `rerenderPnlSummary` troca `container.firstElementChild`.
+function renderPnlSummaryBlock(rows) {
+  return _pnlFundConfig() ? renderPnlSummaryByFund(rows) : renderPnlSummary(rows);
 }
 
 /* ── Thead ───────────────────────────────────────────────────────────────── */
@@ -595,7 +770,11 @@ function renderPnlSections(data, tabId) {
 
   container.style.display       = 'inline-flex';
   container.style.flexDirection = 'column';
-  container.innerHTML = renderPnlSummary(mmRows) + sections.map(s => {
+  // No split por fundo o bloco pode ficar mais largo que a página: clampar aqui (o
+  // containing block é o #pnlSection-*, de largura conhecida) faz o `overflow-x:auto` da
+  // `.pnl-fund-row` rolar DENTRO da seção em vez de a página inteira rolar de lado.
+  container.style.maxWidth      = _pnlFundConfig() ? '100%' : '';
+  container.innerHTML = renderPnlSummaryBlock(mmRows) + sections.map(s => {
     const nav    = traders[s.trader];
     const navStr = nav
       ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}</span>`

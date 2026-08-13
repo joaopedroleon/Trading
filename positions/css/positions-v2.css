@@ -90,6 +90,19 @@ html.theme-v2 .tab.on { display: block; }
 html.theme-v2 .data-table th,
 html.theme-v2 .data-table td { padding: 8px 12px; }
 
+/* ═══ PnL quebrado por FUNDO (PortfolioRF) — duas tabelas lado a lado ═══
+   Duas tabelas de 8 colunas só cabem na largura da página com densidade menor, então a
+   compactação (fonte + padding) é ESCOPADA nesta seção — o resto da tela segue no respiro
+   padrão. O `overflow-x:auto` da linha é a rede de segurança em tela estreita: rola DENTRO
+   da seção em vez de estourar a página (o container ganha `max-width:100%` no pnl.js). */
+.pnl-fund-row {
+  display: flex; gap: 12px; align-items: flex-start;
+  overflow-x: auto; max-width: 100%;
+}
+.pnl-fund-split .card { padding: 10px 12px; }
+html.theme-v2 .pnl-fund-split .data-table th,
+html.theme-v2 .pnl-fund-split .data-table td { padding: 4px 7px; font-size: 11.5px; }
+
 /* ═══ Cards / detalhe — sombra discreta, cantos suaves ═══ */
 html.theme-v2 .card { box-shadow: 0 1px 3px rgba(20,30,60,.06); }
 
