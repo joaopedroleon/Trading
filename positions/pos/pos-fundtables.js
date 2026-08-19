@@ -16,7 +16,9 @@ function fmtPct(v) {
 
 function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   const target   = ALLOC_TARGETS[trader] ?? null;
-  const mmRows   = filterFn(sortRows(allRows.filter(r => r.group === 'MM' && r.trader === trader)));
+  // Linha simulada fica FORA do check de alocação MM×MM Prev: ela não tem par no Prev por
+  // definição (não existe no Oracle) e apareceria como "0% alocado", um alerta falso.
+  const mmRows   = filterFn(sortRows(allRows.filter(r => r.group === 'MM' && r.trader === trader && !r.is_simulated)));
   const visRows  = mmRows.filter(r => !_hiddenForTab(activeTraderTab).has(rowKey(r)));
   const prevRows = allRows.filter(r => r.group === 'MM Prev' && r.trader === trader);
 

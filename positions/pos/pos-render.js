@@ -259,13 +259,24 @@ function renderTable(rows, tbodyId) {
            ${fmtTradedQty(effTraded)}</td>`;
 
     const refCopy = (r.instrument_reference ?? r.instrument_name ?? '').replace(/"/g, '&quot;');
+    // Linha SIMULADA (pos-simular.js): o ✕ REMOVE a simulação em vez de só ocultar a linha,
+    // e o nome ganha ⚡ (a coluna Área, que diria "SIMULAÇÃO", vem escondida por padrão).
+    const simRef  = r.is_simulated ? (r.instrument_reference ?? '').replace(/'/g, "\\'") : null;
+    const killCell = simRef
+      ? `<td class="col-copy" title="Remover esta linha simulada" onclick="event.stopPropagation();removeSimRow('${simRef}')">✕</td>`
+      : `<td class="col-copy" title="Excluir (ocultar) esta linha" onclick="event.stopPropagation();hideRow('${key}')">✕</td>`;
+    const simMark = r.is_simulated
+      ? `<span style="color:var(--yellow)" title="${
+           ['Linha SIMULADA — não está na carteira', ...(r.sim_avisos ?? []).map(a => '⚠ ' + a)]
+             .join('\n').replace(/"/g, '&quot;')}">⚡ </span>`
+      : '';
     return `<tr class="${rowClass} ${areaClass} ${tradedClass}" data-ref="${refCopy}" style="cursor:pointer" title="Clique para copiar a referência" onclick="copyRowRef(this)">
-      <td class="col-copy" title="Excluir (ocultar) esta linha" onclick="event.stopPropagation();hideRow('${key}')">✕</td>
+      ${killCell}
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
       <td class="col-detail num" ${d}>${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
-      <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(rKeyFull) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? '<span style="color:var(--accent);font-size:10px">★ </span>' : ''}${r.instrument_name ?? '—'}</td>
+      <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(rKeyFull) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? '<span style="color:var(--accent);font-size:10px">★ </span>' : ''}${simMark}${r.instrument_name ?? '—'}</td>
       <td>${fmtDate(r.maturity)}</td>
       ${openingCell}
       ${tradedCell}

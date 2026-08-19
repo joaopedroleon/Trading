@@ -18,6 +18,7 @@ function activateTab(key) {
     case 'rolagem':     showRolagemTab();     break;
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
+  if (typeof simSync === 'function') simSync();   // abas de dólar/rolagem: inativa a simulação
 }
 
 // Listener delegado único. #tabbar existe (scripts no fim do <body>); ausente no snapshot.
@@ -47,6 +48,7 @@ function showTraderTab(tabId) {
   }
   renderRestoreBtn();
   if (typeof _syncPnlRestoreBtn === 'function') _syncPnlRestoreBtn();
+  if (typeof simSync === 'function') simSync();   // grupos/contador da ferramenta de simulação
   updateBbgBanner();
 }
 
@@ -139,6 +141,8 @@ async function loadPositionsForTab(tabId, opts = {}) {
     }
 
     posDataByTab[tabId] = data;
+    // Linhas simuladas da aba: repreça e reinjeta ANTES do render (ver pos-simular.js).
+    if (typeof simAfterLoad === 'function') await simAfterLoad(tabId);
     noteBbgSource(data);   // estado global (BBG viva/cache) — vale p/ toda a página
     if (tabId === activeTraderTab) {
       positionsData = data;
@@ -150,8 +154,10 @@ async function loadPositionsForTab(tabId, opts = {}) {
     delete hiddenRows[tabId];
     if (tabId === activeTraderTab) renderRestoreBtn();
     renderBlacklist(data.blacklist);
+    renderExcludedAreas(tabId, data.excluded_rules, data.excluded_count);
     renderSectionsForTab(tabId, data.rows);
     renderWdoUcToggle(tabId);
+    if (typeof simSync === 'function') simSync();
 
     if (typeof resetPnlForTab === 'function') resetPnlForTab(tabId);  // dados novos → re-render do PnL
     if (typeof loadPnlForTab === 'function') loadPnlForTab(tabId);

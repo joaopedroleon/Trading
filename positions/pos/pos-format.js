@@ -100,6 +100,10 @@ function sortRows(rows) {
       const r = (x ?? '').toString().localeCompare((y ?? '').toString(), 'en-US', { sensitivity: 'base' });
       return desc ? -r : r;
     };
+    // Linhas SIMULADAS (pos-simular.js) sempre no FIM, qualquer que seja a área: são
+    // acréscimo do usuário, não podem se intercalar na leitura da posição real.
+    const sim = (a.is_simulated ? 1 : 0) - (b.is_simulated ? 1 : 0);
+    if (sim) return sim;
     return cmp(a.area,            b.area,            true)  // área: Z→A
         || cmp(a.subarea,         b.subarea)                 // sub-área: A→Z
         || cmp(a.strategy,        b.strategy)                // estratégia: A→Z

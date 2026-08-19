@@ -97,7 +97,7 @@ function renderRestoreBtn() {
 }
 
 /* ── Group order ─────────────────────────────────────────────────────────── */
-const GROUP_ORDER = ['MM', 'MM Prev'];
+const GROUP_ORDER = ['MM', 'MM Prev', 'MM Allocation'];
 
 /* ── Allocation targets ──────────────────────────────────────────────────── */
 const ALLOC_TARGETS = { EMota: 0.70, ECotrim: 0.60, PAbinader: 0.30, LAguiar: 0.30 };
@@ -210,6 +210,24 @@ function renderBlacklist(list) {
     if (existing) existing.remove();
     if (chip) el.insertAdjacentHTML('beforeend', `<span class="blacklist-chip">${chip}</span>`);
   }
+}
+
+/* ── Recortes por trader (funds.TRADER_SUBAREA/INSTRUMENT_EXCLUDE) ───────── */
+// Chip por ABA (ao contrário da blacklist, que é global): o corte é por trader e o
+// dado nem foi pedido à Bloomberg — a tela precisa dizer isso, senão a posição some
+// em silêncio.
+function renderExcludedAreas(tabId, rules, count) {
+  const el = document.getElementById(`filterBar-${tabId}`);
+  if (!el) return;
+  const existing = el.querySelector('.excarea-chip');
+  if (existing) existing.remove();
+  if (!rules || !rules.length) return;
+  const n     = count || 0;
+  const title = 'Recortes aplicados na origem para este trader — estas posições não são '
+              + 'carregadas nem consultadas na Bloomberg:\n· ' + rules.join('\n· ');
+  el.insertAdjacentHTML('beforeend',
+    `<span class="excarea-chip"><span class="filter-chip on" style="cursor:default"
+      title="${title.replace(/"/g, '&quot;')}">🚫 ${n} fora do escopo</span></span>`);
 }
 
 /* ── WDO + UC aggregation ────────────────────────────────────────────────── */

@@ -22,7 +22,7 @@ const fmtPricePct4 = v =>
 function priceSrcLabel(src, kind) {
   if (src === 'bbg') {
     return kind === 'mid'  ? 'BBG live — mid (PX_MID)'
-         : kind === 'last' ? 'BBG live — último preço (PX_LAST; sem mid two-sided)'
+         : kind === 'last' ? 'BBG live — último preço (PX_LAST; ação listada, ou sem mid two-sided)'
          : kind === 'pu'   ? 'PU calculado do yield live (título)'
          :                   'BBG live';
   }
@@ -296,7 +296,9 @@ function rerenderPnlValues() {
   }
 }
 
-const _isPnlGroup = g => g === 'MM' || g === 'Todos';
+// Grupos que ganham bloco de PnL. 'MM Allocation' é o grupo próprio do AJakurski
+// (funds.TRADER_FUND_GROUPS) — sem ele aqui a aba dele renderizaria PnL vazio.
+const _isPnlGroup = g => g === 'MM' || g === 'Todos' || g === 'MM Allocation';
 
 function rerenderPnlSection(inputEl) {
   const tbodyId = inputEl.closest('tbody').id;
@@ -679,8 +681,11 @@ function renderPnlSummaryByFund(mainRows) {
   // Cobertura: row principal sem NENHUMA linha de fundo não aparece em tabela alguma —
   // avisar em vez de sumir com o resultado (ex.: SWAP consolidado, cuja chave não existe
   // no break por fundo).
-  const orphans = mainRows.filter(r => !idx.has(pnlRowKey(r)));
+  // Linha SIMULADA não é órfã: por definição não existe no break por fundo (não veio do
+  // Oracle). Fica fora das duas tabelas e é avisada à parte, sem poluir o alerta de cobertura.
+  const orphans = mainRows.filter(r => !r.is_simulated && !idx.has(pnlRowKey(r)));
   const orphanUsd = orphans.reduce((s, r) => s + (pnlFor(r).total ?? 0), 0);
+  const simCount = mainRows.filter(r => r.is_simulated).length;
 
   const cards = cfg.map(t => {
     const nav   = navs[t.fund] ?? null;
@@ -715,12 +720,16 @@ function renderPnlSummaryByFund(mainRows) {
   const orphanWarn = orphans.length
     ? `<span style="color:var(--yellow);font-size:11px" title="${[...new Set(orphans.map(r => r.instrument_name))].join(', ')}">⚠ ${orphans.length} posição(ões) sem break por fundo (${fmtUSD(orphanUsd)}) — fora das duas tabelas</span>`
     : '';
+  const simWarn = simCount
+    ? `<span style="color:var(--yellow);font-size:11px" title="Linha hipotética, sem fundo — aparece só no resumo consolidado e na tabela de Posição">⚡ ${simCount} linha(s) simulada(s) fora do split por fundo</span>`
+    : '';
 
   return `<div class="pnl-fund-split">
     <div class="section-title" style="padding:4px 0 8px 0;font-size:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <span>PnL por fundo <span style="font-weight:400;color:var(--text-muted);font-size:11px">— PortfolioRF</span></span>
       ${navWarn}
       ${orphanWarn}
+      ${simWarn}
       ${restoreBtn}
       ${settleBtn}
       ${_pxSettleMsg}
