@@ -18,16 +18,36 @@ const fmtPricePct4 = v =>
   v == null ? '—' : (v * 100).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + '%';
 
 // Rótulo da fonte do preço p/ o hover (title), distinguindo BBG mid vs último preço (PX_LAST)
-// vs PU do yield. `kind` = r.price_live_kind ('mid'|'last'|'pu'|null), setado pelo backend.
+// vs PU do yield. `kind` = r.price_live_kind, setado pelo backend em TODOS os ramos de
+// preço do router (genérico, título, opção de FX, opção de DOL e forward de FX).
+// Fonte única — usado no PnL, na tabela de Posição e na Análise de Opções.
+const PRICE_KIND_LABELS = {
+  mid:         'BBG live — mid (PX_MID)',
+  last:        'BBG live — último preço (PX_LAST; ação listada, ou sem mid two-sided)',
+  pu:          'PU calculado do yield live (título)',
+  // opções de FX/DOL não têm PX_MID: o preço vem do FXOPT_PRICE, e a convenção é
+  // escolhida por OVERRIDE da BBG (muda o número, não só a unidade).
+  fxopt_perc:  'BBG live — FXOPT_PRICE (overrides: FXOPT_VALUATION_CONVENTION=M, '
+             + 'PIPS_PERCENTAGE_SELECTION=PERC) — % da moeda-base, convertido p/ USD',
+  fxopt_pips:  'BBG live — FXOPT_PRICE (overrides: FXOPT_VALUATION_CONVENTION=M, '
+             + 'PIPS_PERCENTAGE_SELECTION=PIPS, ONSHORE_OFFSHORE=ONSHORE BM&amp;F)',
+  fwd_interp:  'BBG live — interpolado na curva de forwards (PX_LAST dos pontos)',
+  fwd_spot:    'BBG live — spot do par (PX_LAST; vencimento antes do 1º ponto da curva)',
+};
 function priceSrcLabel(src, kind) {
-  if (src === 'bbg') {
-    return kind === 'mid'  ? 'BBG live — mid (PX_MID)'
-         : kind === 'last' ? 'BBG live — último preço (PX_LAST; ação listada, ou sem mid two-sided)'
-         : kind === 'pu'   ? 'PU calculado do yield live (título)'
-         :                   'BBG live';
-  }
+  if (src === 'bbg') return PRICE_KIND_LABELS[kind] || 'BBG live';
   return SOURCE_LABELS[src] || '—';
 }
+
+// Rótulo da procedência do DELTA (r.option_delta_field), mesmo espírito do preço.
+const DELTA_FIELD_LABELS = {
+  DELTA_MID:   'BBG live — DELTA_MID (opção listada)',
+  DELTA:       'BBG live — DELTA (opção de IBOV)',
+  DELTA_FXOPT: 'BBG live — DELTA (overrides: FXOPT_VALUATION_CONVENTION=M, '
+             + 'PIPS_PERCENTAGE_SELECTION=PERC)',
+  jrs:         'JRS gerencial (fallback do banco — a BBG não devolveu delta)',
+};
+function deltaSrcLabel(field) { return DELTA_FIELD_LABELS[field] || '—'; }
 
 // HTML do resultado da última busca de PX_SETTLE D0 (persiste entre rerenders;
 // limpo no "Atualizar" via resetPnlForTab). NÃO altera fallback/prioridade da tela.

@@ -1,8 +1,21 @@
 const DOLAR_CONSOL_TAB_ID = 'dolarconsol';
 const UC_FACE_USD = 50_000;   // face do contrato de dólar cheio (UC)
-const DOLAR_CONSOL_TRADERS = ['EMota', 'ECotrim', 'PortfolioRF', 'PAlves', 'GBranquinho', 'LAguiar', 'PAbinader'];
 const dolarConsolData = {};   // trader → API response (cache próprio, não conflita com posDataByTab)
-let dolarConsolTrader = 'ECotrim';
+
+// ── Trader da aba "Análise de Opções": o ÚLTIMO escolhido vale até ser trocado ──────
+// Persiste em localStorage (mesmo padrão do `jgp_rolagem_cfg_v1`), então sobrevive a F5 e
+// a reabrir a página. `ECotrim` é só o default de quem nunca escolheu.
+// ⚠️ Valida contra `DOLAR_CONSOL_TRADERS` na leitura: um trader que saia da lista deixaria
+// a aba pedindo `/reference` de alguém que não existe mais, e o <select> abriria vazio.
+const LS_DOLAR_CONSOL_TRADER = 'jgp_dolar_consol_trader_v1';
+const DOLAR_CONSOL_TRADERS = ['EMota', 'ECotrim', 'PortfolioRF', 'PAlves', 'GBranquinho', 'LAguiar', 'PAbinader'];
+let dolarConsolTrader = (() => {
+  try {
+    const t = localStorage.getItem(LS_DOLAR_CONSOL_TRADER);
+    if (t && DOLAR_CONSOL_TRADERS.includes(t)) return t;
+  } catch (_) {}
+  return 'ECotrim';
+})();
 /* nº de contratos equivalentes (1 casa, verde +, vermelho entre parênteses) */
 function fmtUc(v) {
   if (v == null || !isFinite(v)) return '<span style="color:var(--text-muted)">—</span>';
@@ -48,6 +61,8 @@ function showDolarConsolTab() {
 
 function selectDolarConsolTrader(trader) {
   dolarConsolTrader = trader;
+  // Grava a escolha: é ela que a aba abre da próxima vez (inclusive depois de F5).
+  try { localStorage.setItem(LS_DOLAR_CONSOL_TRADER, trader); } catch (_) {}
   if (dolarConsolData[trader]) renderDolarConsol(trader);
   else loadDolarConsol(trader);
 }
@@ -78,6 +93,7 @@ async function loadDolarConsol(trader, opts = {}) {
       return;
     }
     dolarConsolData[trader] = data;
+    _noteFetchSig(`dc:${trader}`);
     status.textContent = '';
     document.getElementById('srcLabel').textContent =
       `Abertura: ${fmtDate(data.opening_date)}  |  Boletas: ${fmtDate(data.ref_date)}`;
@@ -149,37 +165,46 @@ function renderDolarConsol(trader) {
   const optRows = rows.filter(x => x.kind === 'dolopt' || x.kind === 'fxopt');
   const futRows = rows.filter(x => x.kind === 'uc' || x.kind === 'wdo' || x.kind === 'fxfwd');
 
-  // cabeçalho em UMA linha (azul escuro); % NAV + UC-equiv delimitados pelas bordas do bloco
-  const head = `<thead><tr>
-    <th class="col-final">Instrumento</th>
-    <th>Tipo</th>
-    <th>Vencto</th>
-    <th class="col-right num">Qtd Final</th>
-    <th class="num">Delta</th>
-    <th>Ticker BBG (DOL)</th>
-    <th class="num">Preço Live</th>
-    <th class="col-pnl num">Prêmio USD</th>
-    <th class="num">% NAV</th>
-    <th class="num">UC-equiv</th>
-  </tr></thead>`;
+  // Cabeçalho em DUAS linhas, padrão `.jgp-tbl` (mesmo da Análise de Opções logo abaixo):
+  // a 1ª linha agrupa por natureza — o que o papel É, como ele está MARCADO, e o que isso
+  // DÁ de exposição. Antes eram 10 colunas soltas numa faixa só, e "Delta" ao lado de
+  // "Ticker BBG" ao lado de "Preço Live" não dizia que os três são a marcação.
+  const head = `<thead>
+    <tr>
+      <th rowspan="2" class="left">Instrumento</th>
+      <th rowspan="2" class="left">Tipo</th>
+      <th rowspan="2" class="left">Vencto</th>
+      <th rowspan="2" class="sep">Qtd Final</th>
+      <th colspan="3" class="center sep">Marcação (BBG)</th>
+      <th colspan="3" class="center sep">Exposição</th>
+    </tr>
+    <tr>
+      <th class="sep">Delta</th>
+      <th class="left">Ticker BBG (DOL)</th>
+      <th>Preço Live</th>
+      <th class="sep">Prêmio USD</th>
+      <th>% NAV</th>
+      <th>UC-equiv</th>
+    </tr>
+  </thead>`;
 
   let gPrem = 0, gUsd = 0, gPct = 0, gUc = 0;
 
   const deltaCell = (m) => {
-    if (!m.isOpt) return `<td class="num" style="color:var(--text-muted)">1.00</td>`;
+    if (!m.isOpt) return `<td class="sep nd">1.00</td>`;
     const ek = m.ik.replace(/'/g, "\\'");
     const hasOv = deltaOverrides.has(m.ik);
     const bord = hasOv ? 'var(--green)' : 'var(--border)';
     const val = m.delta != null ? Number(m.delta.toFixed(4)) : '';
-    return `<td class="num"><input type="number" step="0.01" value="${val}"
+    return `<td class="sep"><input type="number" step="0.01" value="${val}"
       style="width:64px;text-align:right;background:var(--bg);color:var(--text);border:1px solid ${bord};border-radius:4px;padding:2px 4px"
       onchange="consolSetDelta('${ek}', this.value)"></td>`;
   };
   const tickerCell = (r, kind) => {
-    if (kind !== 'dolopt') return `<td style="color:var(--text-muted)">—</td>`;
+    if (kind !== 'dolopt') return `<td class="left nd">—</td>`;
     const ek = (r.instrument_reference || '').replace(/'/g, "\\'");
     const tk = (dolarOptTickers[r.instrument_reference] || '').replace(/"/g, '&quot;');
-    return `<td><input type="text" value="${tk}" placeholder="ticker BBG"
+    return `<td class="left"><input type="text" value="${tk}" placeholder="ticker BBG"
       style="width:150px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 6px"
       onchange="consolSetTicker('${ek}', this.value)"></td>`;
   };
@@ -196,40 +221,42 @@ function renderDolarConsol(trader) {
       if (m.premium!= null) { sPrem+= m.premium; gPrem+= m.premium; }
       const priceFmt = (m.kind === 'fxopt') ? fmtPricePct(m.price) : fmtPrice(m.price);
       return `<tr>
-        <td class="col-final">${r.instrument_name ?? '—'}</td>
-        <td style="color:var(--text-muted);font-size:11px">${_DOLLAR_KIND_LABEL[x.kind]}</td>
-        <td>${fmtDate(r.maturity)}</td>
-        <td class="col-right num">${fmtFinalQty(r.final_qty)}</td>
+        <td class="lbl">${r.instrument_name ?? '—'}</td>
+        <td class="left nd" style="font-size:11px">${_DOLLAR_KIND_LABEL[x.kind]}</td>
+        <td class="left">${fmtDate(r.maturity)}</td>
+        <td class="sep">${fmtFinalQty(r.final_qty)}</td>
         ${deltaCell(m)}
         ${tickerCell(r, x.kind)}
-        <td class="num">${priceFmt}</td>
-        <td class="col-pnl num">${fmtMoney(m.premium)}</td>
-        <td class="num">${fmtPL(m.expPct, 'pct')}</td>
-        <td class="num dc-uc">${fmtUc(m.ucEq)}</td>
+        <td class="val">${priceFmt}</td>
+        <td class="sep">${fmtMoney(m.premium)}</td>
+        <td>${fmtPL(m.expPct, 'pct')}</td>
+        <td class="dc-uc">${fmtUc(m.ucEq)}</td>
       </tr>`;
     }).join('');
-    const sub = `<tr class="dc-sub">
-      <td colspan="7">Subtotal · ${title}</td>
-      <td class="col-pnl num">${fmtMoney(sPrem)}</td>
-      <td class="num">${fmtPL(sPct, 'pct')}</td>
-      <td class="num dc-uc">${fmtUc(sUc)}</td>
+    const sub = `<tr class="tot">
+      <td class="lbl" colspan="7">Subtotal · ${title}</td>
+      <td class="sep">${fmtMoney(sPrem)}</td>
+      <td>${fmtPL(sPct, 'pct')}</td>
+      <td class="dc-uc">${fmtUc(sUc)}</td>
     </tr>`;
-    const header = `<tr class="dc-block"><td colspan="10">${title}</td></tr>`;
+    // Faixa de subgrupo dentro do corpo (padrão `.jgp-tbl`) — o respiro entre blocos vem
+    // do padding-top dela, não de uma <tr> vazia (que virava buraco na imagem copiada).
+    const header = `<tr class="grp"><td colspan="10">${title}</td></tr>`;
     return header + trs + sub;
   };
 
-  // linha espaçadora transparente (respiro entre blocos e antes do total, sem desenhar linha)
-  const spacer = `<tr><td colspan="10" style="height:14px;padding:0;border:none;background:transparent"></td></tr>`;
   const body = [
     renderBlock('Opções (DOL / USDBRL)', optRows),
     renderBlock('Futuros e Spot (UC / WDO / USD/BRL)', futRows),
-  ].filter(Boolean).join(spacer);
+  ].filter(Boolean).join('');
 
-  const grand = `<tr class="dc-total">
-    <td colspan="7">TOTAL DÓLAR — ${trader}</td>
-    <td class="col-pnl num">${fmtMoney(gPrem)}</td>
-    <td class="num">${fmtPL(gPct, 'pct')}</td>
-    <td class="num dc-uc">${fmtUc(gUc)}</td>
+  // TOTAL GERAL: `tot-grand` (régua dupla, caixa alta) para não se confundir com os
+  // subtotais de bloco, que agora são `tot` — antes a distinção vinha da linha vazia.
+  const grand = `<tr class="tot tot-grand">
+    <td class="lbl" colspan="7">TOTAL DÓLAR — ${trader}</td>
+    <td class="sep">${fmtMoney(gPrem)}</td>
+    <td>${fmtPL(gPct, 'pct')}</td>
+    <td class="dc-uc">${fmtUc(gUc)}</td>
   </tr>`;
 
   const navStr = navTrader ? `NAV: USD ${navTrader.toLocaleString('en-US',{maximumFractionDigits:0})}` : '';
@@ -246,9 +273,9 @@ function renderDolarConsol(trader) {
       <span style="color:var(--text-muted);font-size:11px">(face US$ ${UC_FACE_USD.toLocaleString('en-US')} · exposição ${fmtMoney(gUsd)})</span>
     </div>
     <div class="section-copy-target">
-      <table class="data-table dc-table" style="white-space:nowrap;width:auto">
+      <table class="jgp-tbl">
         ${head}
-        <tbody>${body}${spacer}${grand}</tbody>
+        <tbody>${body}${grand}</tbody>
       </table>
     </div>
   </div>`;
@@ -309,6 +336,7 @@ async function loadDolarExposure() {
     }
 
     posDataByTab[DOLAR_TAB_ID] = data;
+    _noteFetchSig(DOLAR_TAB_ID);
     noteBbgSource(data);   // estado global (BBG viva/cache)
     status.textContent = '';
     srcLabel.textContent =
@@ -667,6 +695,7 @@ async function loadEnquadramentoRF() {
     const data = await (await fetch(`${API_BASE}/api/positions/enquadramento-rf?${params}`)).json();
     if (data.error) { container.innerHTML = `<div class="card no-data">${data.error}</div>`; return; }
     posDataByTab[ENQ_RF_TAB_KEY] = data;
+    _noteFetchSig(ENQ_RF_TAB_KEY);
     noteBbgSource(data);   // estado global (BBG viva/cache)
     renderEnquadramentoRF(data);
   } catch (e) {

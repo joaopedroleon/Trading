@@ -102,6 +102,7 @@ async function loadRolagem() {
     }
 
     posDataByTab[ROLAGEM_TAB_ID] = data;
+    _noteFetchSig(ROLAGEM_TAB_ID);
     rolagemMonth = data.target_month;
     rolagemBoletas = null;               // nova base → prévia de boletas anterior fica obsoleta
     // Traders começam marcados por default, exceto os de ROLAGEM_TRADER_OFF; demais dims vazias (=tudo).

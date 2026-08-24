@@ -27,6 +27,27 @@ const priceOverrides = new Map();  // instKey → preço manual (marreta)
 const deltaOverrides = new Map();  // instKey → delta manual (marreta)
 const _dirtyTabs     = new Set();  // abas carregadas que precisam re-render após uma marreta
 
+// ── Assinatura de DATA com que o cache de cada aba foi buscado (`refDate|forceOpening`).
+//    Existe para o "⚡ Só esta aba" PRESERVAR as abas já carregadas sem correr o risco de
+//    servir dado de outro dia: descarta-se só a aba cuja assinatura difere dos inputs de
+//    agora. Sem isto a alternativa era binária — ou apagar tudo (e a próxima aba voltava a
+//    "Carregando…", que é o que a mesa reclamou) ou não apagar nada (e a tela mostrava
+//    silenciosamente a data anterior ao mexer em "Data ref"/"Forçar D-1").
+//    Chave = a MESMA do cache: tabId em `posDataByTab`, e `dc:<trader>` em `dolarConsolData`
+//    (prefixado porque lá a chave é nome de trader, não id de aba).
+const _tabFetchSig = {};
+function _currentDateSig() {
+  const d = document.getElementById('refDate');
+  const f = document.getElementById('forceOpening');
+  return `${d ? d.value : ''}|${f ? f.value : ''}`;
+}
+function _noteFetchSig(key) { _tabFetchSig[key] = _currentDateSig(); }
+
+// ── Análise de Opções: seleção de linhas p/ o "⎘ Copiar" e p/ os totais ────
+//    rowKey → bool. Default (1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
+//    (final_qty ≠ 0). Depois disso a escolha do usuário manda e persiste entre re-renders.
+const optPrintSel = new Map();
+
 /* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */
 const DOLAR_TAB_ID        = 'dolar';
 const ENQ_RF_TAB_KEY      = 'enqrf';    // chave de cache do check de derivativos RF (não é aba nova)

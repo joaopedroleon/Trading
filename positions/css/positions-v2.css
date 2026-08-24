@@ -110,4 +110,91 @@ html.theme-v2 .card { box-shadow: 0 1px 3px rgba(20,30,60,.06); }
 html.theme-v2 [contenteditable="true"]:focus { background: var(--green-tint); }
 html.theme-v2 td[data-bbg]:hover::after,
 html.theme-v2 td[data-swaps]:hover::after { background: var(--text); color: var(--bg-card); }
-html.theme-v2 .dc-table thead th { background: var(--green); color: #fff; }
+
+/* ═══ `.jgp-tbl` — tabela de SUBGRUPO da casa, porte do `um-table` do US Monitor
+   (seção "Nominal, real e breakeven"). Adotada a pedido da mesa nas DUAS tabelas da aba
+   "Análise de Opções" (Consolidado Dólar + Análise de Opções): a separação por subgrupo
+   como faixa clara dentro do corpo lê melhor que a faixa cheia + linha vazia de respiro
+   que as duas usavam antes (`.dc-block`/`.dc-sub` e o bloco manual da análise).
+
+   ⚠️ É irmã do `.data-table`, não substituta: as duas são tabela JGP (cabeçalho verde,
+   papel creme, Inter, tabular-nums). Mudam só na DENSIDADE do cabeçalho — `.data-table`
+   é 13px/700 numa linha, esta é 11px/600 em duas (grupo de colunas + sub-coluna) com
+   letter-spacing. Por isso é classe própria em vez de herdar: herdar seria desfazer o
+   cabeçalho inteiro célula a célula.
+
+   ⚠️ A zebra usa `--bg-row-alt` (e não o `rgba(0,0,0,.016)` do original): o `um-table`
+   vive numa tela só-claro; aqui o tema escuro existe, e preto sobre preto some. Os dois
+   valores são igualmente discretos no claro.                                          */
+/* ⚠️ `width:auto` (não 100%): estas tabelas vivem dentro de `.section-copy-target`, que é
+   `width: fit-content` de propósito — o alvo do "⎘ Copiar" tem de ser exatamente a tabela,
+   senão a imagem sai com uma faixa branca morta à direita. Com o pai encolhendo no
+   conteúdo, um `width:100%` aqui resolve contra ele e dá largura imprevisível (medido: a
+   de opções ia a 1744px e a do consolidado ficava em 1017px, lado a lado no mesmo card).
+   Cada tabela dimensiona pelo próprio conteúdo, e as duas ficam coerentes. */
+html.theme-v2 .jgp-tbl {
+  width: auto; border-collapse: collapse; font-size: 12.5px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* Cabeçalho alinha COMO A COLUNA que encima — número à direita, rótulo à esquerda.
+   Só o cabeçalho de GRUPO (`.center`), que cobre 3 colunas, é centralizado. */
+html.theme-v2 .jgp-tbl thead th {
+  background: var(--green); color: #fff; border: none;
+  text-align: right; padding: 6px 10px; font-weight: 600; font-size: 11px;
+  letter-spacing: .04em; text-transform: none; white-space: nowrap;
+}
+html.theme-v2 .jgp-tbl thead tr:first-child th { padding-top: 8px; }
+html.theme-v2 .jgp-tbl thead th.sep    { border-left: 1px solid rgba(255,255,255,.28); }
+html.theme-v2 .jgp-tbl thead th.left   { text-align: left; }
+html.theme-v2 .jgp-tbl thead th.center { text-align: center; }
+
+html.theme-v2 .jgp-tbl tbody td {
+  padding: 4px 10px; border-bottom: 1px solid var(--border);
+  text-align: right; white-space: nowrap;
+}
+html.theme-v2 .jgp-tbl tbody td.sep  { border-left: 1px solid var(--border); }
+html.theme-v2 .jgp-tbl tbody td.lbl  { text-align: left; font-weight: 600; color: var(--accent); }
+html.theme-v2 .jgp-tbl tbody td.sel  { text-align: center; width: 28px; }
+html.theme-v2 .jgp-tbl tbody tr:nth-child(even):not(.grp) td { background: var(--bg-row-alt); }
+html.theme-v2 .jgp-tbl tbody tr:hover td { background: var(--green-tint); }
+
+/* Cabeçalho de SUBGRUPO (ativo objeto + vencimento) dentro do corpo — é a separação que
+   substituiu a faixa cheia + linha vazia. O respiro vem do padding-top, não de um <tr>
+   fantasma: linha vazia de 18px vira buraco na imagem copiada. */
+html.theme-v2 .jgp-tbl tbody tr.grp td {
+  text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-muted);
+  background: var(--bg); padding: 9px 8px 3px; border-bottom: 1px solid var(--border);
+}
+html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
+
+/* Linha de TOTAL: régua acima e negrito, p/ o olho não a confundir com mais um papel. */
+html.theme-v2 .jgp-tbl tbody tr.tot td {
+  border-top: 2px solid var(--green-dark); font-weight: 700;
+  background: var(--bg) !important;
+}
+html.theme-v2 .jgp-tbl td.val { font-weight: 700; }
+/* "Total" não é nome de instrumento: fica no texto normal, e não no azul de rótulo
+   (que nesta tela também é a cor de célula clicável). */
+html.theme-v2 .jgp-tbl tbody tr.tot td.lbl { color: var(--text); }
+
+/* TOTAL GERAL (Consolidado Dólar) — precisa se distinguir dos subtotais de bloco, que
+   já são `tr.tot`. Sem a linha vazia de respiro que havia antes, a separação tem de vir
+   do peso: régua mais grossa em cima e embaixo, corpo maior e fundo do card. */
+html.theme-v2 .jgp-tbl tbody tr.tot-grand td {
+  border-top: 3px double var(--green-dark); border-bottom: 2px solid var(--green-dark);
+  font-size: 14px; font-weight: 800; background: var(--bg-card) !important;
+  padding-top: 7px; padding-bottom: 7px;
+}
+html.theme-v2 .jgp-tbl tbody tr.tot-grand td.lbl {
+  text-transform: uppercase; letter-spacing: .04em; font-size: 12px; color: var(--text);
+}
+html.theme-v2 .jgp-tbl .nd { color: var(--text-muted); }
+
+/* Texto de apoio (subtítulo e nota de rodapé) DENTRO de um `.section-copy-target`.
+   ⚠️ Não pode ditar a largura do alvo de cópia: o container é `width: fit-content`, então
+   um parágrafo de texto corrido esticava o alvo até 1744px enquanto a tabela media 1147 —
+   e a imagem copiada saía com uma faixa branca morta à direita da tabela.
+   `width:0` zera a contribuição do texto no cálculo do fit-content (quem passa a mandar é
+   a TABELA); `min-width:100%` devolve a largura já resolvida, e o texto quebra nela. */
+html.theme-v2 .jgp-tbl-note { width: 0; min-width: 100%; }

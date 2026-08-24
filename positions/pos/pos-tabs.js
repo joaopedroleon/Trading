@@ -52,45 +52,94 @@ function showTraderTab(tabId) {
   updateBbgBanner();
 }
 
-function reloadActiveTab() {
+/* Invalida o cache de TODAS as abas — SEM disparar request nenhum. Cada aba busca de novo
+   quando for aberta. Existe porque a "Data ref"/"Forçar D-1" pode ter mudado no meio: servir
+   uma aba com dado de outra data em silêncio é pior que refazer o fetch.
+   ⚠️ Antes isto só rodava no ramo das abas de trader — os ramos de dólar/rolagem faziam
+   `return` cedo e deixavam as demais abas cacheadas na data ANTIGA. */
+function _invalidateAllTabs() {
+  for (const tab of TRADER_TABS) _dropTabCache(tab.id);
+  for (const t of Object.keys(dolarConsolData)) _dropTabCache(DOLAR_CONSOL_TAB_ID, t);
+  _dropTabCache(DOLAR_TAB_ID);
+  _dropTabCache(ROLAGEM_TAB_ID);
+}
+
+/* Apaga o cache de UMA aba (e o estado de UI derivado dele). `trader` só vale p/ a aba de
+   Análise de Opções, cujo cache é por trader (`dolarConsolData`), não por aba. */
+function _dropTabCache(key, trader) {
+  if (key === DOLAR_CONSOL_TAB_ID) {
+    const t = trader ?? dolarConsolTrader;
+    delete dolarConsolData[t];
+    delete _tabFetchSig[`dc:${t}`];
+    _dirtyTabs.delete(DOLAR_CONSOL_TAB_ID);
+    return;
+  }
+  if (key === DOLAR_TAB_ID) {   // as duas tabelas da aba são carregadas juntas
+    delete posDataByTab[ENQ_RF_TAB_KEY];
+    delete _tabFetchSig[ENQ_RF_TAB_KEY];
+  }
+  delete posDataByTab[key];
+  delete hiddenRows[key];
+  delete _tabFetchSig[key];
+  _dirtyTabs.delete(key);
+  if (typeof resetPnlForTab === 'function') resetPnlForTab(key);
+}
+
+/* Descarta SÓ os caches buscados com OUTRA data — preserva os que continuam válidos.
+   É o que permite ao "⚡ Só esta aba" não fazer as abas já carregadas voltarem a
+   "Carregando…", sem abrir mão da garantia de nunca servir o dia errado em silêncio. */
+function _invalidateStaleTabs() {
+  const sig = _currentDateSig();
+  for (const tab of TRADER_TABS) {
+    if (posDataByTab[tab.id] && _tabFetchSig[tab.id] !== sig) _dropTabCache(tab.id);
+  }
+  for (const t of Object.keys(dolarConsolData)) {
+    if (_tabFetchSig[`dc:${t}`] !== sig) _dropTabCache(DOLAR_CONSOL_TAB_ID, t);
+  }
+  if (posDataByTab[DOLAR_TAB_ID]   && _tabFetchSig[DOLAR_TAB_ID]   !== sig) _dropTabCache(DOLAR_TAB_ID);
+  if (posDataByTab[ROLAGEM_TAB_ID] && _tabFetchSig[ROLAGEM_TAB_ID] !== sig) _dropTabCache(ROLAGEM_TAB_ID);
+}
+
+/* "Atualizar" (padrão) × "⚡ Só esta aba" (`{prefetch:false}`).
+   Ambos refazem ao vivo a aba ativa e limpam as marretas (que são globais por instrumento).
+   A diferença é o que acontece com as OUTRAS abas:
+     • Atualizar      → apaga o cache de todas + prefetch das de trader (4 requests).
+     • Só esta aba    → PRESERVA quem já estava carregado (1 request). Só descarta o que foi
+                        buscado com outra "Data ref"/"Forçar D-1" (`_invalidateStaleTabs`).
+   ⚠️ As abas preservadas entram em `_dirtyTabs`: as marretas acabaram de ser limpas, então
+   elas precisam RE-RENDERIZAR ao serem abertas — do cache, sem request. Sem isso ficariam
+   mostrando o DOM antigo, com valores marretados que já não existem mais. */
+function reloadActiveTab(opts = {}) {
+  const { prefetch = true } = opts;
   // "Atualizar" sempre busca preços/deltas ao vivo → limpa as marretas (fonte única, global).
   priceOverrides.clear();
   deltaOverrides.clear();
+  swapOpeningOverrides.clear();
+  swapTradedOverrides.clear();
+  swapDv01Overrides.clear();
+  plOverrides.clear();
+  if (prefetch) {
+    _invalidateAllTabs();
+  } else {
+    _invalidateStaleTabs();
+    _dropTabCache(activeTraderTab);          // a ativa é a única que refazemos ao vivo agora
+    for (const tab of TRADER_TABS) if (posDataByTab[tab.id]) _dirtyTabs.add(tab.id);
+    if (Object.keys(dolarConsolData).length) _dirtyTabs.add(DOLAR_CONSOL_TAB_ID);
+  }
   if (activeTraderTab === DOLAR_TAB_ID) {
-    delete posDataByTab[DOLAR_TAB_ID];
-    delete posDataByTab[ENQ_RF_TAB_KEY];
     loadDolarExposure();
     loadEnquadramentoRF();
     return;
   }
   if (activeTraderTab === DOLAR_CONSOL_TAB_ID) {
-    delete dolarConsolData[dolarConsolTrader];
     loadDolarConsol(dolarConsolTrader, { fresh: true });
     return;
   }
   if (activeTraderTab === ROLAGEM_TAB_ID) {
-    delete posDataByTab[ROLAGEM_TAB_ID];
     loadRolagem();
     return;
   }
-  // limpa o cache de TODAS as abas de trader: evita servir dados de uma data
-  // anterior ao trocar de aba após mudar a "Data ref" + Atualizar.
-  for (const tab of TRADER_TABS) {
-    delete posDataByTab[tab.id];
-    delete hiddenRows[tab.id];
-    if (typeof resetPnlForTab === 'function') resetPnlForTab(tab.id);
-  }
-  // também invalida as abas de dólar (Análise de Opções e Check Dólar Exposure):
-  // senão, ao abri-las após Atualizar, serviriam dados em cache de uma data anterior.
-  for (const t of Object.keys(dolarConsolData)) delete dolarConsolData[t];
-  delete posDataByTab[DOLAR_TAB_ID];
-  delete posDataByTab[ENQ_RF_TAB_KEY];
-  delete posDataByTab[ROLAGEM_TAB_ID];
-  swapOpeningOverrides.clear();
-  swapTradedOverrides.clear();
-  swapDv01Overrides.clear();
-  plOverrides.clear();
-  loadPositionsForTab(activeTraderTab, { fresh: true });   // botão "Atualizar" → preços ao vivo
+  loadPositionsForTab(activeTraderTab, { fresh: true, prefetch });   // "Atualizar" → preços ao vivo
 }
 
 function changeOtherTrader(trader) {
@@ -104,8 +153,10 @@ function changeOtherTrader(trader) {
 /* ── Load positions for a tab ────────────────────────────────────────────── */
 // opts.background: carga silenciosa (prefetch) — não mexe na UI global (status/botão).
 // opts.fresh: ignora o cache de preços Bloomberg no backend (botão "Atualizar").
+// opts.prefetch: puxar as OUTRAS abas de trader em background depois desta (padrão true).
+//   false = o "⚡ Só esta aba": 1 request em vez de 4.
 async function loadPositionsForTab(tabId, opts = {}) {
-  const { background = false, fresh = false } = opts;
+  const { background = false, fresh = false, prefetch = true } = opts;
   const tab      = TRADER_TABS.find(t => t.id === tabId);
   const refDate  = document.getElementById('refDate').value;
   const status   = document.getElementById('refStatus');
@@ -141,6 +192,7 @@ async function loadPositionsForTab(tabId, opts = {}) {
     }
 
     posDataByTab[tabId] = data;
+    _noteFetchSig(tabId);
     // Linhas simuladas da aba: repreça e reinjeta ANTES do render (ver pos-simular.js).
     if (typeof simAfterLoad === 'function') await simAfterLoad(tabId);
     noteBbgSource(data);   // estado global (BBG viva/cache) — vale p/ toda a página
@@ -162,8 +214,9 @@ async function loadPositionsForTab(tabId, opts = {}) {
     if (typeof resetPnlForTab === 'function') resetPnlForTab(tabId);  // dados novos → re-render do PnL
     if (typeof loadPnlForTab === 'function') loadPnlForTab(tabId);
 
-    // após a aba ativa carregar, prefetch silencioso das demais (troca de aba instantânea)
-    if (!background && tabId === activeTraderTab) setTimeout(prefetchOtherTabs, 300);
+    // após a aba ativa carregar, prefetch silencioso das demais (troca de aba instantânea).
+    // O "⚡ Só esta aba" passa prefetch:false — as outras carregam ao serem abertas.
+    if (!background && prefetch && tabId === activeTraderTab) setTimeout(prefetchOtherTabs, 300);
 
   } catch (e) {
     if (!background) {

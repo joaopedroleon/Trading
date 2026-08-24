@@ -22,6 +22,14 @@ const fmtPrice = v =>
 const fmtPricePct = v =>
   v == null ? '—' : (v * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
 
+// Preço de OPÇÃO na Análise de Opções (mid + BID/ASK): 2 casas de piso, até 4 quando precisa.
+// ⚠️ Não é firula: com 2 casas fixas um prêmio de EWZ com bid 0,19 e ask 0,22 mostrava mid
+// "0,21" — e o mid É 0,205. A tabela afirma que TODA conta derivada sai do mid; um mid que
+// não bate com o meio do próprio bid/ask exibido desmente a afirmação na cara do leitor.
+// Preço "grande" (24,6 de opção de futuro) segue lendo 24,60, sem cauda de zeros.
+const fmtOptPx = v =>
+  v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
 function fmtDv01(v) {
   if (v == null) return '—';
   const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });

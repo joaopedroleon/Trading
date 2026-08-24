@@ -71,30 +71,61 @@ function renderOptionsAnalysis() {
     a.undl.localeCompare(b.undl, 'en-US', { sensitivity: 'base' }) ||
     String(a.mat).localeCompare(String(b.mat)));
 
-  const head = `<thead><tr>
-    <th class="col-final">Instrumento</th>
-    <th class="col-pnl num">Qtd Abertura</th>
-    <th class="num">Qtd Operada</th>
-    <th class="col-right num">Qtd Final</th>
-    <th class="num">Preço Live</th>
-    <th class="num">Delta</th>
-    <th class="col-pnl num">Prêmio USD</th>
-    <th class="num">Exp. Nominal</th>
-    <th class="col-final num">Exp. Delta</th>
-  </tr></thead>`;
+  // Seleção default (só na 1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO.
+  for (const r of opts) {
+    const k = rowKey(r);
+    if (!optPrintSel.has(k)) optPrintSel.set(k, Number(r.final_qty || 0) !== 0);
+  }
+  const isSel = r => optPrintSel.get(rowKey(r)) !== false;
+  const nSel  = opts.filter(isSel).length;
 
-  const body = sorted.map(g => {
+  const NCOL = 12;   // checkbox + instrumento + 3 qtds + bid/mid/ask + delta + prêmio + 2 exps
+  // Cabeçalho em DUAS linhas, no padrão `um-table` do US Monitor: a 1ª agrupa as colunas
+  // por natureza, a 2ª nomeia cada uma. Não é só estética — pôr BID · MID · ASK sob um
+  // grupo "Preço (BBG)" mostra de relance que o mid está ENTRE os dois, que é a coisa
+  // que a tabela precisa afirmar. As colunas soltas usam rowspan=2.
+  const head = `<thead>
+    <tr>
+      <th rowspan="2" class="center col-sel" style="width:26px"
+          title="Linhas marcadas entram no ⎘ Copiar e nos Totais"><input type="checkbox"
+          ${nSel === opts.length ? 'checked' : ''} onclick="optSelAll(this.checked)" style="cursor:pointer"></th>
+      <th rowspan="2" class="left">Instrumento</th>
+      <th colspan="3" class="center sep">Quantidade</th>
+      <th colspan="3" class="center sep"
+          title="BID e ASK são de tela (PX_BID/PX_ASK) e só existem em opção LISTADA. Só o MID entra nas contas.">Preço (BBG)</th>
+      <th rowspan="2" class="sep">Delta</th>
+      <th colspan="3" class="center sep">Exposição</th>
+    </tr>
+    <tr>
+      <th class="sep">Abertura</th>
+      <th>Operada</th>
+      <th>Final</th>
+      <th class="sep" title="BID de tela (PX_BID) — só opção LISTADA. Referência: NÃO entra em nenhuma conta.">BID</th>
+      <th title="Preço usado em TODAS as contas derivadas (prêmio e exposições). Passe o mouse na célula p/ ver o campo BBG.">MID ◂</th>
+      <th title="ASK de tela (PX_ASK) — só opção LISTADA. Referência: NÃO entra em nenhuma conta.">ASK</th>
+      <th class="sep">Prêmio USD</th>
+      <th>Nominal</th>
+      <th>Delta</th>
+    </tr>
+  </thead>`;
+
+  const body = sorted.map((g, gi) => {
     let tPrem = 0, tDUsd = 0, tDPct = 0, tNUsd = 0, tNPct = 0;
     const rowsHtml = sortRows(g.rows).map(r => {
-      const m = metric(r);
-      if (m.premium != null) tPrem += m.premium;
-      if (m.dUsd != null)    tDUsd += m.dUsd;
-      if (m.dPct != null)    tDPct += m.dPct;
-      if (m.nUsd != null)    tNUsd += m.nUsd;
-      if (m.nPct != null)    tNPct += m.nPct;
+      const m   = metric(r);
+      const sel = isSel(r);
+      // Totais somam SÓ as linhas marcadas — assim a imagem copiada fecha com o que mostra.
+      if (sel) {
+        if (m.premium != null) tPrem += m.premium;
+        if (m.dUsd != null)    tDUsd += m.dUsd;
+        if (m.dPct != null)    tDPct += m.dPct;
+        if (m.nUsd != null)    tNUsd += m.nUsd;
+        if (m.nPct != null)    tNPct += m.nPct;
+      }
       const isFx     = r.option_subtype === 'fx';
       const safeIk   = instKey(r).replace(/"/g, '&quot;');
-      const priceFmt = isFx ? fmtPricePct(m.price) : fmtPrice(m.price);
+      const safeRk   = rowKey(r).replace(/"/g, '&quot;');
+      const priceFmt = isFx ? fmtPricePct(m.price) : fmtOptPx(m.price);
       const deltaFmt = m.delta != null
         ? m.delta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '—';
       const star     = m.edited ? '<span style="color:var(--accent);font-size:10px">★ </span>' : '';
@@ -102,42 +133,132 @@ function renderOptionsAnalysis() {
       const srcMap   = { bbg: ['BBG', 'var(--green)'], boleta: ['Boleta', 'var(--yellow)'], d1: ['D-1', 'var(--red)'], manual: ['Manual', 'var(--accent)'] };
       const [srcLbl, srcColor] = srcMap[m.src] || ['—', ''];
       const priceStyle = `cursor:pointer;${srcColor ? `color:${srcColor}` : ''}`;
-      return `<tr>
-        <td class="col-final">${star}${r.instrument_name ?? '—'}</td>
-        <td class="col-pnl num">${fmtFinalQty(r.opening_qty)}</td>
-        <td class="num">${fmtTradedQty(r.traded_qty)}</td>
-        <td class="col-right num">${fmtFinalQty(r.final_qty)}</td>
-        <td class="num" style="${priceStyle}" title="Fonte: ${srcLbl} · clique para editar" data-instkey="${safeIk}" data-kind="price" data-isfx="${isFx ? 1 : 0}" onclick="optEditStart(this)">${priceFmt}</td>
-        <td class="num" style="cursor:pointer" title="Clique para editar delta" data-instkey="${safeIk}" data-kind="delta" onclick="optEditStart(this)">${deltaFmt}</td>
-        <td class="col-pnl num">${fmtMoney(m.premium)}</td>
-        <td class="num">${fmtExp(m.nUsd, m.nPct)}</td>
-        <td class="col-final num">${fmtExp(m.dUsd, m.dPct)}</td>
+      // Hover do preço: QUAL campo da BBG (com overrides) produziu este número.
+      const priceTip = m.src === 'manual'
+        ? 'Marreta manual (★) — sobrepõe o preço da BBG · clique para editar'
+        : `Fonte: ${srcLbl} — ${priceSrcLabel(m.src, r.price_live_kind)} · clique para editar`;
+      // ⚠️ A coluna se chama "(mid)", mas a cadeia do backend cai p/ PX_LAST quando a BBG não
+      // tem mid two-sided (ilíquido/OTM/pré-abertura) — e aí a conta NÃO saiu de um mid. Marca
+      // essas linhas com * em vez de deixar o rótulo da coluna mentir em silêncio.
+      const notMid = m.src !== 'manual' && r.price_live_kind === 'last';
+      const midMark = notMid
+        ? '<span style="color:var(--yellow)" title="sem mid two-sided na BBG — este número é o PX_LAST">*</span>'
+        : '';
+      const deltaTip = deltaOverrides.has(instKey(r))
+        ? 'Marreta manual (★) — sobrepõe o delta da BBG · clique para editar'
+        : `Delta: ${deltaSrcLabel(r.option_delta_field)} · clique para editar`;
+      // BID/ASK: só opção listada (ações, ETFs e futuros). FX e DOL BMF ficam com traço.
+      const isListed = r.option_subtype === 'futures' || r.option_subtype === 'us_equity';
+      const sideFmt  = v => (!isListed ? '<span style="color:var(--text-muted)">—</span>'
+                            : v == null ? '<span style="color:var(--text-muted)">n/d</span>'
+                            : fmtOptPx(v));
+      const sideTip  = !isListed
+        ? 'Opção de FX / DOL BMF: preço vem do FXOPT_PRICE (sem bid/ask two-sided de tela)'
+        : 'Referência de mercado — não entra em nenhuma conta desta tabela';
+      return `<tr data-optrow="${safeRk}" data-optsel="${sel ? 1 : 0}" data-optgrp="${gi}">
+        <td class="sel col-sel"><input type="checkbox" ${sel ? 'checked' : ''}
+            onclick="optSelRow('${safeRk.replace(/'/g, "\\'")}', this.checked)" style="cursor:pointer"></td>
+        <td class="lbl">${star}${r.instrument_name ?? '—'}</td>
+        <td class="sep">${fmtFinalQty(r.opening_qty)}</td>
+        <td>${fmtTradedQty(r.traded_qty)}</td>
+        <td>${fmtFinalQty(r.final_qty)}</td>
+        <td class="sep" title="${sideTip}">${sideFmt(r.price_bid)}</td>
+        <td class="val" style="${priceStyle}" title="${priceTip}" data-instkey="${safeIk}" data-kind="price" data-isfx="${isFx ? 1 : 0}" onclick="optEditStart(this)">${priceFmt}${midMark}</td>
+        <td title="${sideTip}">${sideFmt(r.price_ask)}</td>
+        <td class="sep" style="cursor:pointer" title="${deltaTip}" data-instkey="${safeIk}" data-kind="delta" onclick="optEditStart(this)">${deltaFmt}</td>
+        <td class="sep">${fmtMoney(m.premium)}</td>
+        <td>${fmtExp(m.nUsd, m.nPct)}</td>
+        <td>${fmtExp(m.dUsd, m.dPct)}</td>
       </tr>`;
     }).join('');
-    const spacer = `<tr><td colspan="9" style="height:18px;padding:0;border:none;background:transparent"></td></tr>`;
-    const header = `<tr><td colspan="9" style="font-weight:600;color:var(--text-dim);background:var(--bg-row-alt);padding:7px 10px">${g.undl}${g.mat ? ` — ${fmtDate(g.mat)}` : ''}</td></tr>`;
-    const total = `<tr style="font-weight:700">
-        <td class="col-final">Total</td>
-        <td class="col-pnl num"></td><td class="num"></td><td class="col-right num"></td><td class="num"></td><td class="num"></td>
-        <td class="col-pnl num">${fmtMoney(tPrem)}</td>
-        <td class="num">${fmtExp(tNUsd, tNPct)}</td>
-        <td class="col-final num">${fmtExp(tDUsd, tDPct)}</td>
+    // Subgrupo = faixa clara DENTRO do corpo (padrão `um-table`). O respiro entre blocos
+    // vem do padding-top da própria faixa — não há mais linha vazia de 18px.
+    const header = `<tr class="grp" data-optgrp="${gi}"><td colspan="${NCOL}">${g.undl}${g.mat ? ` — ${fmtDate(g.mat)}` : ''}</td></tr>`;
+    const total = `<tr class="tot" data-optgrp="${gi}">
+        <td class="sel col-sel"></td>
+        <td class="lbl">Total</td>
+        <td class="sep"></td><td></td><td></td>
+        <td class="sep"></td><td></td><td></td>
+        <td class="sep"></td>
+        <td class="sep">${fmtMoney(tPrem)}</td>
+        <td>${fmtExp(tNUsd, tNPct)}</td>
+        <td>${fmtExp(tDUsd, tDPct)}</td>
       </tr>`;
-    return spacer + header + rowsHtml + total;
+    return header + rowsHtml + total;
   }).join('');
 
   container.innerHTML = `<div class="card">
     <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:center;gap:16px">
       <span>Análise de Opções <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${dolarConsolTrader} (MM)</span></span>
-      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="copyCardImage(this)">⎘ Copiar</button>
+      <span data-html2canvas-ignore="true" style="font-weight:400;color:var(--text-muted);font-size:12px">${nSel}/${opts.length} linhas marcadas</span>
+      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="optSelAll(true)">Marcar todas</button>
+      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" onclick="optSelWithPosition()">Só com posição</button>
+      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" onclick="copyOptAnalysisImage(this)">⎘ Copiar</button>
     </div>
     <div class="section-copy-target">
-      <table class="data-table" style="white-space:nowrap;width:auto">
+      <p class="csub jgp-tbl-note" style="margin:0 0 8px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+        Um subgrupo por <b>ativo objeto + vencimento</b>, com Total próprio. Toda conta derivada
+        (Prêmio e as duas exposições) sai do <b>MID</b> — BID e ASK ficam ao lado só como
+        referência de mercado, e por isso o MID aparece entre os dois.
+      </p>
+      <table class="jgp-tbl" id="optAnalysisTable">
         ${head}
         <tbody>${body}</tbody>
       </table>
+      <div class="opt-calc-note jgp-tbl-note" style="margin-top:8px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+        BID/ASK (<code>PX_BID</code>/<code>PX_ASK</code>) existem apenas para opções
+        <b>listadas</b> (ações, ETFs e futuros) e <b>não entram em nenhuma conta</b>; opções de FX
+        e de DOL BMF marcam pelo <code>FXOPT_PRICE</code> e ficam com traço. Passe o mouse sobre o
+        preço ou o delta para ver o campo exato da Bloomberg (e os overrides) que gerou o número.
+        <b style="color:var(--yellow)">*</b> = a BBG não tinha mid two-sided nesse instante e o
+        preço usado foi o <code>PX_LAST</code>. O <b>Total</b> soma apenas as linhas marcadas.
+      </div>
     </div>
   </div>`;
+}
+
+/* ── Análise de Opções: seleção de linhas p/ o Copiar e p/ os totais ─────── */
+function optSelRow(rk, checked) { optPrintSel.set(rk, !!checked); renderOptionsAnalysis(); }
+
+function _optAnalysisRows() {
+  const data = dolarConsolData[dolarConsolTrader];
+  return (data?.rows ?? []).filter(r => r.is_option && r.group !== 'MM Prev');
+}
+function optSelAll(checked) {
+  for (const r of _optAnalysisRows()) optPrintSel.set(rowKey(r), !!checked);
+  renderOptionsAnalysis();
+}
+function optSelWithPosition() {
+  for (const r of _optAnalysisRows()) optPrintSel.set(rowKey(r), Number(r.final_qty || 0) !== 0);
+  renderOptionsAnalysis();
+}
+
+// Copiar como imagem SÓ a TABELA, e nela só as linhas marcadas. Esconde as demais, a
+// coluna de checkbox e os textos de apoio (`.jgp-tbl-note` — subtítulo e nota de BID/ASK)
+// durante a captura, e restaura ao fim — inclusive se der erro.
+// ⚠️ Os textos saem por `display:none`, não por `data-html2canvas-ignore`: o `ignore` pula
+// o DESENHO mas mantém o espaço, então sobrariam duas faixas brancas na imagem.
+async function copyOptAnalysisImage(btn) {
+  const card   = btn.closest('.card');
+  const target = card.querySelector('.section-copy-target') ?? card;
+  // Bloco (ativo objeto + vencimento) sem NENHUMA linha marcada sai inteiro — senão a
+  // imagem leva um cabeçalho de grupo seguido de um "Total" vazio, que só ocupa espaço.
+  const liveGrp = new Set([...target.querySelectorAll('tr[data-optrow][data-optsel="1"]')]
+                          .map(tr => tr.dataset.optgrp));
+  const hidden = [...target.querySelectorAll('tr[data-optgrp]')]
+                   .filter(tr => !liveGrp.has(tr.dataset.optgrp) || tr.dataset.optsel === '0');
+  const sel    = [...target.querySelectorAll('.col-sel')];
+  const notas  = [...target.querySelectorAll('.jgp-tbl-note')];
+  hidden.forEach(tr => { tr.style.display = 'none'; });
+  sel.forEach(td => { td.style.display = 'none'; });
+  notas.forEach(el => { el.style.display = 'none'; });
+  try {
+    await copyElementAsImage(target, btn);
+  } finally {
+    hidden.forEach(tr => { tr.style.display = ''; });
+    sel.forEach(td => { td.style.display = ''; });
+    notas.forEach(el => { el.style.display = ''; });
+  }
 }
 
 /* ── Análise de Opções: edição inline de preço / delta ───────────────────── */
