@@ -116,6 +116,11 @@ async function fetchPxSettleD0(btn) {
   const oldTxt  = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Buscando…';
+  // Marreta o preço efetivo de várias linhas → o bloco de PnL é REDESENHADO no fim.
+  // Acende só a seção de PnL da aba ativa (a de Posição não muda) — por isso `mark`,
+  // e não `on('ref:...')`, que acenderia as duas.
+  const _busySec = [`pnl:${activePnlTabId ?? activeTraderTab}`];
+  PosBusy.mark(_busySec, true);
   try {
     const params = new URLSearchParams();
     if (refDate) params.set('ref_date', refDate);
@@ -143,6 +148,7 @@ async function fetchPxSettleD0(btn) {
     _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:var(--red)">⚠ Erro de conexão: ${e.message}</span>`;
     rerenderPnlSummary();
   } finally {
+    PosBusy.mark(_busySec, false);
     btn.disabled = false;
     btn.textContent = oldTxt;
   }

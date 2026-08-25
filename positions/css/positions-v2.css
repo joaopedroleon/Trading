@@ -198,3 +198,95 @@ html.theme-v2 .jgp-tbl .nd { color: var(--text-muted); }
    `width:0` zera a contribuição do texto no cálculo do fit-content (quem passa a mandar é
    a TABELA); `min-width:100%` devolve a largura já resolvida, e o texto quebra nela. */
 html.theme-v2 .jgp-tbl-note { width: 0; min-width: 100%; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ESTADO "ATUALIZANDO" POR SEÇÃO  +  botão ⟳ de seção   (ver pos-busy.js)
+   ═══════════════════════════════════════════════════════════════════════════
+   Antes cada loader escrevia `Carregando…` no innerHTML do SEU container — e só
+   dele. Quem não era o container do loader (a "Análise de Opções", que é pintada
+   por `renderOptionsAnalysis` a partir dos mesmos dados; o "Resumo" da Rolagem;
+   o painel de boletas) ficava mostrando o número ANTIGO, parado, sem dizer que
+   estava sendo refeito. Aqui o estado é do SOURCE (o request), e todas as seções
+   que dependem dele acendem juntas — inclusive as que ninguém rescreve.
+
+   Escolha de forma: sem overlay absoluto e sem pseudo-elemento no container.
+   `#posContainer-*` recebe `display:inline-flex` inline (pos-tabs.js), e ali um
+   `::before` viraria FLEX ITEM e empurraria os cards. Então o container só é
+   apagado (opacity + pulso, que separa "atualizando" de "desabilitado") e quem
+   fala é a pílula no <h2> da seção, que existe fora dele e sobrevive ao
+   innerHTML sendo rescrito no meio. */
+
+/* ── Ferramentas no cabeçalho da seção (h2.jgp-sec já é flex/baseline) ── */
+html.theme-v2 .sec-tools {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  flex-shrink: 0; font-weight: 400;
+}
+
+/* Botão ⟳ — discreto até o hover; o glyph vem de ::after para o textContent do
+   <h2> não carregar lixo (o rótulo do atalho de seções lê o texto do título). */
+html.theme-v2 .sec-refresh {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-muted); cursor: pointer; font-family: var(--font);
+  font-size: 12px; line-height: 1;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+html.theme-v2 .sec-refresh::after { content: '⟳'; display: block; }
+html.theme-v2 .sec-refresh:hover:not(:disabled) {
+  color: var(--green-dark); border-color: var(--green); background: var(--green-tint);
+}
+html.theme-v2 .sec-refresh:disabled { cursor: progress; color: var(--green); border-color: var(--green); }
+html.theme-v2 .sec-refresh.spinning::after { animation: sec-spin .9s linear infinite; }
+
+/* Pílula "Atualizando…" — a única coisa que o usuário PRECISA ver para saber
+   que a seção está em voo. `[hidden]` explícito porque o display:inline-flex
+   do estado ligado venceria o display:none do atributo. */
+html.theme-v2 .sec-busy {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--green-dark); background: var(--green-tint);
+  border: 1px solid var(--green); border-radius: 11px; padding: 2px 9px 2px 7px;
+  white-space: nowrap;
+}
+html.theme-v2 .sec-busy[hidden] { display: none; }
+html.theme-v2 .sec-busy .dot {
+  width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--green) 35%, transparent);
+  border-top-color: var(--green); animation: sec-spin .8s linear infinite;
+}
+
+/* ── Container em atualização: apagado + pulso (≠ desabilitado) ── */
+html.theme-v2 .pos-busy {
+  pointer-events: none; user-select: none;
+  animation: pos-busy-pulse 1.15s ease-in-out infinite alternate;
+}
+@keyframes pos-busy-pulse { from { opacity: .34; } to { opacity: .58; } }
+@keyframes sec-spin { to { transform: rotate(360deg); } }
+
+/* ── Esqueleto da 1ª carga ──
+   Container vazio não tem altura: apagar o nada não comunica nada. Este card
+   ocupa o lugar da tabela que vem, com as barras no ritmo do pulso. Sai sozinho
+   quando o render escreve o conteúdo (ou vira aviso, se o fetch falhou). */
+html.theme-v2 .pos-busy-skel { display: flex; flex-direction: column; gap: 9px; }
+html.theme-v2 .pos-busy-skel .lbl {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+html.theme-v2 .pos-busy-skel .bar {
+  height: 11px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--bg-row-alt), var(--border), var(--bg-row-alt));
+  background-size: 220% 100%; animation: pos-skel-slide 1.35s ease-in-out infinite;
+}
+html.theme-v2 .pos-busy-skel .bar.head { height: 15px; background: var(--border); }
+@keyframes pos-skel-slide {
+  from { background-position: 120% 0; } to { background-position: -20% 0; }
+}
+
+/* Movimento é reforço, não a mensagem: sem ele a pílula e o apagado seguem lá. */
+@media (prefers-reduced-motion: reduce) {
+  html.theme-v2 .pos-busy { animation: none; opacity: .45; }
+  html.theme-v2 .sec-busy .dot,
+  html.theme-v2 .sec-refresh.spinning::after,
+  html.theme-v2 .pos-busy-skel .bar { animation: none; }
+}

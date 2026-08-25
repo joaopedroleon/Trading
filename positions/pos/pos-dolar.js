@@ -73,10 +73,13 @@ async function loadDolarConsol(trader, opts = {}) {
   const status    = document.getElementById('refStatus');
   const btn       = document.getElementById('btnLoad');
   const container = document.getElementById('dolarConsolContainer');
+  // As DUAS seções da aba (Consolidado Dólar e Análise de Opções) saem deste mesmo
+  // request — a de opções é pintada por `renderOptionsAnalysis`, que antes ficava com a
+  // tabela velha em silêncio durante a carga. Ver pos-busy.js.
+  PosBusy.on('dc');
   status.textContent = 'Buscando dados...';
   status.style.color = 'var(--text-muted)';
   btn.disabled = true;
-  container.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
   try {
     const params = new URLSearchParams({ trader });
     if (refDate) params.set('ref_date', refDate);
@@ -108,6 +111,7 @@ async function loadDolarConsol(trader, opts = {}) {
     status.textContent = 'Erro ao conectar: ' + e.message;
     status.style.color = 'var(--red)';
   } finally {
+    PosBusy.off('dc');
     btn.disabled = false;
   }
 }
@@ -316,10 +320,10 @@ async function loadDolarExposure() {
   const btn       = document.getElementById('btnLoad');
   const container = document.getElementById('dolarContainer');
 
+  PosBusy.on('dolarexp');
   status.textContent = 'Buscando dados...';
   status.style.color = 'var(--text-muted)';
   btn.disabled = true;
-  container.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
 
   try {
     const params = new URLSearchParams();
@@ -349,6 +353,7 @@ async function loadDolarExposure() {
     status.textContent = 'Erro ao conectar: ' + e.message;
     status.style.color = 'var(--red)';
   } finally {
+    PosBusy.off('dolarexp');
     btn.disabled = false;
   }
 }
@@ -685,7 +690,7 @@ async function dolarSetTicker(optKey, ticker) {
 async function loadEnquadramentoRF() {
   const container = document.getElementById('enqRfContainer');
   if (!container) return;
-  container.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
+  PosBusy.on('enqrf');
   try {
     const params = new URLSearchParams();
     const refDate = document.getElementById('refDate').value;
@@ -700,6 +705,8 @@ async function loadEnquadramentoRF() {
     renderEnquadramentoRF(data);
   } catch (e) {
     container.innerHTML = `<div class="card no-data">Erro ao conectar: ${e.message}</div>`;
+  } finally {
+    PosBusy.off('enqrf');
   }
 }
 

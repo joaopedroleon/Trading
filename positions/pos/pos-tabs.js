@@ -86,8 +86,9 @@ function _dropTabCache(key, trader) {
 }
 
 /* Descarta SÓ os caches buscados com OUTRA data — preserva os que continuam válidos.
-   É o que permite ao "⚡ Só esta aba" não fazer as abas já carregadas voltarem a
-   "Carregando…", sem abrir mão da garantia de nunca servir o dia errado em silêncio. */
+   É o que permite a um ⟳ de seção (PosBusy.refresh, pos-busy.js) não fazer as abas já
+   carregadas voltarem a "Carregando…", sem abrir mão da garantia de nunca servir o dia
+   errado em silêncio. Nasceu para o antigo "⚡ Só esta aba", que o ⟳ substituiu. */
 function _invalidateStaleTabs() {
   const sig = _currentDateSig();
   for (const tab of TRADER_TABS) {
@@ -100,18 +101,23 @@ function _invalidateStaleTabs() {
   if (posDataByTab[ROLAGEM_TAB_ID] && _tabFetchSig[ROLAGEM_TAB_ID] !== sig) _dropTabCache(ROLAGEM_TAB_ID);
 }
 
-/* "Atualizar" (padrão) × "⚡ Só esta aba" (`{prefetch:false}`).
-   Ambos refazem ao vivo a aba ativa e limpam as marretas (que são globais por instrumento).
-   A diferença é o que acontece com as OUTRAS abas:
-     • Atualizar      → apaga o cache de todas + prefetch das de trader (4 requests).
-     • Só esta aba    → PRESERVA quem já estava carregado (1 request). Só descarta o que foi
-                        buscado com outra "Data ref"/"Forçar D-1" (`_invalidateStaleTabs`).
-   ⚠️ As abas preservadas entram em `_dirtyTabs`: as marretas acabaram de ser limpas, então
-   elas precisam RE-RENDERIZAR ao serem abertas — do cache, sem request. Sem isso ficariam
-   mostrando o DOM antigo, com valores marretados que já não existem mais. */
+/* "Atualizar tudo" — a ação GLOBAL da toolbar, e a única que limpa as marretas.
+   Refaz ao vivo a aba ativa, apaga o cache de TODAS as abas e faz prefetch das de trader
+   (4 requests) para a troca de aba seguir instantânea.
+
+   ⚠️ Não confundir com o ⟳ do título de cada seção (`PosBusy.refresh`, pos-busy.js):
+   aquele é a ação ESTREITA — 1 request, e PRESERVA as marretas de preço/delta. A diferença
+   de semântica é intencional: "Atualizar tudo" é "quero a foto do mercado agora, esqueça o
+   que eu digitei"; o ⟳ é "refaz este dado, mantendo meus ajustes".
+   O antigo botão "⚡ Só esta aba" (`{prefetch:false}`) saiu da toolbar — o ⟳ de seção faz o
+   mesmo 1 request com granularidade maior. `opts.prefetch:false` continua aceito para quem
+   chame daqui/console, mantendo o comportamento de então: preserva as abas já carregadas e
+   as marca `_dirtyTabs`, porque as marretas acabaram de ser limpas e elas precisam
+   RE-RENDERIZAR do cache (sem request) ao serem abertas — senão mostrariam o DOM antigo,
+   com valores marretados que já não existem. */
 function reloadActiveTab(opts = {}) {
   const { prefetch = true } = opts;
-  // "Atualizar" sempre busca preços/deltas ao vivo → limpa as marretas (fonte única, global).
+  // "Atualizar tudo" sempre busca preços/deltas ao vivo → limpa as marretas (fonte única, global).
   priceOverrides.clear();
   deltaOverrides.clear();
   swapOpeningOverrides.clear();
@@ -139,7 +145,7 @@ function reloadActiveTab(opts = {}) {
     loadRolagem();
     return;
   }
-  loadPositionsForTab(activeTraderTab, { fresh: true, prefetch });   // "Atualizar" → preços ao vivo
+  loadPositionsForTab(activeTraderTab, { fresh: true, prefetch });   // "Atualizar tudo" → preços ao vivo
 }
 
 function changeOtherTrader(trader) {
@@ -152,9 +158,9 @@ function changeOtherTrader(trader) {
 
 /* ── Load positions for a tab ────────────────────────────────────────────── */
 // opts.background: carga silenciosa (prefetch) — não mexe na UI global (status/botão).
-// opts.fresh: ignora o cache de preços Bloomberg no backend (botão "Atualizar").
+// opts.fresh: ignora o cache de preços Bloomberg no backend ("Atualizar tudo" e o ⟳ de seção).
 // opts.prefetch: puxar as OUTRAS abas de trader em background depois desta (padrão true).
-//   false = o "⚡ Só esta aba": 1 request em vez de 4.
+//   false = 1 request em vez de 4 — é o que o ⟳ de seção usa (PosBusy.refresh).
 async function loadPositionsForTab(tabId, opts = {}) {
   const { background = false, fresh = false, prefetch = true } = opts;
   const tab      = TRADER_TABS.find(t => t.id === tabId);
@@ -164,13 +170,14 @@ async function loadPositionsForTab(tabId, opts = {}) {
   const btn      = document.getElementById('btnLoad');
   const container = document.getElementById(`posContainer-${tabId}`);
 
+  // Aviso de "atualizando" nas DUAS seções da aba (Posição e PnL saem deste mesmo
+  // request). Vale também no prefetch (`background`): trocar para uma aba que está
+  // sendo puxada mostrava painel vazio, sem explicação. Ver pos-busy.js.
+  PosBusy.on(`ref:${tabId}`);
   if (!background) {
     status.textContent = 'Buscando dados...';
     status.style.color = 'var(--text-muted)';
     btn.disabled = true;
-    container.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
-    const pnlCont = document.getElementById(`pnlContainer-${tabId}`);
-    if (pnlCont) pnlCont.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
   }
 
   try {
@@ -224,6 +231,7 @@ async function loadPositionsForTab(tabId, opts = {}) {
       status.style.color = 'var(--red)';
     }
   } finally {
+    PosBusy.off(`ref:${tabId}`);
     if (!background) btn.disabled = false;
   }
 }
@@ -334,7 +342,7 @@ function renderSectionsForTab(tabId, allRows) {
       const el = document.getElementById('fund_break_portfoliorf');
       if (el) el.innerHTML = renderFundBreakTable(
         filterRows(sortRows(displayRows.filter(r => r.group === s.group && r.trader === s.trader))),
-        data.fund_rows, data.fund_navs, filterRows
+        data.fund_rows, data.fund_navs, filterRows, data.portfoliorf_offshore_fund
       );
     }
   }

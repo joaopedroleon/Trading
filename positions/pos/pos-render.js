@@ -20,12 +20,29 @@ function rerenderTables(onlyKey) {
     }
     if (hasFundBreak && s.group === 'Todos') {
       const el = document.getElementById('fund_break_portfoliorf');
-      if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows);
+      if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows, data.portfoliorf_offshore_fund);
     }
   }
 }
 
 /* ── Análise de Opções (na aba dedicada; blocos por objeto + vencimento) ── */
+
+/* Esta linha cai no bloco "DOL / USDBRL"?
+   FONTE ÚNICA do predicado: era escrito inline no agrupamento, e a seleção default passou a
+   precisar do MESMO critério (ago/2026 — DOL/USDBRL nasce desmarcado). Duas cópias da regra
+   deixariam a linha cair num bloco e ser marcada por outro critério, em silêncio.
+   `option_subtype === 'dol'` é opção de DOL **BMF** (o backend a separa do 'fx' genérico pelo
+   nome começando em "DOL" — positions/router.py); `'fx'` com BRL no objeto é a USDBRL. Uma
+   opção de FX que não seja contra o BRL (EURUSD, p.ex.) NÃO entra aqui, e continua marcada.
+   ⚠️ `toUpperCase()` p/ casar com o `_dollarKind` do pos-dolar.js, que classifica a tabela
+   IRMÃ (Consolidado Dólar) na MESMA aba e já normalizava. Sem isso as duas discordariam de um
+   `usdbrl` minúsculo. Não muda nada no dado de hoje (a BBG devolve `USDBRL`). */
+function _isDolUsdbrlOpt(r) {
+  const sub  = r.option_subtype;
+  const undl = (r.option_undl || r.instrument_name || '').toUpperCase();
+  return sub === 'dol' || (sub === 'fx' && undl.includes('BRL'));
+}
+
 // Lê os dados já carregados da aba (dolarConsolData[trader]) — independente das abas de trader.
 function renderOptionsAnalysis() {
   const container = document.getElementById('optAnalysisContainer');
@@ -61,7 +78,7 @@ function renderOptionsAnalysis() {
     const sub  = r.option_subtype;
     let undl   = r.option_undl || r.instrument_name || '—';
     let mat    = r.maturity || '';
-    if (sub === 'dol' || (sub === 'fx' && undl.includes('BRL'))) undl = 'DOL / USDBRL';
+    if (_isDolUsdbrlOpt(r)) undl = 'DOL / USDBRL';
     if (sub === 'us_equity') mat = '';   // ações: mesmo objeto junto, mesmo com vencimentos diferentes
     const gkey = `${undl}||${mat}`;
     if (!groups.has(gkey)) groups.set(gkey, { undl, mat, rows: [] });
@@ -71,10 +88,17 @@ function renderOptionsAnalysis() {
     a.undl.localeCompare(b.undl, 'en-US', { sensitivity: 'base' }) ||
     String(a.mat).localeCompare(String(b.mat)));
 
-  // Seleção default (só na 1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO.
+  /* Seleção default (só na 1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
+     **e não for DOL BMF / USDBRL**. Essas duas já têm tabela própria logo acima nesta mesma
+     aba (Consolidado Dólar, que é onde a mesa lê a posição de dólar), então repeti-las no
+     Total e na imagem copiada da Análise de Opções era ruído — pedido da mesa, ago/2026.
+     Continua sendo só o DEFAULT: o checkbox por linha manda, e "Só com posição" traz as de
+     dólar de volta em um clique. */
   for (const r of opts) {
     const k = rowKey(r);
-    if (!optPrintSel.has(k)) optPrintSel.set(k, Number(r.final_qty || 0) !== 0);
+    if (!optPrintSel.has(k)) {
+      optPrintSel.set(k, Number(r.final_qty || 0) !== 0 && !_isDolUsdbrlOpt(r));
+    }
   }
   const isSel = r => optPrintSel.get(rowKey(r)) !== false;
   const nSel  = opts.filter(isSel).length;
@@ -192,7 +216,7 @@ function renderOptionsAnalysis() {
       <span>Análise de Opções <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${dolarConsolTrader} (MM)</span></span>
       <span data-html2canvas-ignore="true" style="font-weight:400;color:var(--text-muted);font-size:12px">${nSel}/${opts.length} linhas marcadas</span>
       <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="optSelAll(true)">Marcar todas</button>
-      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" onclick="optSelWithPosition()">Só com posição</button>
+      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" title="Marca toda linha com posição final ≠ 0 — INCLUSIVE DOL BMF / USDBRL, que o default deixa desmarcadas (elas já têm a tabela Consolidado Dólar acima)." onclick="optSelWithPosition()">Só com posição</button>
       <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" onclick="copyOptAnalysisImage(this)">⎘ Copiar</button>
     </div>
     <div class="section-copy-target">
@@ -211,7 +235,10 @@ function renderOptionsAnalysis() {
         e de DOL BMF marcam pelo <code>FXOPT_PRICE</code> e ficam com traço. Passe o mouse sobre o
         preço ou o delta para ver o campo exato da Bloomberg (e os overrides) que gerou o número.
         <b style="color:var(--yellow)">*</b> = a BBG não tinha mid two-sided nesse instante e o
-        preço usado foi o <code>PX_LAST</code>. O <b>Total</b> soma apenas as linhas marcadas.
+        preço usado foi o <code>PX_LAST</code>. O <b>Total</b> soma apenas as linhas marcadas
+        &mdash; e por default vêm marcadas só as que <b>ainda têm posição</b> e <b>não são de
+        DOL BMF / USDBRL</b> (essas ficam na tabela <i>Consolidado Dólar</i>, acima). Use
+        <b>Só com posição</b> para incluí-las, ou o checkbox da linha.
       </div>
     </div>
   </div>`;

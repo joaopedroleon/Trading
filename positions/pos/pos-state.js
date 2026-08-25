@@ -28,7 +28,8 @@ const deltaOverrides = new Map();  // instKey → delta manual (marreta)
 const _dirtyTabs     = new Set();  // abas carregadas que precisam re-render após uma marreta
 
 // ── Assinatura de DATA com que o cache de cada aba foi buscado (`refDate|forceOpening`).
-//    Existe para o "⚡ Só esta aba" PRESERVAR as abas já carregadas sem correr o risco de
+//    Existe para o ⟳ de seção (pos-busy.js; antes o botão "⚡ Só esta aba", que ele
+//    substituiu) PRESERVAR as abas já carregadas sem correr o risco de
 //    servir dado de outro dia: descarta-se só a aba cuja assinatura difere dos inputs de
 //    agora. Sem isto a alternativa era binária — ou apagar tudo (e a próxima aba voltava a
 //    "Carregando…", que é o que a mesa reclamou) ou não apagar nada (e a tela mostrava
@@ -45,7 +46,9 @@ function _noteFetchSig(key) { _tabFetchSig[key] = _currentDateSig(); }
 
 // ── Análise de Opções: seleção de linhas p/ o "⎘ Copiar" e p/ os totais ────
 //    rowKey → bool. Default (1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
-//    (final_qty ≠ 0). Depois disso a escolha do usuário manda e persiste entre re-renders.
+//    (final_qty ≠ 0) E NÃO for DOL BMF / USDBRL — essas têm a tabela "Consolidado Dólar"
+//    logo acima na mesma aba (ver `_isDolUsdbrlOpt` em pos-render.js, fonte única do
+//    predicado). Depois disso a escolha do usuário manda e persiste entre re-renders.
 const optPrintSel = new Map();
 
 /* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */

@@ -196,11 +196,15 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
 }
 
 /* ── Fund breakdown table (portfoliorf) ─────────────────────────────────── */
-function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
+function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFund) {
   if (!fundRows?.length || !fundNavs) return '';
 
   const fundLabels = Object.keys(fundNavs).sort();
   const shortLabel = fl => fl.replace('JGP RF Ativa ', '').replace('-A', '');
+  // Fundo que recebe 100% do dólar (backend: `portfoliorf_offshore_fund`). Sem ele —
+  // payload antigo / snapshot estático — o check cai no comportamento anterior.
+  const offFund  = (offshoreFund && fundNavs[offshoreFund] != null) ? offshoreFund : null;
+  let   usedOffOnly = false;
 
   // Index fund rows by key -> {fund_label -> row}
   const fundIndex = {};
@@ -231,6 +235,14 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
     const groupPl     = r.pl;
     const ratioByFund = {};
     const fundPlArr   = [];
+    // Linha cuja alocação vai 100% para o fundo offshore por desenho (hoje: dólar).
+    // O sleeve offshore (`is_offshore`) segue no ramo próprio, sem check.
+    const offOnly     = !!r.alloc_offshore_only && !r.is_offshore && !!offFund;
+    if (offOnly) usedOffOnly = true;
+    // NAV contra o qual o backend calculou o #PL desta linha (`r.nav`): o consolidado nas
+    // linhas rateadas, o NAV do fundo offshore nas de dólar. Usar `totalNavSum` fixo
+    // reescalaria o #PL por fundo da linha de dólar (29,5/25,1 ≈ +17%).
+    const refNav      = r.nav ?? totalNavSum;
 
     const cells = fundLabels.map(fl => {
       const fr       = byFund[fl];
@@ -240,8 +252,8 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
       ratioByFund[fl] = navF && totalNavSum ? (navF / totalNavSum) : null;
 
       let fundPl = null;
-      if (!r.is_offshore && groupPl != null && totalQty !== 0 && navF && totalNavSum) {
-        fundPl = groupPl * (fund_qty / totalQty) * (totalNavSum / navF);
+      if (!r.is_offshore && groupPl != null && totalQty !== 0 && navF && refNav) {
+        fundPl = groupPl * (fund_qty / totalQty) * (refNav / navF);
       }
       fundPlArr.push(fundPl);
 
@@ -255,6 +267,15 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
     let checkCell = '<td></td>';
     if (r.is_offshore) {
       checkCell = '<td style="color:var(--text-muted);text-align:center;font-size:11px">offshore</td>';
+    } else if (offOnly) {
+      // Alvo 100% no fundo offshore — NÃO é desligar o check, é trocar o alvo: qtd que
+      // vaze para o outro fundo continua sendo acusada.
+      const offQty = byFund[offFund]?.final_qty ?? 0;
+      const pctOff = totalQty !== 0 ? offQty / totalQty : null;
+      const dev    = pctOff != null ? Math.abs(pctOff - 1) : null;
+      const lbl    = dev == null ? '—' : dev < 0.01 ? '✓' : `±${(dev * 100).toLocaleString('en-US', {maximumFractionDigits:1})}pp`;
+      checkCell = `<td class="${allocClass(dev)}" style="text-align:center" title="Dólar — alvo 100% em ${
+        shortLabel(offFund)}, não o rateio por NAV">${lbl}</td>`;
     } else {
       const checks = fundLabels.map(fl => {
         const fr       = byFund[fl];
@@ -274,6 +295,18 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
     let checkPlCell = '<td></td>';
     if (r.is_offshore) {
       checkPlCell = '<td style="color:var(--text-muted);text-align:center;font-size:11px">offshore</td>';
+    } else if (offOnly) {
+      // Só o fundo offshore entra: os demais não carregam a posição por desenho, então
+      // compará-los com o #PL do grupo acusaria a ausência esperada.
+      const fpOff  = fundPlArr[fundLabels.indexOf(offFund)];
+      const devPl  = (groupPl != null && fpOff != null) ? Math.abs(fpOff - groupPl) : null;
+      const lblPl  = devPl == null
+        ? '<span style="color:var(--text-muted)">—</span>'
+        : devPl < 0.01
+          ? '<span style="color:var(--green)">✓</span>'
+          : `<span class="${allocClass(devPl)}">±${(devPl * 100).toLocaleString('en-US', {maximumFractionDigits:2})}pp</span>`;
+      checkPlCell = `<td style="text-align:center" title="Dólar — #PL conferido só em ${
+        shortLabel(offFund)}">${lblPl}</td>`;
     } else if (groupPl != null && fundPlArr.every(p => p != null)) {
       const devs   = fundPlArr.map(fp => Math.abs(fp - groupPl));
       const maxDev = Math.max(...devs);
@@ -290,8 +323,13 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
       checkPlCell = '<td style="color:var(--text-muted);text-align:center">—</td>';
     }
 
+    const offMark = offOnly
+      ? ` <span class="alloc-off-only" title="Dólar — alocação 100% em ${shortLabel(offFund)}. `
+        + `Alvo do check e denominador do #PL são o NAV desse fundo, não o consolidado.">US$</span>`
+      : '';
+
     return `<tr class="${rowClass} ${areaClass}">
-      <td>${r.instrument_name ?? '—'}</td>
+      <td>${r.instrument_name ?? '—'}${offMark}</td>
       ${cells}
       ${checkCell}
       ${checkPlCell}
@@ -307,12 +345,21 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn) {
   }).join('');
   const subHeaders = fundLabels.map(() => '<th>Qty</th><th>% Qtd</th><th>#PL</th>').join('');
 
+  // Rodapé: diz por que aquelas linhas não seguem o rateio por NAV (a tela não pode
+  // trocar o alvo do check em silêncio).
+  const footTr = usedOffOnly
+    ? `<tr><td colspan="${1 + 3 * fundLabels.length + 2}" style="white-space:normal;font-size:11px;color:var(--text-muted)">`
+      + `US$ dólar (WDO/UC, opção DOL/USDBRL, spot-fwd USD/BRL): alocação vai 100% para `
+      + `${shortLabel(offFund)} — o check usa esse alvo, não o rateio por NAV, e a exposição `
+      + `(#PL) da tabela principal é calculada sobre o NAV desse fundo.</td></tr>`
+    : '';
+
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead>
       <tr><th rowspan="2">Instrumento</th>${headers}<th rowspan="2">Check Qtd</th><th rowspan="2">Check #PL</th></tr>
       <tr>${subHeaders}</tr>
     </thead>
-    <tbody>${rows}</tbody>
+    <tbody>${rows}${footTr}</tbody>
   </table>`;
 }
 

@@ -81,10 +81,12 @@ async function loadRolagem() {
   const btn       = document.getElementById('btnLoad');
   const container = document.getElementById('rolagemContainer');
 
+  // Antes o unico aviso era este container — que nasce `display:none` (e o detalhe
+  // colapsado). Nada do que estava a vista mudava. Agora as 3 secoes da aba acendem.
+  PosBusy.on('rolagem');
   status.textContent = 'Buscando dados...';
   status.style.color = 'var(--text-muted)';
   btn.disabled = true;
-  container.innerHTML = '<div class="card"><span class="loading">Carregando...</span></div>';
 
   try {
     const params = new URLSearchParams();
@@ -115,6 +117,7 @@ async function loadRolagem() {
     status.textContent = 'Erro ao conectar: ' + e.message;
     status.style.color = 'var(--red)';
   } finally {
+    PosBusy.off('rolagem');
     btn.disabled = false;
   }
 }
@@ -491,6 +494,7 @@ async function gerarBoletas() {
     filters,
     config: rolagemConfig,
   };
+  PosBusy.on('boletas');
   status.textContent = 'Gerando boletas...';
   status.style.color = 'var(--text-muted)';
   try {
@@ -512,6 +516,8 @@ async function gerarBoletas() {
   } catch (e) {
     status.textContent = 'Erro ao gerar boletas: ' + e.message;
     status.style.color = 'var(--red)';
+  } finally {
+    PosBusy.off('boletas');
   }
 }
 
