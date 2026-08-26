@@ -313,7 +313,10 @@ async function consolSetTicker(ref, ticker) {
   }
 }
 
-async function loadDolarExposure() {
+// opts.fresh: ignora o cache TTL de mercado do backend (⟳ da seção / "Atualizar tudo").
+// Sem este fio o botão de atualizar passaria a servir cache — que é o que ele existe p/ furar.
+async function loadDolarExposure(opts = {}) {
+  const { fresh = false } = opts;
   const refDate   = document.getElementById('refDate').value;
   const status    = document.getElementById('refStatus');
   const srcLabel  = document.getElementById('srcLabel');
@@ -330,6 +333,7 @@ async function loadDolarExposure() {
     if (refDate) params.set('ref_date', refDate);
     const forceOpening = document.getElementById('forceOpening').value;
     if (forceOpening) params.set('force_opening', forceOpening);
+    if (fresh) params.set('fresh', 'true');
     const data = await (await fetch(`${API_BASE}/api/positions/dolar-exposure?${params}`)).json();
 
     if (data.error) {
@@ -687,7 +691,9 @@ async function dolarSetTicker(optKey, ticker) {
 }
 
 /* ── Check Enquadramento — derivativos dos fundos RF (limite 100% NAV/caixinha) ── */
-async function loadEnquadramentoRF() {
+// opts.fresh: idem loadDolarExposure — o ⟳ desta seção passa {fresh:true}.
+async function loadEnquadramentoRF(opts = {}) {
+  const { fresh = false } = opts;
   const container = document.getElementById('enqRfContainer');
   if (!container) return;
   PosBusy.on('enqrf');
@@ -697,6 +703,7 @@ async function loadEnquadramentoRF() {
     if (refDate) params.set('ref_date', refDate);
     const forceOpening = document.getElementById('forceOpening').value;
     if (forceOpening) params.set('force_opening', forceOpening);
+    if (fresh) params.set('fresh', 'true');
     const data = await (await fetch(`${API_BASE}/api/positions/enquadramento-rf?${params}`)).json();
     if (data.error) { container.innerHTML = `<div class="card no-data">${data.error}</div>`; return; }
     posDataByTab[ENQ_RF_TAB_KEY] = data;

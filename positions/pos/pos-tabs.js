@@ -133,8 +133,10 @@ function reloadActiveTab(opts = {}) {
     if (Object.keys(dolarConsolData).length) _dirtyTabs.add(DOLAR_CONSOL_TAB_ID);
   }
   if (activeTraderTab === DOLAR_TAB_ID) {
-    loadDolarExposure();
-    loadEnquadramentoRF();
+    // "Atualizar tudo" = foto do mercado AGORA → fresh, como o loadDolarConsol abaixo.
+    // (A carga preguiçosa ao abrir a aba, em showDolarTab, segue usando o cache.)
+    loadDolarExposure({ fresh: true });
+    loadEnquadramentoRF({ fresh: true });
     return;
   }
   if (activeTraderTab === DOLAR_CONSOL_TAB_ID) {

@@ -65,8 +65,8 @@ const PosBusy = (() => {
   /* ── Refetch por source. `ref:<tab>` é dinâmico (um por aba de trader). ───── */
   const RUNNERS = {
     dc:       () => window.loadDolarConsol(dolarConsolTrader, { fresh: true }),
-    dolarexp: () => window.loadDolarExposure(),
-    enqrf:    () => window.loadEnquadramentoRF(),
+    dolarexp: () => window.loadDolarExposure({ fresh: true }),
+    enqrf:    () => window.loadEnquadramentoRF({ fresh: true }),
     rolagem:  () => { _dropTabCache(ROLAGEM_TAB_ID); return window.loadRolagem(); },
     boletas:  () => window.gerarBoletas(),
   };
