@@ -213,8 +213,10 @@ function renderDolarConsol(trader) {
       onchange="consolSetTicker('${ek}', this.value)"></td>`;
   };
 
-  const renderBlock = (title, blockRows) => {
-    if (!blockRows.length) return '';
+  /* Renderiza um conjunto de linhas e devolve o HTML + os subtotais daquele conjunto.
+     Saiu de dentro do `renderBlock` porque o bloco de opções passou a ter DOIS níveis
+     (bloco → vencimento) e os dois precisam da mesma soma. */
+  const renderRows = (blockRows) => {
     let sUsd = 0, sPct = 0, sUc = 0, sPrem = 0;
     const trs = sortRows(blockRows.map(x => x.r)).map(r => {
       const x = blockRows.find(b => b.r === r);
@@ -227,7 +229,7 @@ function renderDolarConsol(trader) {
       return `<tr>
         <td class="lbl">${r.instrument_name ?? '—'}</td>
         <td class="left nd" style="font-size:11px">${_DOLLAR_KIND_LABEL[x.kind]}</td>
-        <td class="left">${fmtDate(r.maturity)}</td>
+        <td class="left">${fmtOptMaturity(r)}</td>
         <td class="sep">${fmtFinalQty(r.final_qty)}</td>
         ${deltaCell(m)}
         ${tickerCell(r, x.kind)}
@@ -237,20 +239,59 @@ function renderDolarConsol(trader) {
         <td class="dc-uc">${fmtUc(m.ucEq)}</td>
       </tr>`;
     }).join('');
-    const sub = `<tr class="tot">
-      <td class="lbl" colspan="7">Subtotal · ${title}</td>
-      <td class="sep">${fmtMoney(sPrem)}</td>
-      <td>${fmtPL(sPct, 'pct')}</td>
-      <td class="dc-uc">${fmtUc(sUc)}</td>
+    return { trs, sUsd, sPct, sUc, sPrem };
+  };
+
+  const subtotalRow = (label, s, cls = '') => `<tr class="tot${cls}">
+      <td class="lbl" colspan="7">${label}</td>
+      <td class="sep">${fmtMoney(s.sPrem)}</td>
+      <td>${fmtPL(s.sPct, 'pct')}</td>
+      <td class="dc-uc">${fmtUc(s.sUc)}</td>
     </tr>`;
+
+  /* Bloco do corpo. Com `byMaturity`, quebra em sub-faixas por VENCIMENTO, cada uma com
+     subtotal próprio — pedido da mesa (ago/2026) para o bloco de opções: a exposição de
+     dólar POR VENCIMENTO é a leitura que importa (rolagem), e com as opções intercaladas
+     pela ordem de área/sub-área/estratégia do `sortRows` ela tinha de ser somada de cabeça.
+     ⚠️ A ordenação é sobre a data ISO crua (`YYYY-MM-DD` ordena certo como string) — NÃO
+     sobre o `fmtDate` (dd/mm/aaaa), que ordenaria por dia do mês. Linha sem vencimento
+     (não deveria haver em opção, mas o campo é opcional) cai numa faixa própria, no fim. */
+  const renderBlock = (title, blockRows, byMaturity = false) => {
+    if (!blockRows.length) return '';
     // Faixa de subgrupo dentro do corpo (padrão `.jgp-tbl`) — o respiro entre blocos vem
     // do padding-top dela, não de uma <tr> vazia (que virava buraco na imagem copiada).
     const header = `<tr class="grp"><td colspan="10">${title}</td></tr>`;
-    return header + trs + sub;
+    if (!byMaturity) {
+      const s = renderRows(blockRows);
+      return header + s.trs + subtotalRow(`Subtotal · ${title}`, s);
+    }
+    const byMat = new Map();
+    for (const x of blockRows) {
+      const { iso, derived } = optMaturity(x.r);
+      const k = iso || '';
+      if (!byMat.has(k)) byMat.set(k, { derived: false, rows: [] });
+      byMat.get(k).rows.push(x);
+      if (derived) byMat.get(k).derived = true;
+    }
+    const keys = [...byMat.keys()].sort((a, b) =>
+      (a === '' ? 1 : b === '' ? -1 : String(a).localeCompare(String(b))));
+    const blk = { sUsd: 0, sPct: 0, sUc: 0, sPrem: 0 };
+    let inner = '';
+    for (const k of keys) {
+      const g   = byMat.get(k);
+      const s   = renderRows(g.rows);
+      const lbl = k ? fmtDate(k) + (g.derived ? '~' : '') : 'Sem vencimento';
+      const tip = g.derived
+        ? ' title="Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste vencimento."' : '';
+      inner += `<tr class="grp grp-sub"><td colspan="10"${tip}>Vencimento ${lbl}</td></tr>`
+             + s.trs + subtotalRow(`Subtotal · ${lbl}`, s, ' tot-sub');
+      blk.sUsd += s.sUsd; blk.sPct += s.sPct; blk.sUc += s.sUc; blk.sPrem += s.sPrem;
+    }
+    return header + inner + subtotalRow(`Subtotal · ${title}`, blk);
   };
 
   const body = [
-    renderBlock('Opções (DOL / USDBRL)', optRows),
+    renderBlock('Opções (DOL / USDBRL)', optRows, true),
     renderBlock('Futuros e Spot (UC / WDO / USD/BRL)', futRows),
   ].filter(Boolean).join('');
 

@@ -75,6 +75,16 @@ function fmtFinalQty(v) {
   return s;
 }
 
+/* Vencimento de OPÇÃO já marcando o que veio DERIVADO do nome (ver `optMaturity`).
+   O til não é enfeite: é a diferença entre "o JRS disse" e "eu li no nome do papel", e a
+   mesa precisa saber qual dos dois está olhando antes de rolar posição por essa data. */
+function fmtOptMaturity(r) {
+  const { iso, derived } = optMaturity(r);
+  if (!iso) return '<span style="color:var(--text-muted)">—</span>';
+  if (!derived) return fmtDate(iso);
+  return `<span style="border-bottom:1px dotted var(--text-muted)" title="Vencimento lido do NOME do instrumento: o JRS não trouxe maturity para esta linha (opção sem posição de abertura — aberta hoje).">${fmtDate(iso)}<span style="color:var(--text-muted)">~</span></span>`;
+}
+
 /* Valor financeiro em USD (verde +, vermelho entre parênteses), 0 casas */
 function fmtMoney(v) {
   if (v == null || !isFinite(v)) return '<span style="color:var(--text-muted)">—</span>';
@@ -112,9 +122,19 @@ function sortRows(rows) {
     // acréscimo do usuário, não podem se intercalar na leitura da posição real.
     const sim = (a.is_simulated ? 1 : 0) - (b.is_simulated ? 1 : 0);
     if (sim) return sim;
+    /* ⭐ VENCIMENTO entra DENTRO da estratégia, não como 1ª chave (ago/2026, pedido da mesa,
+       decidido sobre a medição). Assim opções/contratos de mesmo vencimento ficam juntos e os
+       blocos de área/sub-área continuam inteiros — e isso importa porque o `renderTable` desenha
+       a **divisória de área** e a **zebra por sub-área** por TRANSIÇÃO DE LINHA CONSECUTIVA:
+       ordenar por vencimento primeiro não reordenaria só a tabela, ela ganharia divisória e
+       troca de faixa quase linha a linha. Medido no EMota (25 linhas): vencimento como 1ª chave
+       leva os 4 blocos de área a 11 e os 9 de sub-área a 14; aqui os dois ficam em 4 e 9.
+       Ordena pela `sortMaturityKey` (ISO, com o fallback de nome), NÃO por `fmtDate` — dd/mm/aaaa
+       ordenaria por dia do mês. */
     return cmp(a.area,            b.area,            true)  // área: Z→A
         || cmp(a.subarea,         b.subarea)                 // sub-área: A→Z
         || cmp(a.strategy,        b.strategy)                // estratégia: A→Z
+        || cmp(sortMaturityKey(a), sortMaturityKey(b))       // vencimento: mais curto primeiro
         || cmp(a.instrument_name, b.instrument_name);        // instrumento: A→Z
   });
 }

@@ -25,6 +25,51 @@ function instKey(r) {
   const isFamily = r.is_fx || ref.startsWith('SWAP') || ref.includes('/');
   return isFamily ? ref + '||' + (r.maturity || '') : ref;
 }
+/* ── Vencimento de OPÇÃO para AGRUPAR/EXIBIR ─────────────────────────────────
+   ☠️ `r.maturity` vem do JRS (posição de ABERTURA). Opção **aberta hoje**, sem posição
+   D-1 em nenhum fundo, não tem linha JRS — e o JDS (boletas) não traz maturity. Resultado:
+   `maturity: null` justamente nas opções que a mesa acabou de operar (medido em 27/08/2026:
+   3 das 5 USDBRL do EMota, todas `_260930`). Agrupar por vencimento com esse buraco jogaria
+   as opções do dia num balde "Sem vencimento" — que é como pareceria quebrado.
+   O nome carrega a data nos dois padrões que o `classify.py` reconhece:
+     • FX / DOL BMF  `CUSDBRL_5.25_260930`  → sufixo `_AAMMDD`
+     • ação US       `EWZ US 09/04/26 C36`  → token `MM/DD/AA`
+   ⚠️ Derivar é SÓ para exibir/agrupar — não vira `r.maturity`. O `maturity` participa do
+   `rowKey`/`instKey` (identidade de linha e de marreta) e do agregado do backend; reescrevê-lo
+   mudaria agrupamento de posição e P&L. Quem consome recebe `derived: true` e a tela marca.
+   Janela de século: `AA` < 70 → 20AA. Opção listada não tem vencimento em 1970.            */
+function optMaturity(r) {
+  const raw = r.maturity;
+  if (raw) return { iso: String(raw).slice(0, 10), derived: false };
+  const name = r.instrument_name || '';
+  let m = name.match(/_(\d{2})(\d{2})(\d{2})\s*$/);          // ..._AAMMDD
+  if (m) return { iso: `${_optYY(m[1])}-${m[2]}-${m[3]}`, derived: true };
+  m = name.match(/(?:^|[^\d])(\d{2})\/(\d{2})\/(\d{2})(?!\d)/);   // MM/DD/AA
+  if (m) return { iso: `${_optYY(m[3])}-${m[1]}-${m[2]}`, derived: true };
+  return { iso: null, derived: false };
+}
+function _optYY(yy) { const n = Number(yy); return String(n < 70 ? 2000 + n : 1900 + n); }
+
+/* Chave de ORDENAÇÃO por vencimento — SÓ para ordenar, nunca exibida.
+   Estende o `optMaturity` com o padrão de FUTURO da BBG (`... Jan29`, `... Oct26`), que ele
+   de propósito não cobre: ali o nome dá o MÊS do contrato, não o dia, e devolver um dia
+   inventado ("01/01/2029" para o ODF29) seria mentira numa coluna de vencimento. Para
+   ORDENAR o mês basta, e é o que separa `Jan29` de `Jan31` na mesma sub-área.
+   Mesma origem do buraco de sempre: `maturity` vem do JRS (abertura) e o JDS não traz — o
+   contrato ABERTO HOJE chega sem vencimento (medido em 27/08/2026: `ONE-DAY BANK DEP Jan29`,
+   `ODF29 Comdty`, era a única linha não-opção sem maturity do EMota). Sem este fallback ele
+   ia para o FIM da sub-área, depois do Jan31 — logo na tabela que a mesa lê por vértice.
+   Sem vencimento nenhum → `9999`, no fim: é o único lugar onde a linha não atrapalha. */
+const _MON3 = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+                jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+function sortMaturityKey(r) {
+  const iso = optMaturity(r).iso;
+  if (iso) return iso;
+  const m = (r.instrument_name || '').match(/(^|[^A-Za-z])([A-Za-z]{3})(\d{2})\s*$/);
+  const mon = m && _MON3[m[2].toLowerCase()];
+  return mon ? `${_optYY(m[3])}-${mon}-01` : '9999';
+}
+
 // CALL → +1, PUT → -1, senão null. Procura em QUALQUER parte do nome (não só no
 // fim): há opções cadastradas com CALL/PUT no meio do nome.
 function _optTypeSign(name) {

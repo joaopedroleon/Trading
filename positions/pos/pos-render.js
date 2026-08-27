@@ -77,12 +77,18 @@ function renderOptionsAnalysis() {
   for (const r of opts) {
     const sub  = r.option_subtype;
     let undl   = r.option_undl || r.instrument_name || '—';
-    let mat    = r.maturity || '';
+    // Vencimento EFETIVO (JRS, ou lido do nome quando o JRS não traz — ver `optMaturity`):
+    // sem isso a opção aberta hoje caía num bloco "sem vencimento" separado do resto da
+    // mesma série, e o Total do bloco não era o da série.
+    const om   = optMaturity(r);
+    let mat    = om.iso || '';
+    let matDrv = om.derived;
     if (_isDolUsdbrlOpt(r)) undl = 'DOL / USDBRL';
-    if (sub === 'us_equity') mat = '';   // ações: mesmo objeto junto, mesmo com vencimentos diferentes
+    if (sub === 'us_equity') { mat = ''; matDrv = false; }   // ações: mesmo objeto junto, mesmo com vencimentos diferentes
     const gkey = `${undl}||${mat}`;
-    if (!groups.has(gkey)) groups.set(gkey, { undl, mat, rows: [] });
+    if (!groups.has(gkey)) groups.set(gkey, { undl, mat, matDrv: false, rows: [] });
     groups.get(gkey).rows.push(r);
+    if (matDrv) groups.get(gkey).matDrv = true;
   }
   const sorted = [...groups.values()].sort((a, b) =>
     a.undl.localeCompare(b.undl, 'en-US', { sensitivity: 'base' }) ||
@@ -111,7 +117,7 @@ function renderOptionsAnalysis() {
   const head = `<thead>
     <tr>
       <th rowspan="2" class="center col-sel" style="width:26px"
-          title="Linhas marcadas entram no ⎘ Copiar e nos Totais"><input type="checkbox"
+          title="Linhas marcadas entram no ⎘ Copiar (o Total da tela soma o bloco inteiro)"><input type="checkbox"
           ${nSel === opts.length ? 'checked' : ''} onclick="optSelAll(this.checked)" style="cursor:pointer"></th>
       <th rowspan="2" class="left">Instrumento</th>
       <th colspan="3" class="center sep">Quantidade</th>
@@ -134,18 +140,24 @@ function renderOptionsAnalysis() {
   </thead>`;
 
   const body = sorted.map((g, gi) => {
+    /* DOIS totais por bloco, e os dois vão para o DOM:
+       • `t*` = TODAS as linhas do bloco — é o que a TELA mostra. O checkbox é filtro de
+         IMPRESSÃO, então desmarcar não pode apagar o total (era o sintoma: bloco todo
+         desmarcado somava 0 e o `fmtMoney`/`fmtExp` pintam 0 como "—", ou seja, a linha
+         de Total aparecia vazia). Pedido da mesa, ago/2026 — inverte a regra anterior.
+       • `s*` = só as linhas MARCADAS — fica numa <tr> escondida por CSS (`.tot-print`) que
+         o `copyOptAnalysisImage` troca no lugar da outra, para a IMAGEM fechar com as
+         linhas que ela de fato mostra. Calcular aqui evita re-render no clique do Copiar. */
     let tPrem = 0, tDUsd = 0, tDPct = 0, tNUsd = 0, tNPct = 0;
+    let sPrem = 0, sDUsd = 0, sDPct = 0, sNUsd = 0, sNPct = 0;
     const rowsHtml = sortRows(g.rows).map(r => {
       const m   = metric(r);
       const sel = isSel(r);
-      // Totais somam SÓ as linhas marcadas — assim a imagem copiada fecha com o que mostra.
-      if (sel) {
-        if (m.premium != null) tPrem += m.premium;
-        if (m.dUsd != null)    tDUsd += m.dUsd;
-        if (m.dPct != null)    tDPct += m.dPct;
-        if (m.nUsd != null)    tNUsd += m.nUsd;
-        if (m.nPct != null)    tNPct += m.nPct;
-      }
+      if (m.premium != null) { tPrem += m.premium; if (sel) sPrem += m.premium; }
+      if (m.dUsd != null)    { tDUsd += m.dUsd;    if (sel) sDUsd += m.dUsd; }
+      if (m.dPct != null)    { tDPct += m.dPct;    if (sel) sDPct += m.dPct; }
+      if (m.nUsd != null)    { tNUsd += m.nUsd;    if (sel) sNUsd += m.nUsd; }
+      if (m.nPct != null)    { tNPct += m.nPct;    if (sel) sNPct += m.nPct; }
       const isFx     = r.option_subtype === 'fx';
       const safeIk   = instKey(r).replace(/"/g, '&quot;');
       const safeRk   = rowKey(r).replace(/"/g, '&quot;');
@@ -197,17 +209,22 @@ function renderOptionsAnalysis() {
     }).join('');
     // Subgrupo = faixa clara DENTRO do corpo (padrão `um-table`). O respiro entre blocos
     // vem do padding-top da própria faixa — não há mais linha vazia de 18px.
-    const header = `<tr class="grp" data-optgrp="${gi}"><td colspan="${NCOL}">${g.undl}${g.mat ? ` — ${fmtDate(g.mat)}` : ''}</td></tr>`;
-    const total = `<tr class="tot" data-optgrp="${gi}">
+    const matLbl = g.mat ? ` — ${fmtDate(g.mat)}${g.matDrv ? '~' : ''}` : '';
+    const matTip = g.matDrv
+      ? ' title="Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste bloco."' : '';
+    const header = `<tr class="grp" data-optgrp="${gi}"><td colspan="${NCOL}"${matTip}>${g.undl}${matLbl}</td></tr>`;
+    const totalRow = (prem, nUsd, nPct, dUsd, dPct, cls, kind) => `<tr class="tot${cls}" data-optgrp="${gi}" data-tot="${kind}">
         <td class="sel col-sel"></td>
         <td class="lbl">Total</td>
         <td class="sep"></td><td></td><td></td>
         <td class="sep"></td><td></td><td></td>
         <td class="sep"></td>
-        <td class="sep">${fmtMoney(tPrem)}</td>
-        <td>${fmtExp(tNUsd, tNPct)}</td>
-        <td>${fmtExp(tDUsd, tDPct)}</td>
+        <td class="sep">${fmtMoney(prem)}</td>
+        <td>${fmtExp(nUsd, nPct)}</td>
+        <td>${fmtExp(dUsd, dPct)}</td>
       </tr>`;
+    const total = totalRow(tPrem, tNUsd, tNPct, tDUsd, tDPct, '', 'all')
+                + totalRow(sPrem, sNUsd, sNPct, sDUsd, sDPct, ' tot-print', 'sel');
     return header + rowsHtml + total;
   }).join('');
 
@@ -235,10 +252,12 @@ function renderOptionsAnalysis() {
         e de DOL BMF marcam pelo <code>FXOPT_PRICE</code> e ficam com traço. Passe o mouse sobre o
         preço ou o delta para ver o campo exato da Bloomberg (e os overrides) que gerou o número.
         <b style="color:var(--yellow)">*</b> = a BBG não tinha mid two-sided nesse instante e o
-        preço usado foi o <code>PX_LAST</code>. O <b>Total</b> soma apenas as linhas marcadas
-        &mdash; e por default vêm marcadas só as que <b>ainda têm posição</b> e <b>não são de
-        DOL BMF / USDBRL</b> (essas ficam na tabela <i>Consolidado Dólar</i>, acima). Use
-        <b>Só com posição</b> para incluí-las, ou o checkbox da linha.
+        preço usado foi o <code>PX_LAST</code>. Na tela o <b>Total</b> soma <b>todas</b> as linhas
+        do bloco; o checkbox escolhe apenas o que entra no <b>⎘ Copiar</b> (e lá o Total é
+        recalculado sobre as marcadas, para a imagem fechar). Por default vêm marcadas só as que
+        <b>ainda têm posição</b> e <b>não são de DOL BMF / USDBRL</b> (essas ficam na tabela
+        <i>Consolidado Dólar</i>, acima). Use <b>Só com posição</b> para incluí-las, ou o
+        checkbox da linha.
       </div>
     </div>
   </div>`;
@@ -265,6 +284,10 @@ function optSelWithPosition() {
 // durante a captura, e restaura ao fim — inclusive se der erro.
 // ⚠️ Os textos saem por `display:none`, não por `data-html2canvas-ignore`: o `ignore` pula
 // o DESENHO mas mantém o espaço, então sobrariam duas faixas brancas na imagem.
+// ⚠️ E TROCA a linha de Total: a da tela soma o bloco inteiro (o checkbox não mexe no que
+// a tela mostra), a da imagem soma só as marcadas — senão a imagem levaria um Total que
+// não fecha com as linhas que ela mostra. As duas já vêm prontas do `renderOptionsAnalysis`
+// (`data-tot="all"` visível, `data-tot="sel"` escondida pelo CSS `.tot-print`).
 async function copyOptAnalysisImage(btn) {
   const card   = btn.closest('.card');
   const target = card.querySelector('.section-copy-target') ?? card;
@@ -274,15 +297,24 @@ async function copyOptAnalysisImage(btn) {
                           .map(tr => tr.dataset.optgrp));
   const hidden = [...target.querySelectorAll('tr[data-optgrp]')]
                    .filter(tr => !liveGrp.has(tr.dataset.optgrp) || tr.dataset.optsel === '0');
+  // Só nos blocos que sobrevivem: esconde o Total "todas" e revela o Total "marcadas".
+  // ⚠️ `display:'table-row'` explícito — o `.tot-print` é `display:none` por CSS, e um
+  // `''` aqui devolveria o elemento à regra que o esconde.
+  const totAll = [...target.querySelectorAll('tr[data-tot="all"]')].filter(tr => liveGrp.has(tr.dataset.optgrp));
+  const totSel = [...target.querySelectorAll('tr[data-tot="sel"]')].filter(tr => liveGrp.has(tr.dataset.optgrp));
   const sel    = [...target.querySelectorAll('.col-sel')];
   const notas  = [...target.querySelectorAll('.jgp-tbl-note')];
   hidden.forEach(tr => { tr.style.display = 'none'; });
+  totAll.forEach(tr => { tr.style.display = 'none'; });
+  totSel.forEach(tr => { tr.style.display = 'table-row'; });
   sel.forEach(td => { td.style.display = 'none'; });
   notas.forEach(el => { el.style.display = 'none'; });
   try {
     await copyElementAsImage(target, btn);
   } finally {
     hidden.forEach(tr => { tr.style.display = ''; });
+    totAll.forEach(tr => { tr.style.display = ''; });
+    totSel.forEach(tr => { tr.style.display = ''; });
     sel.forEach(td => { td.style.display = ''; });
     notas.forEach(el => { el.style.display = ''; });
   }
@@ -425,7 +457,11 @@ function renderTable(rows, tbodyId) {
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
       <td class="col-detail num" ${d}>${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
       <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(rKeyFull) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? '<span style="color:var(--accent);font-size:10px">★ </span>' : ''}${simMark}${r.instrument_name ?? '—'}</td>
-      <td>${fmtDate(r.maturity)}</td>
+      <!-- fmtOptMaturity, e nao fmtDate(r.maturity): a coluna tem de mostrar a MESMA data que
+           ORDENA a linha (sortMaturityKey). Sem isso as opcoes abertas hoje, que chegam sem
+           maturity do JRS, ficavam com um traco no meio do bloco, ordenadas por um criterio
+           invisivel. O que foi derivado do nome sai marcado com ~ e com title proprio. -->
+      <td>${fmtOptMaturity(r)}</td>
       ${openingCell}
       ${tradedCell}
       <td class="col-right num">${fmtFinalQty(effFinal)}</td>

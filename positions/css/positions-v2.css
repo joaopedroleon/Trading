@@ -168,6 +168,15 @@ html.theme-v2 .jgp-tbl tbody tr.grp td {
 }
 html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
 
+/* Sub-faixa de VENCIMENTO dentro de um bloco (hoje só "Opções (DOL / USDBRL)", no
+   Consolidado Dólar). Tem de ser MAIS LEVE que a `.grp` do bloco — recuo, sem caixa alta
+   e menos respiro em cima — senão duas faixas seguidas (bloco + vencimento) pesam mais
+   que as linhas de posição que elas separam. */
+html.theme-v2 .jgp-tbl tbody tr.grp-sub td {
+  text-transform: none; letter-spacing: .02em; font-size: 10.5px;
+  color: var(--text); padding: 6px 8px 3px 24px;
+}
+
 /* Linha de TOTAL: régua acima e negrito, p/ o olho não a confundir com mais um papel. */
 html.theme-v2 .jgp-tbl tbody tr.tot td {
   border-top: 2px solid var(--green-dark); font-weight: 700;
@@ -177,6 +186,19 @@ html.theme-v2 .jgp-tbl td.val { font-weight: 700; }
 /* "Total" não é nome de instrumento: fica no texto normal, e não no azul de rótulo
    (que nesta tela também é a cor de célula clicável). */
 html.theme-v2 .jgp-tbl tbody tr.tot td.lbl { color: var(--text); }
+
+/* Subtotal de VENCIMENTO — régua fina de 1px em vez da de 2px do subtotal de bloco, p/ o
+   olho ler a hierarquia (vencimento < bloco < total geral) sem contar linhas. */
+html.theme-v2 .jgp-tbl tbody tr.tot.tot-sub td {
+  border-top: 1px solid var(--border); font-weight: 600;
+}
+html.theme-v2 .jgp-tbl tbody tr.tot.tot-sub td.lbl { padding-left: 24px; color: var(--text-muted); }
+
+/* Linha de Total ALTERNATIVA da Análise de Opções: soma só as linhas marcadas e existe
+   apenas para a imagem do "⎘ Copiar" (o `copyOptAnalysisImage` a troca pela da tela).
+   Fica fora do fluxo por CSS — não por style inline — para o `finally` do copiar poder
+   restaurar tudo com `display = ''` sem ressuscitá-la. */
+html.theme-v2 .jgp-tbl tbody tr.tot-print { display: none; }
 
 /* TOTAL GERAL (Consolidado Dólar) — precisa se distinguir dos subtotais de bloco, que
    já são `tr.tot`. Sem a linha vazia de respiro que havia antes, a separação tem de vir
