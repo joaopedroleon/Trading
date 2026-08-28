@@ -168,14 +168,49 @@ html.theme-v2 .jgp-tbl tbody tr.grp td {
 }
 html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
 
-/* Sub-faixa de VENCIMENTO dentro de um bloco (hoje só "Opções (DOL / USDBRL)", no
-   Consolidado Dólar). Tem de ser MAIS LEVE que a `.grp` do bloco — recuo, sem caixa alta
-   e menos respiro em cima — senão duas faixas seguidas (bloco + vencimento) pesam mais
-   que as linhas de posição que elas separam. */
-html.theme-v2 .jgp-tbl tbody tr.grp-sub td {
-  text-transform: none; letter-spacing: .02em; font-size: 10.5px;
-  color: var(--text); padding: 6px 8px 3px 24px;
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHIPS DE FILTRO DA ROLAGEM DE DÓLAR  (#rolagemControls)
+   ═══════════════════════════════════════════════════════════════════════════
+   O `.filter-chip.on` global (positions.html) é quase igual ao `.off`: `--bg-row-alt`
+   #FAFAF7 contra `--bg` #F6F4EE, ~2% de diferença de luminância. Numa faixa com 5
+   dimensões e algumas dezenas de chips, a mesa não enxergava o que estava marcado.
+   Aqui o marcado vira pílula VERDE CHEIA (o mesmo verde do cabeçalho das tabelas) e o
+   desmarcado recua para contorno tracejado sem fundo.
+   ⚠️ Escopo no `#rolagemControls` de propósito, e não no `.filter-chip.on` global: aquela
+   classe também veste BADGES que não são botão (`🚫 N ocultos`, as áreas excluídas — ambos
+   `cursor:default`) e o seletor de conversão do resumo. Pintar todos de verde diria que
+   são clicáveis e que estão "ativos", que é o oposto do que aqueles dois informam. */
+html.theme-v2 #rolagemControls .filter-chip.on {
+  background: var(--green); color: #fff; border-color: var(--green-dark); font-weight: 600;
 }
+html.theme-v2 #rolagemControls .filter-chip.off {
+  background: transparent; color: var(--text-muted); border-style: dashed; font-weight: 400;
+}
+/* Chip de AÇÃO ("Marcar todos" / "Desmarcar todos"): não é valor selecionado, então não
+   pode usar nem o verde do `.on` nem o tracejado do `.off` — ficaria na mesma fileira dos
+   traders parecendo mais um deles. Contorno sólido no azul de rótulo da tela. */
+html.theme-v2 #rolagemControls .filter-chip.chip-act {
+  background: transparent; color: var(--accent); border-color: var(--accent);
+  border-style: solid; font-weight: 600;
+}
+html.theme-v2 #rolagemControls .filter-chip.chip-act:hover {
+  background: var(--accent); color: var(--bg-card);
+}
+html.theme-v2 #rolagemControls .filter-chip:hover { opacity: 1; filter: brightness(1.08); }
+
+/* Respiro BRANCO entre blocos e antes do TOTAL GERAL (Consolidado Dólar) — a mesa pediu
+   uma "linha branca dividindo" (ago/2026): as réguas sozinhas não separavam o bloco de
+   opções do de futuros/spot. Tem de ser <tr> própria com o fundo do CARD, e NÃO padding
+   da faixa `.grp` seguinte: aquela faixa tem fundo creme (`--bg`) e régua embaixo, então
+   o respiro sairia bege e riscado em vez de branco. Sem borda e fora da zebra (por isso o
+   `!important`, que também vence o `tr:hover`, senão o vazio acendia verde ao passar o mouse). */
+html.theme-v2 .jgp-tbl tbody tr.gap td {
+  height: 14px; padding: 0; border: none; background: var(--bg-card) !important;
+}
+
+/* ⚠️ A sub-faixa `.grp-sub` (cabeçalho "Vencimento XXX" dentro do bloco de opções) foi
+   REMOVIDA em ago/2026 — a quebra por vencimento continua, mas só pelo subtotal, que já
+   carrega a data no rótulo. Não recriar a faixa sem o pedido da mesa. */
 
 /* Linha de TOTAL: régua acima e negrito, p/ o olho não a confundir com mais um papel. */
 html.theme-v2 .jgp-tbl tbody tr.tot td {
@@ -193,6 +228,24 @@ html.theme-v2 .jgp-tbl tbody tr.tot.tot-sub td {
   border-top: 1px solid var(--border); font-weight: 600;
 }
 html.theme-v2 .jgp-tbl tbody tr.tot.tot-sub td.lbl { padding-left: 24px; color: var(--text-muted); }
+
+/* ── Peso do texto no CONSOLIDADO DÓLAR (#dolarConsolContainer) ──────────────
+   Pedido da mesa (ago/2026): **negrito = linha de soma**, e só. Fora das somas a tabela
+   fica toda no peso normal, para o olho achar subtotal e total sem procurar.
+   Dois pesos tinham de sair das linhas de POSIÇÃO: a coluna `.dc-uc` (UC-equiv, 700 — o
+   pedido explícito) e `td.val` (Preço Live, 700 pela regra genérica do `.jgp-tbl`), que
+   sozinha continuaria disputando a atenção na mesma linha.
+   ⚠️ Escopo no `#dolarConsolContainer`: `td.val` é da classe `.jgp-tbl` e também veste o
+   MID da Análise de Opções logo abaixo, onde o negrito do preço é o ponto (a coluna se
+   chama "MID ◂" justamente por ser a que entra nas contas). */
+html.theme-v2 #dolarConsolContainer .jgp-tbl tbody tr:not(.tot) td.val,
+html.theme-v2 #dolarConsolContainer .jgp-tbl tbody tr:not(.tot) td.dc-uc {
+  font-weight: 400;
+}
+/* Subtotal de VENCIMENTO fora do negrito também: os únicos em negrito são os subtotais de
+   BLOCO (Opções · Futuros e Spot) e o TOTAL GERAL. A hierarquia do vencimento continua
+   legível pela régua de 1px e pelo rótulo recuado/esmaecido — ver `.tot-sub` acima. */
+html.theme-v2 #dolarConsolContainer .jgp-tbl tbody tr.tot.tot-sub td { font-weight: 400; }
 
 /* Linha de Total ALTERNATIVA da Análise de Opções: soma só as linhas marcadas e existe
    apenas para a imagem do "⎘ Copiar" (o `copyOptAnalysisImage` a troca pela da tela).

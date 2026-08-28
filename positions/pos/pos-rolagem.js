@@ -20,11 +20,17 @@ const ROLAGEM_BROKERS = [
 const ROLAGEM_BROKER_DEFAULT = 'Ativa CTVC';
 // Traders desmarcados por default (o resto começa marcado).
 const ROLAGEM_TRADER_OFF = new Set(['AMuller', 'EquityHedge', 'FIA', 'CPLiquidos']);
+/* Dimensões de seleção EXPLÍCITA: o Set vazio significa **NADA passa**, e não "tudo".
+   Só o Trader — é a única que nasce com os valores marcados um a um (o resto nasce vazio =
+   tudo). Sem esta lista, "Desmarcar todos" no Trader devolveria a tabela CHEIA, com os 7
+   chips apagados: o oposto do que o botão diz. Ver `_rolagemFilteredRows`. */
+const ROLAGEM_EXPLICIT_DIMS = new Set(['trader']);
 let rolagemMonth = null;                       // 'YYYY-MM' escolhido; null = default (próximo mês)
 const rolagemFilters = {};                     // dimKey → Set<valor> (vazio/ausente = tudo)
 let rolagemBoletas = null;                     // último retorno do POST /boletas
 let rolagemQtyEdit = {};                        // idx da boleta → quantidade ajustada manualmente
 let _rolagemPanelMonth = null;                 // vencimento p/ o qual o painel de config foi montado
+let _rolagemPanelRef = null;                   // D0 (data ref) p/ o qual o Deal Date foi preenchido
 let _fundDropOpen = false;                     // dropdown de fundos aberto?
 // Config de execução/colunas fixas (persiste entre renders). Cada ativo tem uma LISTA de
 // execuções (qtd/preço/broker/base) que a ferramenta distribui pelas alocações.
@@ -41,7 +47,9 @@ const rolagemConfig = {
 // (rolagemBoletas) — essas são sempre regeradas via "Gerar boletas".
 const LS_ROLAGEM_CFG = 'jgp_rolagem_cfg_v1';
 let _rolagemCfgLoaded = false;
-const _ROLAGEM_CFG_SCALARS = ['deal_date', 'counterparty_gerencial', 'giveup', 'deal_type',
+// ⚠️ `deal_date` NÃO entra nesta lista de propósito: ele é sempre o D0 do carregamento.
+// Persistido, o campo voltava com a data de ONTEM no dia seguinte e a boleta saía datada errada.
+const _ROLAGEM_CFG_SCALARS = ['counterparty_gerencial', 'giveup', 'deal_type',
   'value_date', 'fixing_date', 'fo_remark', 'bo_remark', 'obs_reserved', 'ignore_previous'];
 
 function saveRolagemConfig() {
@@ -157,6 +165,16 @@ function clearRolagemFilter(key) {
   rolagemBoletas = null;
   renderRolagem();
 }
+/* "Marcar todos" / "Desmarcar todos" de uma dimensão (hoje só o Trader — pedido da mesa,
+   ago/2026: eram 7 chips clicados um a um para isolar um trader). Os valores saem da BASE
+   CARREGADA, não dos chips na tela: `_rolagemDistinct` já é a fonte que pinta os chips, e
+   ler do DOM traria só o que sobrou de outro filtro. */
+function setRolagemFilterAll(key, on) {
+  const rows = posDataByTab[ROLAGEM_TAB_ID]?.rows || [];
+  rolagemFilters[key] = on ? new Set(_rolagemDistinct(rows, key)) : new Set();
+  rolagemBoletas = null;
+  renderRolagem();
+}
 function _rolagemDistinct(rows, key) {
   return [...new Set(rows.map(r => r[key]).filter(v => v != null && v !== ''))].sort();
 }
@@ -165,7 +183,9 @@ function _rolagemFilteredRows(data) {
   let rows = (data.rows || []).slice();
   for (const d of ROLAGEM_FILTER_DIMS) {
     const s = rolagemFilters[d.key];
-    if (s && s.size) rows = rows.filter(r => s.has(r[d.key]));
+    if (!s) continue;                                    // dimensão nunca tocada = tudo
+    // Explícita (Trader): vazio = nada passa. Demais: vazio = tudo (o chip "Todos" é limpar).
+    if (ROLAGEM_EXPLICIT_DIMS.has(d.key) || s.size) rows = rows.filter(r => s.has(r[d.key]));
   }
   return rows;
 }
@@ -213,21 +233,35 @@ function _rolagemRenderControls(data) {
   const monthOpts = months.map(m =>
     `<option value="${m.ym}" ${m.ym === rolagemMonth ? 'selected' : ''}>${m.label}</option>`).join('');
 
-  // Trader: chips TODOS selecionados por default (sem "Todos"). Área/Sub-área/Estratégia/Ativo:
-  // chips com "Todos" (vazio = tudo). Fundo: dropdown multi-select (acima).
-  const chipDim = (d, withTodos) => {
-    const sel = rolagemFilters[d.key];
+  /* Trader: seleção EXPLÍCITA (nasce toda marcada, vazio = nada passa) e por isso ganha o
+     par "Marcar todos / Desmarcar todos" em vez do chip "Todos" — pedido da mesa, ago/2026.
+     Área/Sub-área/Estratégia/Ativo: chips com "Todos" (vazio = tudo). Fundo: dropdown acima.
+     Os dois chips de ação levam `chip-act`: são BOTÃO, não valor selecionado — sem a
+     distinção, "Marcar todos" pareceria mais um trader marcado na mesma fileira. */
+  const chipDim = (d) => {
+    const explicit = ROLAGEM_EXPLICIT_DIMS.has(d.key);
+    const sel   = rolagemFilters[d.key];
+    const vals  = _rolagemDistinct(allRows, d.key);
     const allOn = !sel || sel.size === 0;
-    const chips = _rolagemDistinct(allRows, d.key).map(v => {
+    const nSel  = vals.filter(v => sel && sel.has(v)).length;
+    const chips = vals.map(v => {
       const on = sel && sel.has(v);
-      const safe = String(v).replace(/'/g, "\\'");
+      const safe = String(v).replace(/'/g, "\'");
       return `<span class="filter-chip ${on ? 'on' : 'off'}" onclick="toggleRolagemFilter('${d.key}','${safe}')">${v}</span>`;
     }).join('');
-    const todos = withTodos
-      ? `<span class="filter-chip ${allOn ? 'on' : 'off'}" onclick="clearRolagemFilter('${d.key}')">Todos</span>` : '';
+    const acts = explicit
+      ? `<span class="filter-chip chip-act" onclick="setRolagemFilterAll('${d.key}',true)">✓ Marcar todos</span>
+         <span class="filter-chip chip-act" onclick="setRolagemFilterAll('${d.key}',false)">✕ Desmarcar todos</span>`
+      : `<span class="filter-chip ${allOn ? 'on' : 'off'}" onclick="clearRolagemFilter('${d.key}')">Todos</span>`;
+    /* Contador só na dimensão explícita: é a única em que "nenhum marcado" ESVAZIA a tela.
+       Sem o aviso ao lado, resumo e boletas em branco pareceriam falha de carga. */
+    const count = explicit
+      ? `<span style="font-size:11px;color:var(--text-muted)">${nSel}/${vals.length}</span>` +
+        (nSel === 0 ? `<span style="font-size:11px;color:var(--yellow);font-weight:600">nenhum trader marcado — nada a rolar</span>` : '')
+      : '';
     return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:2px 0">
         <span style="font-size:12px;color:var(--text-muted);font-weight:600;min-width:74px">${d.label}:</span>
-        ${todos}${chips}
+        ${acts}${chips}${count}
       </div>`;
   };
 
@@ -242,11 +276,11 @@ function _rolagemRenderControls(data) {
         ${_rolagemFundDropdown(allRows)}
         <span style="font-size:12px;color:var(--text-muted)">Contrato BBG: <b>${data.target_code}${(data.target_month || '').slice(2, 4)}</b> (mini WDO + cheio UC)</span>
       </div>
-      ${chipDim(ROLAGEM_FILTER_DIMS[1], false)}
-      ${chipDim(ROLAGEM_FILTER_DIMS[2], true)}
-      ${chipDim(ROLAGEM_FILTER_DIMS[3], true)}
-      ${chipDim(ROLAGEM_FILTER_DIMS[4], true)}
-      ${chipDim(ROLAGEM_FILTER_DIMS[5], true)}
+      ${chipDim(ROLAGEM_FILTER_DIMS[1])}
+      ${chipDim(ROLAGEM_FILTER_DIMS[2])}
+      ${chipDim(ROLAGEM_FILTER_DIMS[3])}
+      ${chipDim(ROLAGEM_FILTER_DIMS[4])}
+      ${chipDim(ROLAGEM_FILTER_DIMS[5])}
     </div>`;
 }
 
@@ -521,7 +555,8 @@ function _cfgInput(label, path, cur, ph = '') {
   const safe = String(cur ?? '').replace(/"/g, '&quot;');
   return `<label style="font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:2px">
       ${label}
-      <input type="text" value="${safe}" placeholder="${ph}" oninput="setRolagemCfg('${path}', this.value)"
+      <input type="text" id="rolagemCfg-${path.replace(/\./g, '-')}" value="${safe}" placeholder="${ph}"
+        oninput="setRolagemCfg('${path}', this.value)"
         style="padding:4px 8px;font-size:12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;min-width:120px">
     </label>`;
 }
@@ -597,9 +632,17 @@ function _rolagemRenderBoletaPanel(data) {
 
   // (Re)monta a config só quando o vencimento muda (os tickers dependem dele);
   // os valores digitados persistem em rolagemConfig.
+  // Deal Date default = SEMPRE o D0 da tela (a "Data ref" do topo, que é hoje por default).
+  // Reaplica quando o D0 muda — virada de dia com a aba aberta, ou troca da data ref.
+  const d0 = _fmtDDMMYYYY(data.ref_date || '');
+  const refMudou = _rolagemPanelRef !== data.ref_date;
+  if (refMudou) {
+    _rolagemPanelRef = data.ref_date;
+    rolagemConfig.deal_date = d0;
+  }
+
   if (_rolagemPanelMonth !== data.target_month) {
     _rolagemPanelMonth = data.target_month;
-    if (!rolagemConfig.deal_date) rolagemConfig.deal_date = _fmtDDMMYYYY(data.ref_date || '');
     const assetBlock = (asset, label) => `
       <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;flex:1;min-width:340px">
         <div style="font-weight:600;font-size:12px">${label} — ativo <b>${_rollSpreadTicker(asset, data.target_month)}</b></div>
@@ -630,6 +673,9 @@ function _rolagemRenderBoletaPanel(data) {
       </div>`;
     _renderExecRows('mini');
     _renderExecRows('cheio');
+  } else if (refMudou) {
+    const inp = document.getElementById('rolagemCfg-deal_date');
+    if (inp) inp.value = d0;         // painel já montado (só o D0 mudou) → atualiza o campo
   }
   _renderBoletaPreview();
 }

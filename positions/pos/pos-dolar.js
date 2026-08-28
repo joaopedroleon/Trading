@@ -242,17 +242,26 @@ function renderDolarConsol(trader) {
     return { trs, sUsd, sPct, sUc, sPrem };
   };
 
-  const subtotalRow = (label, s, cls = '') => `<tr class="tot${cls}">
-      <td class="lbl" colspan="7">${label}</td>
+  /* Respiro BRANCO entre blocos (e antes do TOTAL GERAL) — pedido da mesa (ago/2026):
+     as réguas sozinhas não separavam "Opções" de "Futuros e Spot". É uma <tr> própria, com
+     o fundo do CARD e sem régua (`.jgp-tbl tbody tr.gap`), e não padding da faixa seguinte:
+     a faixa `.grp` tem fundo creme e borda embaixo, então o vazio sairia bege e riscado. */
+  const spacer = `<tr class="gap"><td colspan="10"></td></tr>`;
+
+  const subtotalRow = (label, s, cls = '', tip = '') => `<tr class="tot${cls}">
+      <td class="lbl" colspan="7"${tip}>${label}</td>
       <td class="sep">${fmtMoney(s.sPrem)}</td>
       <td>${fmtPL(s.sPct, 'pct')}</td>
       <td class="dc-uc">${fmtUc(s.sUc)}</td>
     </tr>`;
 
-  /* Bloco do corpo. Com `byMaturity`, quebra em sub-faixas por VENCIMENTO, cada uma com
-     subtotal próprio — pedido da mesa (ago/2026) para o bloco de opções: a exposição de
-     dólar POR VENCIMENTO é a leitura que importa (rolagem), e com as opções intercaladas
-     pela ordem de área/sub-área/estratégia do `sortRows` ela tinha de ser somada de cabeça.
+  /* Bloco do corpo. Com `byMaturity`, quebra por VENCIMENTO — cada faixa com subtotal
+     próprio e SEM cabeçalho (pedido da mesa, ago/2026: o rótulo do subtotal já diz a data,
+     e a faixa "Vencimento XXX" em cima de 2-3 linhas pesava mais do que separava). A quebra
+     em si continua: a exposição de dólar POR VENCIMENTO é a leitura que importa (rolagem), e
+     com as opções intercaladas pela ordem de área/sub-área/estratégia do `sortRows` ela tinha
+     de ser somada de cabeça. O tooltip do `~` (vencimento derivado do nome) migrou junto,
+     do cabeçalho para o rótulo do subtotal — é o único lugar que ainda mostra a data.
      ⚠️ A ordenação é sobre a data ISO crua (`YYYY-MM-DD` ordena certo como string) — NÃO
      sobre o `fmtDate` (dd/mm/aaaa), que ordenaria por dia do mês. Linha sem vencimento
      (não deveria haver em opção, mas o campo é opcional) cai numa faixa própria, no fim. */
@@ -283,8 +292,7 @@ function renderDolarConsol(trader) {
       const lbl = k ? fmtDate(k) + (g.derived ? '~' : '') : 'Sem vencimento';
       const tip = g.derived
         ? ' title="Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste vencimento."' : '';
-      inner += `<tr class="grp grp-sub"><td colspan="10"${tip}>Vencimento ${lbl}</td></tr>`
-             + s.trs + subtotalRow(`Subtotal · ${lbl}`, s, ' tot-sub');
+      inner += s.trs + subtotalRow(`Subtotal · ${lbl}`, s, ' tot-sub', tip);
       blk.sUsd += s.sUsd; blk.sPct += s.sPct; blk.sUc += s.sUc; blk.sPrem += s.sPrem;
     }
     return header + inner + subtotalRow(`Subtotal · ${title}`, blk);
@@ -293,11 +301,11 @@ function renderDolarConsol(trader) {
   const body = [
     renderBlock('Opções (DOL / USDBRL)', optRows, true),
     renderBlock('Futuros e Spot (UC / WDO / USD/BRL)', futRows),
-  ].filter(Boolean).join('');
+  ].filter(Boolean).join(spacer);
 
   // TOTAL GERAL: `tot-grand` (régua dupla, caixa alta) para não se confundir com os
   // subtotais de bloco, que agora são `tot` — antes a distinção vinha da linha vazia.
-  const grand = `<tr class="tot tot-grand">
+  const grand = spacer + `<tr class="tot tot-grand">
     <td class="lbl" colspan="7">TOTAL DÓLAR — ${trader}</td>
     <td class="sep">${fmtMoney(gPrem)}</td>
     <td>${fmtPL(gPct, 'pct')}</td>
