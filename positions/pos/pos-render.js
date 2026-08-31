@@ -43,6 +43,28 @@ function _isDolUsdbrlOpt(r) {
   return sub === 'dol' || (sub === 'fx' && undl.includes('BRL'));
 }
 
+/* Preço de REFERÊNCIA do resultado de uma linha de opção.
+   É a mesma base que o breakdown de PnL do backend (positions/pricing/pnl.py) usa:
+     • `r.price` = marcação de D-1 (JRS) → base do ESTOQUE;
+     • sem D-1 (opção ABERTA HOJE — não tem linha no JRS, ver `optMaturity`) → o preço
+       MÉDIO das boletas do dia, que é a base de COMPRA/VENDA.
+   ⚠️ Quando o dia teve as DUAS pontas, o médio exibido é ponderado pela quantidade
+   (`bq`/`sq` chegam do backend como MAGNITUDES, nunca negativas — `avg_*_price` só é
+   preenchido `where(qty > 0)`). É resumo de EXIBIÇÃO: a conta continua separando compra de
+   venda (o `pnlFor` não usa este número), por isso as duas pontas vão no title da célula. */
+function _optResultRef(r) {
+  if (r.price != null) return { px: r.price, kind: 'd1' };
+  const ab = r.avg_buy_price  != null ? r.avg_buy_price  : null;
+  const av = r.avg_sell_price != null ? r.avg_sell_price : null;
+  const bq = Math.abs(r.buy_qty  || 0);
+  const sq = Math.abs(r.sell_qty || 0);
+  if (ab != null && av != null && (bq + sq) > 0)
+    return { px: (ab * bq + av * sq) / (bq + sq), kind: 'medio', ab, av };
+  if (ab != null) return { px: ab, kind: 'medio', ab, av: null };
+  if (av != null) return { px: av, kind: 'medio', ab: null, av };
+  return { px: null, kind: null };
+}
+
 // Lê os dados já carregados da aba (dolarConsolData[trader]) — independente das abas de trader.
 function renderOptionsAnalysis() {
   const container = document.getElementById('optAnalysisContainer');
@@ -67,7 +89,17 @@ function renderOptionsAnalysis() {
     const dPct = (nPct != null && delta != null) ? nPct * delta : null;  // exp. delta = nominal × delta
     const dUsd = (dPct != null && nav) ? dPct * nav : null;
     const edited = priceOverrides.has(ik) || deltaOverrides.has(ik);
-    return { price, delta, src, premium, dPct, dUsd, nPct, nUsd, edited };
+    /* RESULTADO: não se recalcula aqui. `pnlFor` (pnl.js) é a MESMA função que a aba de PnL
+       do trader usa — estoque (D-1) + compra + venda, a partir do preço EFETIVO, ou seja a
+       marreta ★ desta tela também move o resultado, como já move prêmio e exposições.
+       Guarda de `typeof`: o `pnl.js` carrega DEPOIS dos módulos `pos/*` (ver positions.html);
+       em runtime já está lá, mas um consumidor que carregue só os `pos/*` degrada p/ "—" em
+       vez de estourar a tabela inteira. */
+    const ref = _optResultRef(r);
+    const pf  = (typeof pnlFor === 'function') ? pnlFor(r) : null;
+    const res = pf && isFinite(pf.total) ? pf.total : null;
+    const bps = pf && isFinite(pf.bps)   ? pf.bps   : null;
+    return { price, delta, src, premium, dPct, dUsd, nPct, nUsd, edited, ref, res, bps };
   };
 
   // agrupar por ativo objeto + vencimento, com exceções:
@@ -109,7 +141,7 @@ function renderOptionsAnalysis() {
   const isSel = r => optPrintSel.get(rowKey(r)) !== false;
   const nSel  = opts.filter(isSel).length;
 
-  const NCOL = 12;   // checkbox + instrumento + 3 qtds + bid/mid/ask + delta + prêmio + 2 exps
+  const NCOL = 15;   // checkbox + instrumento + 3 qtds + bid/mid/ask + delta + prêmio + 2 exps + 3 result
   // Cabeçalho em DUAS linhas, no padrão `um-table` do US Monitor: a 1ª agrupa as colunas
   // por natureza, a 2ª nomeia cada uma. Não é só estética — pôr BID · MID · ASK sob um
   // grupo "Preço (BBG)" mostra de relance que o mid está ENTRE os dois, que é a coisa
@@ -125,6 +157,8 @@ function renderOptionsAnalysis() {
           title="BID e ASK são de tela (PX_BID/PX_ASK) e só existem em opção LISTADA. Só o MID entra nas contas.">Preço (BBG)</th>
       <th rowspan="2" class="sep">Delta</th>
       <th colspan="3" class="center sep">Exposição</th>
+      <th colspan="3" class="center sep"
+          title="Mesmo cálculo da aba de PnL do trader: estoque (D-1) + compra + venda, sobre o preço MID desta tabela.">Resultado</th>
     </tr>
     <tr>
       <th class="sep">Abertura</th>
@@ -136,6 +170,9 @@ function renderOptionsAnalysis() {
       <th class="sep">Prêmio USD</th>
       <th>Nominal</th>
       <th>Delta</th>
+      <th class="sep" title="Base do resultado: a marcação de D-1 (JRS). Sem D-1 (opção aberta HOJE), o preço MÉDIO das boletas do dia.">D-1 / Médio</th>
+      <th title="Resultado em USD = estoque (D-1 → MID) + compra + venda. Mesma conta da aba de PnL.">USD</th>
+      <th title="Resultado sobre o NAV do trader, em bps.">bps</th>
     </tr>
   </thead>`;
 
@@ -148,8 +185,8 @@ function renderOptionsAnalysis() {
        • `s*` = só as linhas MARCADAS — fica numa <tr> escondida por CSS (`.tot-print`) que
          o `copyOptAnalysisImage` troca no lugar da outra, para a IMAGEM fechar com as
          linhas que ela de fato mostra. Calcular aqui evita re-render no clique do Copiar. */
-    let tPrem = 0, tDUsd = 0, tDPct = 0, tNUsd = 0, tNPct = 0;
-    let sPrem = 0, sDUsd = 0, sDPct = 0, sNUsd = 0, sNPct = 0;
+    let tPrem = 0, tDUsd = 0, tDPct = 0, tNUsd = 0, tNPct = 0, tRes = 0, tBps = 0;
+    let sPrem = 0, sDUsd = 0, sDPct = 0, sNUsd = 0, sNPct = 0, sRes = 0, sBps = 0;
     const rowsHtml = sortRows(g.rows).map(r => {
       const m   = metric(r);
       const sel = isSel(r);
@@ -158,6 +195,11 @@ function renderOptionsAnalysis() {
       if (m.dPct != null)    { tDPct += m.dPct;    if (sel) sDPct += m.dPct; }
       if (m.nUsd != null)    { tNUsd += m.nUsd;    if (sel) sNUsd += m.nUsd; }
       if (m.nPct != null)    { tNPct += m.nPct;    if (sel) sNPct += m.nPct; }
+      /* bps somado LINHA A LINHA (e não total/NAV): cada linha já vem dividida pelo SEU nav,
+         e na aba PortfolioRF o nav difere entre linha onshore e offshore — é a mesma regra
+         que as colunas de exposição em %NAV logo acima já seguem. */
+      if (m.res != null)     { tRes  += m.res;     if (sel) sRes  += m.res; }
+      if (m.bps != null)     { tBps  += m.bps;     if (sel) sBps  += m.bps; }
       const isFx     = r.option_subtype === 'fx';
       const safeIk   = instKey(r).replace(/"/g, '&quot;');
       const safeRk   = rowKey(r).replace(/"/g, '&quot;');
@@ -191,6 +233,20 @@ function renderOptionsAnalysis() {
       const sideTip  = !isListed
         ? 'Opção de FX / DOL BMF: preço vem do FXOPT_PRICE (sem bid/ask two-sided de tela)'
         : 'Referência de mercado — não entra em nenhuma conta desta tabela';
+      // Base do resultado. Sem realce de cor: quem é médio (em vez de D-1) se diz no title
+      // — pedido da mesa, ago/2026. A coluna fica nas cores normais da tabela.
+      const pxFmt   = v => (isFx ? fmtPricePct(v) : fmtOptPx(v));
+      const refFmt  = m.ref.px == null
+        ? '<span style="color:var(--text-muted)">—</span>' : pxFmt(m.ref.px);
+      const refTip  = m.ref.kind === 'd1'
+        ? 'Marcação de D-1 (JRS) — base do resultado de ESTOQUE'
+        : m.ref.kind === 'medio'
+          ? 'Sem marcação de D-1 (posição ABERTA HOJE): preço médio das boletas do dia'
+            + (m.ref.ab != null ? ` · C ${pxFmt(m.ref.ab)}` : '')
+            + (m.ref.av != null ? ` · V ${pxFmt(m.ref.av)}` : '')
+            + (m.ref.ab != null && m.ref.av != null
+               ? ' (o exibido é a média ponderada pela quantidade; a conta separa as duas pontas)' : '')
+          : 'Sem D-1 e sem boleta — não há base de resultado para esta linha';
       return `<tr data-optrow="${safeRk}" data-optsel="${sel ? 1 : 0}" data-optgrp="${gi}">
         <td class="sel col-sel"><input type="checkbox" ${sel ? 'checked' : ''}
             onclick="optSelRow('${safeRk.replace(/'/g, "\\'")}', this.checked)" style="cursor:pointer"></td>
@@ -205,6 +261,9 @@ function renderOptionsAnalysis() {
         <td class="sep">${fmtMoney(m.premium)}</td>
         <td>${fmtExp(m.nUsd, m.nPct)}</td>
         <td>${fmtExp(m.dUsd, m.dPct)}</td>
+        <td class="sep" title="${refTip}">${refFmt}</td>
+        <td>${fmtMoney(m.res)}</td>
+        <td>${fmtBps(m.bps)}</td>
       </tr>`;
     }).join('');
     // Subgrupo = faixa clara DENTRO do corpo (padrão `um-table`). O respiro entre blocos
@@ -213,7 +272,7 @@ function renderOptionsAnalysis() {
     const matTip = g.matDrv
       ? ' title="Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste bloco."' : '';
     const header = `<tr class="grp" data-optgrp="${gi}"><td colspan="${NCOL}"${matTip}>${g.undl}${matLbl}</td></tr>`;
-    const totalRow = (prem, nUsd, nPct, dUsd, dPct, cls, kind) => `<tr class="tot${cls}" data-optgrp="${gi}" data-tot="${kind}">
+    const totalRow = (prem, nUsd, nPct, dUsd, dPct, res, bps, cls, kind) => `<tr class="tot${cls}" data-optgrp="${gi}" data-tot="${kind}">
         <td class="sel col-sel"></td>
         <td class="lbl">Total</td>
         <td class="sep"></td><td></td><td></td>
@@ -222,9 +281,12 @@ function renderOptionsAnalysis() {
         <td class="sep">${fmtMoney(prem)}</td>
         <td>${fmtExp(nUsd, nPct)}</td>
         <td>${fmtExp(dUsd, dPct)}</td>
+        <td class="sep"></td>
+        <td>${fmtMoney(res)}</td>
+        <td>${fmtBps(bps)}</td>
       </tr>`;
-    const total = totalRow(tPrem, tNUsd, tNPct, tDUsd, tDPct, '', 'all')
-                + totalRow(sPrem, sNUsd, sNPct, sDUsd, sDPct, ' tot-print', 'sel');
+    const total = totalRow(tPrem, tNUsd, tNPct, tDUsd, tDPct, tRes, tBps, '', 'all')
+                + totalRow(sPrem, sNUsd, sNPct, sDUsd, sDPct, sRes, sBps, ' tot-print', 'sel');
     return header + rowsHtml + total;
   }).join('');
 
@@ -236,23 +298,42 @@ function renderOptionsAnalysis() {
       <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" title="Marca toda linha com posição final ≠ 0 — INCLUSIVE DOL BMF / USDBRL, que o default deixa desmarcadas (elas já têm a tabela Consolidado Dólar acima)." onclick="optSelWithPosition()">Só com posição</button>
       <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" onclick="copyOptAnalysisImage(this)">⎘ Copiar</button>
     </div>
-    <div class="section-copy-target">
+    <!-- max-width:100% e o que faz o wrap de rolagem funcionar: .section-copy-target e
+         width:fit-content (positions.html), logo sem teto ele cresce ate a tabela (1.338px)
+         e o overflow-x:auto de dentro nunca chega a apertar nada. Com o teto, o alvo para na
+         largura do card e a tabela rola DENTRO dele - e a nota de rodape (width:0;
+         min-width:100%) volta a quebrar na largura visivel em vez de na da tabela.
+         Inline, e nao no CSS: .section-copy-target veste outros 3 blocos da tela. -->
+    <div class="section-copy-target" style="max-width:100%">
       <p class="csub jgp-tbl-note" style="margin:0 0 8px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
         Um subgrupo por <b>ativo objeto + vencimento</b>, com Total próprio. Toda conta derivada
-        (Prêmio e as duas exposições) sai do <b>MID</b> — BID e ASK ficam ao lado só como
-        referência de mercado, e por isso o MID aparece entre os dois.
+        (Prêmio, as duas exposições e o <b>Resultado</b>) sai do <b>MID</b> — BID e ASK ficam ao
+        lado só como referência de mercado, e por isso o MID aparece entre os dois.
       </p>
-      <table class="jgp-tbl" id="optAnalysisTable">
-        ${head}
-        <tbody>${body}</tbody>
-      </table>
+      <!-- Rolagem lateral DENTRO do card, nunca da pagina: com o bloco Resultado a tabela
+           passa de 1.100 p/ ~1.340px e, abaixo de ~1.370px de viewport, o document inteiro
+           comecava a rolar de lado (medido: doc 1386 x win 1366). Mesmo padrao do detalhe da
+           aba de PnL (overflow-x:auto no wrap). O copyOptAnalysisImage NEUTRALIZA este
+           wrap na captura - senao a imagem sairia cortada na largura visivel. -->
+      <div class="opt-tbl-scroll" style="overflow-x:auto">
+        <table class="jgp-tbl" id="optAnalysisTable">
+          ${head}
+          <tbody>${body}</tbody>
+        </table>
+      </div>
       <div class="opt-calc-note jgp-tbl-note" style="margin-top:8px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
         BID/ASK (<code>PX_BID</code>/<code>PX_ASK</code>) existem apenas para opções
         <b>listadas</b> (ações, ETFs e futuros) e <b>não entram em nenhuma conta</b>; opções de FX
         e de DOL BMF marcam pelo <code>FXOPT_PRICE</code> e ficam com traço. Passe o mouse sobre o
         preço ou o delta para ver o campo exato da Bloomberg (e os overrides) que gerou o número.
         <b style="color:var(--yellow)">*</b> = a BBG não tinha mid two-sided nesse instante e o
-        preço usado foi o <code>PX_LAST</code>. Na tela o <b>Total</b> soma <b>todas</b> as linhas
+        preço usado foi o <code>PX_LAST</code>.
+        O bloco <b>Resultado</b> é o mesmo cálculo da aba de PnL do trader — estoque
+        (<i>abertura × (MID − D-1)</i>) + compra + venda — e por isso responde à marreta ★ de
+        preço. A coluna <b>D-1 / Médio</b> mostra a base contra a qual o resultado é medido:
+        a <b>marcação de D-1</b> do JRS, ou, quando a linha <b>nasceu hoje</b> e não tem D-1, o
+        <b>preço médio das boletas do dia</b> — qual dos dois é, e as duas pontas quando houve
+        compra e venda, ficam no <i>hover</i> da célula. Na tela o <b>Total</b> soma <b>todas</b> as linhas
         do bloco; o checkbox escolhe apenas o que entra no <b>⎘ Copiar</b> (e lá o Total é
         recalculado sobre as marcadas, para a imagem fechar). Por default vêm marcadas só as que
         <b>ainda têm posição</b> e <b>não são de DOL BMF / USDBRL</b> (essas ficam na tabela
@@ -304,6 +385,15 @@ async function copyOptAnalysisImage(btn) {
   const totSel = [...target.querySelectorAll('tr[data-tot="sel"]')].filter(tr => liveGrp.has(tr.dataset.optgrp));
   const sel    = [...target.querySelectorAll('.col-sel')];
   const notas  = [...target.querySelectorAll('.jgp-tbl-note')];
+  /* ⚠️ O wrap de rolagem tem de sair na captura, e o ALVO junto: o html2canvas desenha a
+     CAIXA do elemento, então um `overflow:visible` sozinho deixaria a tabela transbordar
+     para fora do `.section-copy-target` e a imagem sairia cortada na largura da tela. */
+  const wrap    = target.querySelector('.opt-tbl-scroll');
+  const wrapCss = wrap ? wrap.getAttribute('style') : null;
+  const tgtCss  = target.getAttribute('style');
+  if (wrap) wrap.style.cssText = 'overflow:visible;width:max-content';
+  target.style.maxWidth = 'none';
+  target.style.width    = 'max-content';
   hidden.forEach(tr => { tr.style.display = 'none'; });
   totAll.forEach(tr => { tr.style.display = 'none'; });
   totSel.forEach(tr => { tr.style.display = 'table-row'; });
@@ -317,6 +407,8 @@ async function copyOptAnalysisImage(btn) {
     totSel.forEach(tr => { tr.style.display = ''; });
     sel.forEach(td => { td.style.display = ''; });
     notas.forEach(el => { el.style.display = ''; });
+    if (wrap) { if (wrapCss === null) wrap.removeAttribute('style'); else wrap.setAttribute('style', wrapCss); }
+    if (tgtCss === null) target.removeAttribute('style'); else target.setAttribute('style', tgtCss);
   }
 }
 
