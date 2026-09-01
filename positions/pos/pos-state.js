@@ -46,9 +46,10 @@ function _noteFetchSig(key) { _tabFetchSig[key] = _currentDateSig(); }
 
 // ── Análise de Opções: seleção de linhas p/ o "⎘ Copiar" e p/ os totais ────
 //    rowKey → bool. Default (1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
-//    (final_qty ≠ 0) E NÃO for DOL BMF / USDBRL — essas têm a tabela "Consolidado Dólar"
-//    logo acima na mesma aba (ver `_isDolUsdbrlOpt` em pos-render.js, fonte única do
-//    predicado). Depois disso a escolha do usuário manda e persiste entre re-renders.
+//    (final_qty ≠ 0) E NÃO for opção contra o BRL — DOL BMF, USDBRL e EURBRL (ver
+//    `_isBrlOpt` em pos-render.js, fonte única do predicado; o `_isDolUsdbrlOpt` ao lado
+//    dele é o do AGRUPAMENTO, mais estreito). Depois disso a escolha do usuário manda e
+//    persiste entre re-renders.
 const optPrintSel = new Map();
 
 /* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */

@@ -32,7 +32,14 @@ function _dollarKind(r) {
   if (isCurncy && ref.startsWith('UC'))  return 'uc';    // dólar cheio (futuro)
   if (isCurncy && ref.startsWith('WDO')) return 'wdo';   // mini dólar (futuro)
   if (r.is_option && r.option_subtype === 'dol') return 'dolopt';
-  if (r.is_option && r.option_subtype === 'fx' && (r.option_undl || '').toUpperCase().includes('BRL')) return 'fxopt';
+  // ⚠️ USD **e** BRL: `includes('BRL')` sozinho aceitaria uma EURBRL como instrumento de
+  // DÓLAR. Não era visível enquanto o `option_undl` de um `Digital_EURBRL…` saía quebrado
+  // ("IGITAL"); com o rótulo correto (set/2026) passaria a entrar nesta tabela. Mesmo
+  // aperto no `_isDolUsdbrlOpt` (pos-render.js) e no `dollar_kind` (positions/classify.py).
+  if (r.is_option && r.option_subtype === 'fx') {
+    const _u = (r.option_undl || '').toUpperCase();
+    if (_u.includes('USD') && _u.includes('BRL')) return 'fxopt';
+  }
   if (r.is_fx) {
     const nm = (r.instrument_name || '').toUpperCase().replace(/\s/g, '');
     if (nm.includes('USD') && nm.includes('BRL')) return 'fxfwd';

@@ -27,20 +27,28 @@ function rerenderTables(onlyKey) {
 
 /* ── Análise de Opções (na aba dedicada; blocos por objeto + vencimento) ── */
 
-/* Esta linha cai no bloco "DOL / USDBRL"?
-   FONTE ÚNICA do predicado: era escrito inline no agrupamento, e a seleção default passou a
-   precisar do MESMO critério (ago/2026 — DOL/USDBRL nasce desmarcado). Duas cópias da regra
-   deixariam a linha cair num bloco e ser marcada por outro critério, em silêncio.
-   `option_subtype === 'dol'` é opção de DOL **BMF** (o backend a separa do 'fx' genérico pelo
-   nome começando em "DOL" — positions/router.py); `'fx'` com BRL no objeto é a USDBRL. Uma
-   opção de FX que não seja contra o BRL (EURUSD, p.ex.) NÃO entra aqui, e continua marcada.
-   ⚠️ `toUpperCase()` p/ casar com o `_dollarKind` do pos-dolar.js, que classifica a tabela
-   IRMÃ (Consolidado Dólar) na MESMA aba e já normalizava. Sem isso as duas discordariam de um
-   `usdbrl` minúsculo. Não muda nada no dado de hoje (a BBG devolve `USDBRL`). */
+/* ── Dois predicados PARECIDOS e de propósito diferente — não fundir ──────────
+   `_isDolUsdbrlOpt` responde "esta linha é do bloco DOL / USDBRL?" (AGRUPAMENTO: é o par
+   que a tabela irmã Consolidado Dólar consolida). `_isBrlOpt` responde "é opção contra o
+   BRL?" (SELEÇÃO default). EURBRL separa os dois: é BRL, mas não é dólar.
+   `option_subtype === 'dol'` é opção de DOL **BMF** (o backend a separa do 'fx' genérico
+   pelo nome começando em "DOL" — positions/router.py).
+   ⚠️ `_isDolUsdbrlOpt` exige USD **e** BRL. Era só `includes('BRL')`, o que bastava
+   enquanto o rótulo `option_undl` de um `Digital_EURBRL…` saía quebrado ("IGITAL") e não
+   casava com nada; com o rótulo correto (set/2026) aquele teste jogaria a EURBRL no bloco
+   do dólar. Mesmo aperto no `_dollarKind` (pos-dolar.js) e no `dollar_kind` (Python).
+   ⚠️ `toUpperCase()` p/ casar com o `_dollarKind`, que classifica a tabela IRMÃ na MESMA
+   aba e já normalizava — sem isso as duas discordariam de um `usdbrl` minúsculo. */
+function _optUndlName(r) {
+  return (r.option_undl || r.instrument_name || '').toUpperCase();
+}
 function _isDolUsdbrlOpt(r) {
-  const sub  = r.option_subtype;
-  const undl = (r.option_undl || r.instrument_name || '').toUpperCase();
-  return sub === 'dol' || (sub === 'fx' && undl.includes('BRL'));
+  const undl = _optUndlName(r);
+  return r.option_subtype === 'dol' || (r.option_subtype === 'fx' && undl.includes('USD') && undl.includes('BRL'));
+}
+function _isBrlOpt(r) {
+  const undl = _optUndlName(r);
+  return r.option_subtype === 'dol' || (r.option_subtype === 'fx' && undl.includes('BRL'));
 }
 
 /* Preço de REFERÊNCIA do resultado de uma linha de opção.
@@ -127,15 +135,17 @@ function renderOptionsAnalysis() {
     String(a.mat).localeCompare(String(b.mat)));
 
   /* Seleção default (só na 1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
-     **e não for DOL BMF / USDBRL**. Essas duas já têm tabela própria logo acima nesta mesma
-     aba (Consolidado Dólar, que é onde a mesa lê a posição de dólar), então repeti-las no
-     Total e na imagem copiada da Análise de Opções era ruído — pedido da mesa, ago/2026.
+     **e não for opção contra o BRL** (`_isBrlOpt`) — DOL BMF, USDBRL e também EURBRL.
+     Começou em ago/2026 com DOL/USDBRL, que já têm tabela própria logo acima nesta mesma
+     aba (Consolidado Dólar); em set/2026 a mesa estendeu a QUALQUER opção de BRL, então o
+     critério deixou de ser "já aparece na tabela irmã" e passou a ser a MOEDA — por isso
+     um predicado próprio, e não o `_isDolUsdbrlOpt` do agrupamento.
      Continua sendo só o DEFAULT: o checkbox por linha manda, e "Só com posição" traz as de
-     dólar de volta em um clique. */
+     BRL de volta em um clique. */
   for (const r of opts) {
     const k = rowKey(r);
     if (!optPrintSel.has(k)) {
-      optPrintSel.set(k, Number(r.final_qty || 0) !== 0 && !_isDolUsdbrlOpt(r));
+      optPrintSel.set(k, Number(r.final_qty || 0) !== 0 && !_isBrlOpt(r));
     }
   }
   const isSel = r => optPrintSel.get(rowKey(r)) !== false;
@@ -295,7 +305,7 @@ function renderOptionsAnalysis() {
       <span>Análise de Opções <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${dolarConsolTrader} (MM)</span></span>
       <span data-html2canvas-ignore="true" style="font-weight:400;color:var(--text-muted);font-size:12px">${nSel}/${opts.length} linhas marcadas</span>
       <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="optSelAll(true)">Marcar todas</button>
-      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" title="Marca toda linha com posição final ≠ 0 — INCLUSIVE DOL BMF / USDBRL, que o default deixa desmarcadas (elas já têm a tabela Consolidado Dólar acima)." onclick="optSelWithPosition()">Só com posição</button>
+      <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" title="Marca toda linha com posição final ≠ 0 — INCLUSIVE as opções contra o BRL (DOL BMF, USDBRL, EURBRL), que o default deixa desmarcadas." onclick="optSelWithPosition()">Só com posição</button>
       <button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:3px 12px;font-size:12px" onclick="copyOptAnalysisImage(this)">⎘ Copiar</button>
     </div>
     <!-- max-width:100% e o que faz o wrap de rolagem funcionar: .section-copy-target e
@@ -336,9 +346,9 @@ function renderOptionsAnalysis() {
         compra e venda, ficam no <i>hover</i> da célula. Na tela o <b>Total</b> soma <b>todas</b> as linhas
         do bloco; o checkbox escolhe apenas o que entra no <b>⎘ Copiar</b> (e lá o Total é
         recalculado sobre as marcadas, para a imagem fechar). Por default vêm marcadas só as que
-        <b>ainda têm posição</b> e <b>não são de DOL BMF / USDBRL</b> (essas ficam na tabela
-        <i>Consolidado Dólar</i>, acima). Use <b>Só com posição</b> para incluí-las, ou o
-        checkbox da linha.
+        <b>ainda têm posição</b> e <b>não são opções contra o BRL</b> (DOL BMF, USDBRL e
+        EURBRL — as de dólar ficam na tabela <i>Consolidado Dólar</i>, acima). Use
+        <b>Só com posição</b> para incluí-las, ou o checkbox da linha.
       </div>
     </div>
   </div>`;
