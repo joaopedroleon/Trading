@@ -848,20 +848,29 @@
   const REF = () => cssv('--s3');
   const el = (id) => document.getElementById(id);
 
-  /* ⭐ ZERO ALINHADO NOS DOIS EIXOS (01/09/2026, pedido do usuário: *"nesse
-     gráfico de tamanho da posição ao longo do tempo, o 0 do PL e do DV01 deve
-     ser alinhado, não tem por que não ser. 0 é 0"*).
-     ☠️ Num eixo duplo o Plotly escala cada eixo SOZINHO, então a linha do zero
-     de cada um cai numa ALTURA DIFERENTE do mesmo card — e o leitor lê as duas
-     séries contra a mesma horizontal. No `figRisco` o DV01 cruzava de TOMADO
-     para APLICADO numa altura em que a área de #PL ainda estava cheia; a troca
-     de sinal parecia acontecer com o livro montado.
-     ⚠️ **Nenhum eixo é CORTADO — os dois são EXPANDIDOS.** O zero vai para a
-     fração `f = max(−min / (max − min))` da altura: manda o eixo que mais
-     precisa de espaço negativo, e os outros ganham folga vazia. Dado nenhum
-     sai da vista, e a altura da barra continua proporcional ao valor (o que a
-     nota do `rangemode:'tozero'` do `figCurva` exige é que a base seja o zero,
-     não que o eixo termine nele). */
+  /* ⭐ **O ZERO NA MESMA ALTURA NOS DOIS EIXOS, COM O MENOR ESTICAMENTO POSSÍVEL**
+     (§5.-46, revisto em 02/09/2026 a pedido do usuário: *"o eixo da esquerda
+     ficou mal fitado, o range de bps; faça de forma mais inteligente"*).
+     ☠️ A 1ª versão pegava `f = MAX(fração negativa)`: a série MAIS EXIGENTE
+     ditava a altura do zero e todas as outras pagavam a conta INTEIRA. Passou a
+     doer quando o #PL do gráfico mensal virou líquido (§5.-68) e ganhou lado
+     negativo: o #PL passou a pedir 79% de espaço abaixo do zero e as barras
+     precisavam de 57%, então o eixo das BARRAS ia de −62 até −155 bps —
+     **2,05× o intervalo do dado**, com as barras achatadas no terço de cima.
+     ⭐ Hoje `f` é o ponto de MINIMAX: aquele em que as duas pontas esticam
+     IGUAL. Em fechado,
+         f* = f_max / (1 − f_min + f_max)
+     e o esticamento de CADA eixo é exatamente **f_max − f_min** — no caso acima,
+     22% em cada um em vez de 105% num só. ⭐ Séries com a MESMA fração natural
+     não esticam nada (f* = f_min = f_max, sobra zero), e uma série sozinha nunca
+     é esticada.
+     ⚠️ **O invariante do §5.-46 continua**: o range SEMPRE contém o dado — por
+     construção `span ≥ hi/(1−f)` e `span ≥ −lo/f`. Expande, nunca corta.
+     ⚠️ **Simétrico de propósito**: não há série "principal" com desconto. As 3
+     chamadas (resultado × #PL do mês, giro × resultado por vértice, fluxo ×
+     acumulado no drill) têm a barra como 1º argumento, e privilegiar o 1º daria
+     um eixo secundário esticado sem que ninguém veja — o defeito de agora, ao
+     contrário. */
   function zeroAlinhado(...series) {
     const ext = series.map((v) => {
       let lo = 0, hi = 0;
@@ -873,16 +882,23 @@
       });
       return [lo, hi];
     });
+    /* a fração NATURAL de cada série: quanto da altura dela fica abaixo do zero */
+    const fr = [];
+    ext.forEach(([lo, hi]) => { if (hi > lo) fr.push(-lo / (hi - lo)); });
     let f = 0;
-    ext.forEach(([lo, hi]) => { if (hi > lo) f = Math.max(f, -lo / (hi - lo)); });
-    /* ⚠️ teto de 0,9: uma série 100% negativa pediria `f = 1`, o que achataria
-       o eixo do companheiro (que é positivo) numa fatia de altura zero. */
+    if (fr.length) {
+      const fmin = Math.min.apply(null, fr), fmax = Math.max.apply(null, fr);
+      f = fmax / (1 - fmin + fmax);
+    }
+    /* ⚠️ teto de 0,9: séries TODAS negativas pediriam `f = 1`, o que achataria a
+       metade positiva do eixo numa fatia de altura zero. */
     f = Math.min(f, 0.9);
     const FOLGA = 1.06;          // o respiro que o eixo automático daria no topo
     return ext.map(([lo, hi]) => {
       if (f <= 0) return [0, (hi || 1) * FOLGA];
-      const alto = Math.max(hi, (-lo * (1 - f)) / f) * FOLGA;
-      return [(-f * alto) / (1 - f), alto];
+      /* o eixo tem de caber os dois lados do dado COM o zero na fração `f` */
+      const span = Math.max(hi / (1 - f), -lo / f) * FOLGA;
+      return [-f * span, (1 - f) * span];
     });
   }
   /* DETALHE = mostrar a quebra bruto × custo × líquido. Default false: a tela é
@@ -931,42 +947,26 @@
     if (el('pillMeta')) el('pillMeta').textContent = 'SOPHIS · ' + (TA.gerado_em || '—');
     document.title = TA.trader + ' — ' + (TA.grupo_rotulo || TA.grupo) + ' · JGP Macro';
 
-    /* ⛔ ONDE a opcao NAO entra — declarado, e com o escopo certo.
-       ⚠️ A 1a versao dizia que a pagina inteira excluia opcao, e estava errado:
-       a exclusao vale SO para as analises de TAMANHO (#PL, DV01, quartis,
-       contrafactual), porque opcao tem exposicao em premio e nao em DV01.
-       Resultado, custo, carrego, acerto, payoff e duracao contam a opcao — um
-       condor E uma decisao. Dizer "excluindo opcoes" sem qualificar faria o
-       leitor descontar o resultado dela do total, que esta la. */
-    const ex = TA.excluidos;
-    const bx = el('ehExcluidos');
-    if (bx) {
-      if (ex && ex.n > 0) {
-        /* ⚠️ A regua do aviso ACOMPANHA a regua da pagina: opcao nao tem #PL,
-           mas tem `bps_nav_liq`, entao nao ha razao para o unico numero deste
-           bloco ficar em R$ quando o resto da tela esta em bps. */
-        bx.innerHTML = '<b>As análises de tamanho não incluem ' + ex.rotulo + '.</b> '
-          + 'São ' + nf(ex.n, 0) + ' trade' + (ex.n > 1 ? 's' : '')
-          + ' (resultado líquido ' + K(ex.result_bps, ex.result_brl) + ') que <b>contam</b> '
-          + 'no resultado, no custo, no acerto e no payoff, mas ficam fora de '
-          + '#PL, DV01, quartis de tamanho e do contrafactual de sizing. '
-          /* ⭐ APONTA PARA A SAIDA: a opcao nao ficou sem regua de tamanho —
-             ganhou a dela. Sem este link o aviso sugeria que aquele risco
-             simplesmente nao e medido em lugar nenhum. */
-          /* ⚠️ ERA "os graficos afetados dizem titulos e DI no titulo" — e hoje
-             o escopo e uma ETIQUETA no cabecalho de cada secao (papeis e DI ·
-             so DI · so opcoes). Aviso que descreve uma tela que nao existe mais
-             e pior que aviso nenhum: manda o leitor procurar o que nao ha. */
-          + 'Elas têm DUAS réguas próprias: '
-          + '<a href="#secOpcoes">o prêmio em bps do NAV</a> e os '
-          + '<b>pontos de preço</b> (coluna <i>pts %</i>). '
-          + '<span class="mdn">' + ex.motivo
-          + '. Cada seção traz no título a etiqueta do que ela cobre.</span>';
-        bx.style.display = '';
-      } else {
-        bx.style.display = 'none';
-      }
-    }
+    /* ⛔ **O AVISO DE "AS ANÁLISES DE TAMANHO NÃO INCLUEM OPÇÕES" FOI REMOVIDO**
+       (02/09/2026, reportado pelo usuário: *"aqui está desatualizado, acho que
+       se tornou inútil o comentário, porque estamos sim considerando em análises
+       de tamanho"*).
+       ☠️ Ele nasceu no §5.-12, quando a opção de fato ficava fora dos quartis e
+       do contrafactual. O §5.-54 pôs a opção DENTRO da análise de tamanho pela
+       régua dela (`tam_norm` = tamanho ÷ média do MESMO tipo, prêmio em bps na
+       opção) — e o aviso continuou dizendo que ela ficava "fora de #PL, DV01,
+       quartis de tamanho e do contrafactual de sizing". Metade daquela frase
+       virou mentira, no bloco mais visível da tela.
+       ⚠️ E o que sobrou de verdade nele — que a opção não tem DV01, logo fica
+       fora das linhas em #PL — **já é declarado onde o número aparece**, que é a
+       regra do §5.-49: a nota da ficha `Exposição do dia` ("Títulos e DI. Opção
+       não tem DV01…"), o subtítulo em `#PL (títulos e DI)` das duas linhas de
+       tamanho por trade, o `<i>` da coluna #PL das tabelas, a nota do Retrato e
+       o card "onde na curva", que monta a exclusão a partir de
+       `TA.excluidos.books`. Um aviso de página repetindo isso só tinha como
+       envelhecer — e envelheceu.
+       ⚠️ `TA.excluidos` CONTINUA no payload: `books` é a fonte da exclusão do
+       gráfico da curva (§5.-52) e não é escrita à mão em lugar nenhum. */
   }
 
   /* ── quando o par (trader, grupo) nao tem uma linha ────────────────────
@@ -1175,10 +1175,19 @@
     /* ⚠️ `barmode:'relative'` EMPILHA — o extremo do eixo e a soma das barras
        do mes (a de custo e sempre negativa), nao o maior valor de uma delas. */
     const mcu = (r) => (DETALHE ? -(emBps() ? r.custo_bps : r.custo) : 0);
+    /* ⭐ **#PL DO MÊS COM SINAL** (+ tomado / − aplicado), a mesma leitura do
+       gráfico de tamanho ao longo do ano (§5.-46/§5.-47) — pedido do usuário.
+       ⚠️ **O fallback para o módulo é obrigatório, não defensivo**: o seletor
+       "Base até" carrega FOTOS antigas (`data/hist/*.js`) e os payloads
+       publicados, que não têm os campos novos. Sem ele, escolher uma foto de
+       ontem desenharia uma linha vazia. */
+    const mpl = (r) => (r.pl_liq_med != null ? r.pl_liq_med : r.pl_med);
+    const mplMed = (r) => (r.pl_liq_mediana != null ? r.pl_liq_mediana : r.pl_mediana);
+    const temNet = M.some((r) => r.pl_liq_med != null);
     const [rgMes, rgPlMes] = zeroAlinhado(
       M.map((r) => Math.max(mv(r), 0) + Math.max(mcu(r), 0))
        .concat(M.map((r) => Math.min(mv(r), 0) + Math.min(mcu(r), 0))),
-      M.map((r) => r.pl_med).concat(M.map((r) => r.pl_mediana)));
+      M.map(mpl).concat(M.map(mplMed)));
     Plotly.newPlot(el('figMes'), [
       { x: M.map((r) => r.data), y: M.map(mv),
         name: DETALHE ? 'resultado LÍQUIDO' : 'resultado', type: 'bar',
@@ -1198,27 +1207,38 @@
          O hover traz também o par calculado só sobre os dias COM posição, que é
          o tamanho limpo de frequência. A queda ao longo do ano aparece nas
          quatro leituras, então o achado não depende de qual se escolhe. */
-      { x: M.map((r) => r.data), y: M.map((r) => r.pl_med), name: '#PL médio (mês)',
+      { x: M.map((r) => r.data), y: M.map(mpl),
+        name: temNet ? '#PL médio (mês) — líquido' : '#PL médio (mês)',
         type: 'scatter', mode: 'lines+markers', yaxis: 'y2',
         line: { color: P()[2], width: 2 },
-        customdata: M.map((r) => [r.pl_med_pos, r.pl_mediana_pos, r.dias_com_pos]),
-        hovertemplate: '%{x}<br><b>#PL MÉDIO no mês %{y:.2f}</b>'
-                     + '<br>só nos %{customdata[2]} dias com posição:'
+        /* ⚠️ O MÓDULO vai no hover, e não é redundância: num mês de inclinação
+           (tomado e aplicado no mesmo dia) o líquido sai perto de zero e o
+           módulo mostra que o risco estava lá — as duas divergem em 32% dos
+           dias-livro (§5.-47). O par "só nos dias com posição" continua. */
+        customdata: M.map((r) => [r.pl_med_pos, r.pl_mediana_pos, r.dias_com_pos,
+                                  r.pl_med, r.pl_tom_med, r.pl_apl_med]),
+        hovertemplate: '%{x}<br><b>#PL LÍQUIDO médio no mês %{y:.2f}</b>'
+                     + (temNet ? '<br>tomado %{customdata[4]:.2f} · aplicado '
+                                 + '%{customdata[5]:.2f} · módulo %{customdata[3]:.2f}' : '')
+                     + '<br>só nos %{customdata[2]} dias com posição (módulo):'
                      + '<br>  média %{customdata[0]:.2f} · mediana %{customdata[1]:.2f}<extra></extra>' },
       /* ⚠️ Nasce DESMARCADA (`visible:'legendonly'`): a mediana e a média do #PL
          andam quase juntas na maioria dos meses, e as duas linhas juntas sobre as
          barras poluem o gráfico. Fica um clique na legenda — não some do estudo.
          O par completo (inclusive só nos dias COM posição) segue no hover da
          linha de média, então nada de informação se perde por padrão. */
-      { x: M.map((r) => r.data), y: M.map((r) => r.pl_mediana), name: '#PL mediano (mês)',
+      { x: M.map((r) => r.data), y: M.map(mplMed),
+        name: temNet ? '#PL mediano (mês) — líquido' : '#PL mediano (mês)',
         type: 'scatter', mode: 'lines+markers', yaxis: 'y2', visible: 'legendonly',
         line: { color: P()[2], width: 2, dash: 'dot' }, marker: { size: 5 },
         hovertemplate: '%{x}<br><b>#PL MEDIANO no mês %{y:.2f}</b><extra></extra>' },
     ], baseLayout(t, {
       height: H_HALF(), barmode: 'relative',
       yaxis: { title: { text: uni() }, zeroline: true, range: rgMes },
-      yaxis2: { title: { text: '#PL' }, overlaying: 'y', side: 'right',
-                showgrid: false, range: rgPlMes },
+      /* ⚠️ o rótulo do eixo diz o SINAL: sem isso um #PL negativo se lê como
+         erro de conta, e não como "estava aplicado". */
+      yaxis2: { title: { text: temNet ? '#PL líquido (+ tomado / − aplicado)' : '#PL' },
+                overlaying: 'y', side: 'right', showgrid: false, range: rgPlMes },
       legend: { orientation: 'h' },
     }), CFG);
 

@@ -14,9 +14,12 @@
      baseLayout(theme(), extra)                -> layout base p/ qualquer outro tipo (barras etc.)
 
    `series` = [{name, x[], y[], color, w?, dash?, mode?, noLabel?,
-                marker?, customdata?, hovertemplate?, showlegend?}]
-              os 4 últimos são passthrough opt-in p/ Plotly (série de marcadores com
-              tamanho por ponto e hover próprio — ex.: leilões no monitor-rf.html)
+                marker?, customdata?, hovertemplate?, showlegend?, yaxis?, shape?}]
+              os 6 últimos são passthrough opt-in p/ Plotly: série de marcadores com
+              tamanho por ponto e hover próprio (leilões no monitor-rf.html), eixo
+              secundário (yaxis:'y2', fora do yExtent do principal) e `shape:'hv'`
+              p/ linha em DEGRAU — limite que muda de vigência numa data salta ali,
+              em vez de virar rampa (bandas do PAF na divida.html)
    `opts`   = {x0, suffix, zero, log, targetBand, h, noLabel, layout}
    ========================================================================== */
 const $=(s,r=document)=>r.querySelector(s);
@@ -147,6 +150,8 @@ function lineFig(el,series,opts){opts=opts||{};const t=theme();
     if(s.hovertemplate)tr.hovertemplate=s.hovertemplate;
     if(s.showlegend!==undefined)tr.showlegend=s.showlegend;
     if(s.yaxis)tr.yaxis=s.yaxis;             // 'y2' = eixo secundário (unidade diferente)
+    if(s.shape)tr.line.shape=s.shape;        // 'hv' = DEGRAU (limite que muda de vigência
+    // numa data: a banda do PAF salta no mês da revisão, não sobe em rampa entre os dois)
     return tr;});
   const x0v=opts.x0||'2018-01-01';
   /* Série em 'y2' fica FORA do extent do eixo principal — senão uma linha de nível (CDI

@@ -41,12 +41,10 @@
   const dt = (s) => (s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '—');
   const el = (id) => document.getElementById(id);
 
-  /* ⭐ ZERO ALINHADO NOS DOIS EIXOS — gêmeo do helper do `app.js` (01/09/2026).
-     ☠️ Aqui a falha era pior que lá: no `figDrillPnl` as DUAS escalas estão em
-     **R$**, e o zero de cada uma caía numa altura diferente. Barra de fluxo
-     negativa aparecia acima da linha de acumulado positiva.
-     ⚠️ Duplicado de propósito — as duas telas são IIFEs independentes, como já
-     acontece com `table()` e `par()` (§5.-41). */
+  /* ⭐ O zero na MESMA altura nos dois eixos, com o menor esticamento possível.
+     ⚠️ **CÓPIA do helper do `app.js` — mexeu num, mexa no outro** (as duas telas
+     não compartilham script). O porquê do MINIMAX (e o caso de 105% de
+     esticamento que o motivou) está escrito por extenso lá, e no §5.-46/§5.-68. */
   function zeroAlinhado(...series) {
     const ext = series.map((v) => {
       let lo = 0, hi = 0;
@@ -58,14 +56,23 @@
       });
       return [lo, hi];
     });
+    /* a fração NATURAL de cada série: quanto da altura dela fica abaixo do zero */
+    const fr = [];
+    ext.forEach(([lo, hi]) => { if (hi > lo) fr.push(-lo / (hi - lo)); });
     let f = 0;
-    ext.forEach(([lo, hi]) => { if (hi > lo) f = Math.max(f, -lo / (hi - lo)); });
+    if (fr.length) {
+      const fmin = Math.min.apply(null, fr), fmax = Math.max.apply(null, fr);
+      f = fmax / (1 - fmin + fmax);
+    }
+    /* ⚠️ teto de 0,9: séries TODAS negativas pediriam `f = 1`, o que achataria a
+       metade positiva do eixo numa fatia de altura zero. */
     f = Math.min(f, 0.9);
-    const FOLGA = 1.06;
+    const FOLGA = 1.06;          // o respiro que o eixo automático daria no topo
     return ext.map(([lo, hi]) => {
       if (f <= 0) return [0, (hi || 1) * FOLGA];
-      const alto = Math.max(hi, (-lo * (1 - f)) / f) * FOLGA;
-      return [(-f * alto) / (1 - f), alto];
+      /* o eixo tem de caber os dois lados do dado COM o zero na fração `f` */
+      const span = Math.max(hi / (1 - f), -lo / f) * FOLGA;
+      return [-f * span, (1 - f) * span];
     });
   }
   const P = () => PALETTE_JGP();

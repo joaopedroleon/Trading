@@ -544,10 +544,6 @@
              vira nota de rodape. -->
         <div class="meta-item"><dt>Base at&eacute;</dt><dd id="mtBase">&mdash;</dd></div>
       </dl>
-      <!-- ⛔ O que a base de an&aacute;lise deixou de fora, preenchido por app.js.
-           Fica no CABE&Ccedil;ALHO de prop&oacute;sito: vale para a p&aacute;gina inteira, n&atilde;o para
-           um gr&aacute;fico. -->
-      <div class="aviso" id="ehExcluidos" style="display:none;margin-top:14px"></div>
     </header>
 
 
@@ -565,6 +561,13 @@
         </div>
         <div class="card">
           <h3 class="chart-title">Resultado por m&ecirc;s</h3>
+          <!-- ⭐ O card n&atilde;o tinha subt&iacute;tulo, e a linha de #PL passou a ter SINAL
+               (02/09/2026): sem dizer que `+` &eacute; tomado e `−` aplicado, um m&ecirc;s
+               negativo se leria como erro. Mesma leitura do gr&aacute;fico de tamanho
+               da posi&ccedil;&atilde;o ao longo do ano. -->
+          <div class="csub">barras = resultado do m&ecirc;s &middot; linha = <b>#PL m&eacute;dio
+            l&iacute;quido</b> (<b>+</b> tomado, <b>&minus;</b> aplicado). O m&oacute;dulo &mdash; quanto
+            risco havia, sem a dire&ccedil;&atilde;o &mdash; vai no hover</div>
           <div class="plot" id="figMes"></div>
           <div class="cfonte">JRS.VW_SOPHIS_TICKETS</div>
         </div>
