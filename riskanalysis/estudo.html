@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trades do gestor — análise anual · JGP Macro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- (opcional) lib de gr&aacute;fico: <script src="plotly.min.js"></script> -->
+<style>
+/* =====================================================================
+     Tema JGP (analise_html): Inter única, papel creme quente + tinta preta,
+     verde JGP como acento, navbar global no topo + tabbar de capítulos +
+     header editorial (SEM sidebar lateral).
+     As variáveis --surface/--ink/--s1…/--chart-* são consumidas pelo JS do
+     chart (theme(), baseLayout(), séries) — NÃO renomeie nem remova.
+     ===================================================================== */
+  :root{
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    /* paleta editorial */
+    --bg-page:#F6F4EE; --bg-content:#FFFFFF; --bg-subtle:#FAFAF7; --bg-overlay:rgba(246,244,238,.85);
+    --ink-primary:#0A0A0A; --ink-secondary:#4A4A48; --ink-tertiary:#8C8C88; --ink-quaternary:#B8B8B2;
+    --jgp-green:#00B050; --jgp-green-deep:#008A3F; --jgp-green-tint:rgba(0,176,80,.08);
+    --rule-strong:#0A0A0A; --rule-soft:#DDD9CE; --rule-faint:#ECE8DC;
+    --container-max:1840px; --scroll-progress:0%; --jgp-nav-h:46px;
+    /* mapeamento p/ o dashboard (consumido pelo JS/Plotly) */
+    --page:var(--bg-page); --surface:var(--bg-content); --ink:var(--ink-primary);
+    --ink2:var(--ink-secondary); --muted:var(--ink-tertiary);
+    --grid:var(--rule-faint); --axis:var(--rule-soft); --line:var(--rule-soft);
+    --green:var(--jgp-green); --green-dark:var(--jgp-green-deep); --red:#E63946;
+    --sec:#E4E0D3; --hl:var(--jgp-green-tint);
+
+    /* ---- Paleta JGP (funcoes_graficas_jgp/config.py · PALETTE_JGP) ----
+       Ordem canônica: verde · preto · cinza · azul · verde-claro · azul-claro · laranja.
+       Semântica: verde=série principal/realizado · preto=série secundária ·
+       cinza=neutro/mediana histórica · azul=alternativa · verde-claro=projeção da verde ·
+       azul-claro=ano anterior em sazonais · laranja=alerta moderado · vermelho=alerta forte. */
+    --jgp-verde:#00B050; --jgp-preto:#1F1F1F; --jgp-cinza:#7F7F7F; --jgp-azul:#0070C0;
+    --jgp-verde-claro:#92D050; --jgp-azul-claro:#00B0F0; --jgp-laranja:#FFA500; --jgp-vermelho:#E63946;
+
+    /* séries do chart = paleta JGP na ordem canônica */
+    --s1:var(--jgp-verde); --s2:var(--jgp-preto); --s3:var(--jgp-cinza); --s4:var(--jgp-azul);
+    --d1:var(--jgp-verde-claro); --d2:var(--jgp-azul-claro); --d3:var(--jgp-laranja);
+    --accent:var(--jgp-azul);   /* chrome de UI (foco, célula editada) — NÃO é cor de série */
+    --band:rgba(127,127,127,.18); --band-strong:rgba(127,127,127,.30); --median:var(--jgp-cinza);
+    --prior:var(--jgp-azul-claro); --cur:var(--jgp-verde);
+
+    /* estrutura do chart (tema.py: setup_matplotlib + aplicar_tema) */
+    --chart-grid:#EBEBEB; --chart-axis:#000000; --chart-zero:var(--jgp-cinza);
+    --chart-legend:#4D4D4D; --chart-title:#1F1F1F; --chart-sub:#666666; --chart-caption:#8C8C8C;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg-page:#0d0d0d; --bg-content:#1a1a19; --bg-subtle:#161615; --bg-overlay:rgba(13,13,13,.85);
+      --ink-primary:#ffffff; --ink-secondary:#c3c2b7; --ink-tertiary:#898781; --ink-quaternary:#5a5a58;
+      --jgp-green:#00b856; --jgp-green-deep:#00a04a; --jgp-green-tint:rgba(0,184,86,.15);
+      --rule-strong:#e8e8e4; --rule-soft:#383835; --rule-faint:#2c2c2a;
+      --red:#E66767; --sec:#2b2b28; --hl:var(--jgp-green-tint);
+      /* Paleta JGP no dark: mesma identidade/ordem, luminância elevada p/ contraste. */
+      --jgp-verde:#00C95C; --jgp-preto:#E8E8E4; --jgp-cinza:#9A9A94; --jgp-azul:#3D9BE0;
+      --jgp-verde-claro:#A8DC6B; --jgp-azul-claro:#3FC8F5; --jgp-laranja:#FFB733; --jgp-vermelho:#E66767;
+      --band:rgba(154,154,148,.20); --band-strong:rgba(154,154,148,.32);
+      --chart-grid:#2C2C2A; --chart-axis:#E8E8E4; --chart-zero:var(--jgp-cinza);
+      --chart-legend:#C3C2B7; --chart-title:#FFFFFF; --chart-sub:#A9A79F; --chart-caption:#898781;
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  body{font-family:var(--font);font-weight:400;background:var(--bg-page);color:var(--ink-primary);
+       line-height:1.55;font-size:15px;letter-spacing:-.005em;font-feature-settings:'cv11','ss01','ss03';
+       padding-top:var(--jgp-nav-h,46px);
+       background-image:radial-gradient(circle at 20% 30%,rgba(0,0,0,.012) 0%,transparent 35%),
+                        radial-gradient(circle at 80% 70%,rgba(0,0,0,.008) 0%,transparent 40%)}
+  ::selection{background:var(--jgp-green);color:#fff}
+
+  /* ==== Barra de progresso de scroll ==== */
+  .scroll-progress{position:fixed;top:0;left:0;right:0;height:3px;background:var(--rule-faint);z-index:200}
+  .scroll-progress::after{content:'';display:block;height:100%;width:var(--scroll-progress);
+    background:var(--jgp-green);transition:width .06s linear}
+
+  /* ==== Top nav (autocontida — só p/ deliverable standalone; no monorepo use shared-web/nav.js) ==== */
+  .topnav{position:fixed;top:0;left:0;right:0;height:var(--jgp-nav-h,46px);background:var(--bg-overlay);
+    backdrop-filter:saturate(140%) blur(12px);-webkit-backdrop-filter:saturate(140%) blur(12px);
+    border-bottom:1px solid var(--rule-faint);z-index:150;display:flex;align-items:center;
+    justify-content:space-between;padding:0 1.5rem}
+  .topnav-left{display:flex;align-items:baseline;gap:.6rem;font-size:.74rem;font-weight:500;letter-spacing:.02em}
+  .topnav .wordmark{font-weight:700;font-size:.96rem;letter-spacing:-.01em;color:var(--ink-primary)}
+  .topnav .divider{color:var(--ink-quaternary)}
+  .topnav .breadcrumb{color:var(--ink-secondary);font-weight:400;text-transform:uppercase;letter-spacing:.08em;font-size:.7rem}
+  .topnav-right{font-size:.7rem;font-weight:500;letter-spacing:.06em;color:var(--ink-tertiary);text-transform:uppercase}
+  .topnav-right .pill{display:inline-flex;align-items:center;gap:.4rem;padding:.18rem .55rem;
+    border:1px solid var(--rule-soft);border-radius:999px;background:var(--bg-content)}
+  .topnav-right .pill::before{content:'';display:block;width:6px;height:6px;border-radius:50%;background:var(--jgp-green)}
+
+  /* ==== Conteúdo principal — coluna única, largura total (SEM sidebar) ==== */
+  .main-content{max-width:var(--container-max);margin:0 auto;background:var(--bg-content);
+    min-height:calc(100vh - var(--jgp-nav-h,46px));
+    border-left:1px solid var(--rule-faint);border-right:1px solid var(--rule-faint);
+    padding:2rem clamp(1.4rem,3vw,2.4rem) 4rem;min-width:0;position:relative}
+
+  /* ==== Header da página ==== */
+  .page-header{margin-bottom:2.6rem;padding-bottom:1.6rem;border-bottom:1px solid var(--rule-strong);position:relative}
+  .page-header::after{content:'';position:absolute;bottom:-1px;left:0;width:80px;height:3px;background:var(--jgp-green)}
+  .page-eyebrow{font-size:.7rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-tertiary);margin-bottom:1.2rem;display:flex;align-items:center;gap:.7rem}
+  .page-eyebrow .tag{padding:.18rem .55rem;background:var(--ink-primary);color:var(--bg-content);letter-spacing:.1em;font-weight:600}
+  .page-title{font-weight:700;font-size:clamp(2rem,3.6vw,2.9rem);line-height:1.05;letter-spacing:-.028em;
+    color:var(--ink-primary);margin-bottom:.6rem}
+  .page-meta{display:flex;flex-wrap:wrap;gap:1.6rem;font-size:.74rem;font-weight:500;color:var(--ink-tertiary);
+    text-transform:uppercase;letter-spacing:.08em;margin-top:1.4rem;font-feature-settings:'tnum' 1}
+  .page-meta .meta-item{display:flex;gap:.4rem;align-items:baseline}
+  .page-meta dt{color:var(--ink-quaternary);font-weight:500}
+  .page-meta dd{color:var(--ink-secondary);font-weight:600}
+
+  /* ==== Títulos de seção (h1 legacy + h2 numeradas) ==== */
+  h1{font-weight:700;font-size:clamp(2rem,3.6vw,2.9rem);line-height:1.05;letter-spacing:-.028em;margin:0 0 .6rem}
+  h2{counter-increment:sec;display:flex;align-items:baseline;gap:.7rem;font-weight:600;font-size:1.02rem;
+    letter-spacing:-.005em;color:var(--ink-primary);margin:1.7rem 0 .7rem;padding-bottom:.4rem;
+    border-bottom:1px dashed var(--rule-soft);scroll-margin-top:70px}
+  h2::before{content:counter(sec,decimal-leading-zero);font-size:.78rem;font-weight:600;color:var(--jgp-green);
+    letter-spacing:.04em;flex-shrink:0;font-feature-settings:'tnum' 1}
+  .tab{counter-reset:sec}
+  .lead,.sub{font-size:12.5px;color:var(--ink-secondary);margin:0 0 8px;max-width:1400px;line-height:1.5}
+  .sub{color:var(--ink-tertiary)}
+
+  /* ==== Tabelas ==== */
+  .wrap{overflow-x:auto;margin-bottom:6px}
+  table{border-collapse:collapse;font-size:12px;min-width:760px;width:100%;max-width:1040px}
+  th,td{border:1px solid var(--line);padding:3px 8px;white-space:nowrap}
+  thead th{background:var(--green);color:#fff;font-weight:700;text-align:center;border-color:var(--green-dark)}
+  thead th.left{text-align:left}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  td.lbl,td.cat{text-align:left} td.peso{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink2)}
+  tr.headline td{background:var(--hl);font-weight:700}
+  tr.core td{background:var(--sec);color:var(--ink);font-weight:700}
+  tr.section td{background:var(--sec);font-weight:700}
+  td.cat{color:var(--red);font-weight:700;text-decoration:underline}
+  td.item{padding-left:26px} td.item2{padding-left:40px}
+  tr.zebra td{background:rgba(128,128,128,.06)}
+  td.nd{color:var(--muted);text-align:center;font-style:italic}
+  .neg{color:var(--red)}
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  @media (max-width:820px){.grid2{grid-template-columns:1fr}}
+  /* cards = molduras de figura: título 14 bold · subtítulo 11 (Last data) · caption de fonte 11 */
+  .card{background:var(--bg-content);border:1px solid var(--rule-faint);border-radius:2px;padding:.5rem .6rem;
+    transition:border-color .25s ease;margin-bottom:14px}
+  .card:hover{border-color:var(--rule-soft)}
+  .card h3{font-size:14px;font-weight:700;margin:0 0 1px;color:var(--chart-title);letter-spacing:-.01em;line-height:1.25}
+  .card .csub{font-size:11px;font-weight:400;color:var(--chart-sub);margin:0 0 6px;line-height:1.35}
+  .card .cfonte{font-size:11px;color:var(--chart-caption);margin:4px 0 0;line-height:1.3}
+  .plot{width:100%}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0 8px}
+  .controls label{font-size:12px;color:var(--ink2)}
+  select{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--axis);border-radius:5px;background:var(--surface);color:var(--ink)}
+  .seg{display:inline-flex;border:1px solid var(--axis);border-radius:5px;overflow:hidden}
+  .seg button{font:inherit;font-size:12px;padding:4px 12px;border:0;background:var(--surface);color:var(--ink2);cursor:pointer}
+  .seg button.on{background:var(--accent);color:#fff}
+  .foot{font-size:11px;color:var(--muted);margin-top:16px;max-width:1100px;line-height:1.55}
+  code{background:var(--jgp-green-tint);color:var(--ink-secondary);padding:1px 4px;border-radius:3px;
+    font-size:.92em;font-feature-settings:'tnum' 1}
+
+  /* ==== Footer ==== */
+  .page-footer{margin-top:5rem;padding-top:1.6rem;border-top:1px solid var(--rule-strong);position:relative;
+    display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
+    font-size:.72rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-tertiary)}
+  .page-footer::before{content:'';position:absolute;top:-1px;left:0;width:80px;height:3px;background:var(--jgp-green)}
+  .page-footer .credits{color:var(--ink-secondary);font-weight:500}
+  .page-footer .credits strong{color:var(--ink-primary);font-weight:700}
+
+  /* ==== Back to top ==== */
+  .back-to-top{position:fixed;bottom:2rem;right:2rem;width:44px;height:44px;background:var(--ink-primary);
+    color:var(--bg-content);border:none;cursor:pointer;font-family:inherit;font-size:.55rem;font-weight:600;
+    letter-spacing:.08em;text-transform:uppercase;opacity:0;transform:translateY(10px);
+    transition:opacity .3s ease,transform .3s ease,background .2s ease;z-index:120;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:.05rem;line-height:1}
+  .back-to-top:hover{background:var(--jgp-green-deep)}
+  .back-to-top.visible{opacity:1;transform:translateY(0)}
+  .back-to-top .arrow{font-size:1rem;font-weight:400}
+
+  /* ==== Animações ==== */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .fade-up{opacity:0;animation:fadeUp .55s cubic-bezier(.2,0,.1,1) forwards}
+  .delay-1{animation-delay:.05s} .delay-2{animation-delay:.18s}
+
+  /* ==== Abas de capítulo — tabbar sticky sob a navbar global (padrão analise_html) ==== */
+  .tabbar{position:sticky;top:calc(var(--jgp-nav-h,46px) + 3px);z-index:30;display:flex;gap:2px;flex-wrap:wrap;
+    padding:0 clamp(1rem,3vw,3rem);background:var(--bg-content);   /* faixa BRANCA (padrão Monitor RF), destaca do creme */
+    backdrop-filter:saturate(140%) blur(12px);-webkit-backdrop-filter:saturate(140%) blur(12px);
+    border-bottom:1px solid var(--rule-soft)}
+  .tabbtn{padding:11px 16px;font-size:13px;font-weight:600;color:var(--ink-secondary);
+    background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;
+    font-family:var(--font);transition:color .18s ease}
+  .tabbtn:hover{color:var(--ink-primary)}
+  .tabbtn.on{color:var(--ink-primary);border-bottom:2px solid var(--jgp-green)}
+  .tab{display:none} .tab.on{display:block}
+  h2{scroll-margin-top:calc(var(--jgp-nav-h,46px) + 52px)}
+
+
+  /* ==== extensões do estudo ==== */
+  /* ⭐ cabeçalho ORDENÁVEL: o clique inteiro do <th> é o alvo, e a seta só
+     ocupa espaço quando a coluna está ativa (`ordseta` vazia não desloca).
+     ⚠️ `user-select:none` porque duplo clique rápido selecionaria o texto. */
+  th .ordth{cursor:pointer;user-select:none;display:inline-block}
+  th .ordth:hover{color:var(--green)}
+  th .ordseta{font-style:normal;font-size:9px;color:var(--green)}
+  /* ⭐ ESCOPO no título da seção: qual base de ativos aquele bloco cobre.
+     ⚠️ Discreto de propósito — é qualificador, não título; competir com o
+     nome da seção faria o leitor ler a etiqueta antes do assunto. */
+  .esc{display:inline-block;margin-left:9px;padding:2px 8px;border-radius:10px;
+    background:var(--grid);color:var(--ink-tertiary);vertical-align:middle;
+    font:600 10px/1.5 var(--font);letter-spacing:.06em;text-transform:uppercase}
+  /* ⚠️ A regra `.selreg` (seletor de régua DENTRO do subtítulo de um card) saiu
+     em 01/09/2026: o único consumidor era o `#selDuracao` do card de duração ×
+     resultado, e ele foi absorvido pelo seletor de régua GLOBAL da tabbar. Duas
+     réguas na mesma página — uma da página, outra de um card — se contradiriam
+     na cara do leitor. Se voltar a existir seletor por card, a casca é a do
+     `.swdet select` abaixo. */
+
+  /* ⭐ FICHA: o modelo que substituiu os KPIs soltos (31/08/2026).
+     ☠️ **Cartão isolado não diz a que grupo pertence.** A tela tinha 9 caixinhas
+     em fila no Retrato do ano, e nada dizia que "Custo" e "Carrego" são a mesma
+     conta ou que "Acerto" e "Payoff" respondem à mesma pergunta — o leitor tinha
+     de reagrupar de cabeça. Pior, a fila quebrava em 2-3 linhas conforme a
+     largura, então a vizinhança mudava de tamanho de janela.
+     ⭐ A ficha é uma LISTA rotulada: um cabeçalho de subseção e linhas
+     `rótulo … valor`, alinhadas à direita e tabulares, como uma demonstração
+     financeira. O agrupamento passa a ser explícito e a ordem, estável. */
+  /* ⚠️ `flex:1 1 100%` porque o container herdado (`.kpis`) e FLEX — sem isso a
+     grade vira um item flex e encolhe ao conteudo (medido: 481px de largura num
+     viewport de 1600, com as 3 fichas empilhadas numa coluna so). */
+  .fichas{display:grid;gap:20px 30px;margin:2px 0 4px;width:100%;flex:1 1 100%;
+    grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+  .ficha{min-width:0}
+  .ficha-h{font:600 10.5px/1 var(--font);letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-tertiary);margin:0 0 7px;padding-bottom:6px;
+    border-bottom:1px solid var(--grid)}
+  .ficha dl{margin:0}
+  /* ⚠️ `baseline` e não `center`: os valores têm corpos diferentes (o destaque é
+     maior), e centralizar deixaria os números dançando na vertical. */
+  .fl{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+    padding:5px 0;border-bottom:1px solid var(--grid-soft,rgba(128,128,128,.13))}
+  .ficha .fl:last-child{border-bottom:none}
+  .fl dt{margin:0;min-width:0;font-size:12px;color:var(--ink2);line-height:1.3}
+  .fl dt i{display:block;font-style:normal;font-size:10.5px;color:var(--ink-tertiary);
+    line-height:1.35;margin-top:1px}
+  .fl dd{margin:0;flex:none;text-align:right;font-size:14.5px;font-weight:600;
+    color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* o número PRINCIPAL de cada ficha: maior, e o rótulo em peso cheio */
+  .fl.dst{padding:2px 0 8px}
+  .fl.dst dt{font-size:12.5px;font-weight:600;color:var(--ink)}
+  .fl.dst dd{font-size:23px;font-weight:700;letter-spacing:-.01em}
+  .fl dd.neg{color:var(--red,#c83c3c)} .fl dd.pos{color:var(--green)}
+  /* ⚠️ a nota de rodapé da ficha fica FORA da <dl>: é sobre o conjunto */
+  .ficha-n{font-size:10.5px;line-height:1.45;color:var(--ink-tertiary);margin:7px 0 0}
+
+  .xlink{margin-left:14px;font:600 11.5px/1 var(--font);letter-spacing:.05em;text-transform:uppercase;
+    color:var(--ink-tertiary);text-decoration:none;padding-bottom:2px;border-bottom:2px solid transparent}
+  .xlink:hover{color:var(--ink)}
+  .xlink.on{color:var(--green);border-bottom-color:var(--green)}
+  .segbar{display:flex;gap:2px;margin-top:1.4rem}
+  .segbtn{padding:7px 18px;font:600 12px/1 var(--font);letter-spacing:.04em;cursor:pointer;
+    color:var(--ink-secondary);background:var(--surface);border:1px solid var(--grid);border-radius:5px}
+  .segbtn.on{background:var(--green);border-color:var(--green);color:#fff}
+  .aviso{border-left:3px solid var(--green);background:rgba(0,176,80,.06);padding:9px 14px;
+    margin:0 0 8px;font-size:12.5px;line-height:1.55;color:var(--ink2);border-radius:0 4px 4px 0}
+  /* par média/mediana numa célula só: a mediana em cinza, a média no peso normal.
+     O cabeçalho traz os dois nomes por extenso num <i> menor — sem isso a coluna
+     voltaria a ser um "med" que não diz qual das duas está na frente. */
+  .mdn{color:var(--muted);font-weight:400}
+  /* custo, na célula bruto − custo = líquido */
+  .cst{color:var(--red);font-weight:400}
+  .bcl2{display:block;font-size:10.5px;color:var(--muted);font-weight:400;margin-top:1px}
+  /* campo com explicacao no hover: o pontilhado e o unico aviso de que ha
+     algo a ler. `help` no cursor reforca. Vale em <th> e no rotulo do KPI. */
+  .hastip{border-bottom:1px dotted currentColor;cursor:help}
+  th .hastip{border-bottom-color:rgba(255,255,255,.55)}
+  /* o interruptor da quebra bruto x custo — mora na TABBAR (não no header) para
+     ficar visível em todas as abas: ele muda a página inteira, não uma seção */
+  /* seletores de trader e grupo de ativo — mandam na pagina inteira, entao
+     ficam na TABBAR, visiveis em toda aba (mesma razao do .swdet) */
+  .selwrap{margin-left:auto;display:inline-flex;align-items:center;gap:10px;padding:4px 0}
+  .selwrap label{display:inline-flex;align-items:center;gap:5px;
+    font:600 10px/1 var(--font);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted)}
+  .selwrap select{font:600 12px/1 var(--font);color:var(--ink);background:var(--surface);
+    border:1px solid var(--grid);border-radius:5px;padding:6px 8px;cursor:pointer}
+  .selwrap select:hover{border-color:var(--green)}
+  .selwrap select option:disabled{color:var(--muted)}
+  .swdet{display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+    font:500 11.5px/1 var(--font);color:var(--ink-secondary);letter-spacing:.02em;
+    padding:6px 10px;border:1px solid var(--grid);border-radius:5px;white-space:nowrap}
+  .swdet:hover{color:var(--ink);border-color:var(--green)}
+  .swdet input{accent-color:var(--green);cursor:pointer;margin:0}
+  /* ⭐ O seletor de RÉGUA da página (bps × reais) usa a MESMA casca do
+     interruptor de detalhe, e de propósito: os dois mandam na página inteira e
+     vivem lado a lado na tabbar. Casca diferente sugeriria escopo diferente. */
+  .swreg{gap:7px}
+  .swdet select{font:600 11.5px/1 var(--font);color:var(--ink);
+    background:var(--surface);border:1px solid var(--grid);border-radius:4px;
+    padding:3px 6px;cursor:pointer}
+  .swdet select:hover{border-color:var(--green)}
+  /* a 3ª leitura de bps de taxa (ponderada por DV01 x giro) — é a que reconcilia
+     com o dinheiro, então vai em destaque, não em cinza como a mediana */
+  .pnd{color:var(--green);font-weight:600}
+  th i{display:block;font-style:normal;font-weight:500;font-size:10px;letter-spacing:.02em;
+    opacity:.72;text-transform:none;margin-top:1px}
+  .mlist{margin:.2rem 0 1.4rem 1.1rem;padding:0;font-size:13.5px;line-height:1.7;color:var(--ink2)}
+  .mlist li{margin-bottom:.45rem}
+  .chk{margin-left:2px;font-size:12px;color:var(--muted);cursor:pointer;font-weight:600;
+    white-space:nowrap}
+  .chk input{vertical-align:-2px;margin-right:4px;accent-color:var(--green)}
+  td.neg,.v.neg{color:var(--red)}
+  .page-eyebrow #ehJanela{color:var(--ink-tertiary);letter-spacing:.06em}
+  /* filtros das tabelas grandes */
+  .filtros{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:.6rem 0 1rem;
+    padding:9px 12px;background:var(--surface);border:1px solid var(--grid);border-radius:6px}
+  .filtros select{font:500 12px/1 var(--font);padding:5px 8px;color:var(--ink2);
+    background:var(--surface);border:1px solid var(--grid);border-radius:4px}
+  .fcount{margin-left:auto;font:600 11.5px/1 var(--font);color:var(--muted);
+    letter-spacing:.04em;white-space:nowrap}
+  /* drill-down de um ciclo */
+  .drill{margin-top:1.6rem;padding-top:1.2rem;border-top:2px solid var(--green)}
+  .drillhead{display:flex;align-items:center;justify-content:space-between;gap:14px;
+    margin-bottom:.8rem}
+  .drillhead h3{margin:0;font-size:15px;font-weight:600;color:var(--ink)}
+  tr.clickable{cursor:pointer}
+  tr.clickable:hover td{background:rgba(0,176,80,.07)}
+  .tagmini{display:inline-block;padding:1px 5px;border-radius:3px;font:700 9.5px/1.5 var(--font);
+    letter-spacing:.05em;text-transform:uppercase;background:var(--green);color:#fff;
+    vertical-align:1px}
+  .tagmini.alt{background:var(--ink-tertiary)}
+  .lado{font-weight:700;font-size:11px;letter-spacing:.03em}
+  .lado.compra{color:var(--green)}
+  .lado.venda{color:var(--red)}
+  .vaziofig{display:flex;align-items:center;justify-content:center;height:180px;
+    color:var(--muted);font-size:13px;font-style:italic}
+  /* ==== controle da tela local: atualizar / publicar (report/controle.js) ====
+     ⛔ Só a versão LOCAL tem estes elementos — o publicador arranca o
+     `controle.js` do HTML que vai para o GitHub Pages. O CSS sobra lá sem uso,
+     e é de propósito: uma folha por destino divergiria em silêncio. */
+  #ctlWrap{display:inline-flex;align-items:center;gap:7px;margin-left:12px}
+  .ctl-pill{font:600 10px/1 var(--font);letter-spacing:.04em;text-transform:uppercase;
+    padding:4px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+  .ctl-ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,transparent)}
+  .ctl-run{color:#b36f00;border-color:#e8c98a;background:#fff6e0}
+  .ctl-err{color:var(--red);border-color:color-mix(in srgb,var(--red) 40%,transparent)}
+  .ctl-off{color:var(--muted)}
+  .ctl-b{font:600 11.5px/1 var(--font);color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer}
+  .ctl-b:hover:not(:disabled){border-color:var(--green);color:var(--green)}
+  /* ⚠️ desabilitado tem de PARECER desabilitado: sem o controle no ar o clique
+     não faz nada, e um botão de aparência normal viraria "a tela travou". */
+  .ctl-b:disabled{opacity:.42;cursor:not-allowed}
+  .ctl-msg{font:400 11px/1.3 var(--font);color:var(--muted);max-width:280px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* ⚠️ abaixo de 1100px a tabbar já quebra em linhas com os 4 <select>; a
+     mensagem de progresso é o primeiro item dispensável. */
+  @media (max-width:1100px){ .ctl-msg{display:none} }
+
+  /* ==== Responsivo ==== */
+  @media (max-width:1100px){
+    .main-content{padding:2rem 1.4rem 4rem}
+  }
+  /* tabela de projeção */
+  .ptbl-wrap{overflow-x:auto;margin-bottom:8px;border:1px solid var(--grid);border-radius:6px;max-height:640px}
+  table.ptbl{border-collapse:separate;border-spacing:0;font-size:11px;min-width:1400px}
+  table.ptbl th,table.ptbl td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:2px 5px;white-space:nowrap}
+  table.ptbl thead th{position:sticky;top:0;background:var(--green);color:#fff;font-weight:700;text-align:center;z-index:3}
+  table.ptbl th.name,table.ptbl td.name{position:sticky;left:0;z-index:2;text-align:left;min-width:210px;
+    background:var(--surface);border-right:2px solid var(--axis)}
+  table.ptbl thead th.name{z-index:4;background:var(--green)}
+  table.ptbl td.yy{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;background:rgba(0,138,62,.08)}
+  table.ptbl td.val{text-align:right;font-variant-numeric:tabular-nums;padding:0}
+  table.ptbl td.val input{width:52px;border:0;background:transparent;color:var(--ink);font:inherit;text-align:right;
+    padding:2px 5px;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+  table.ptbl td.val input::-webkit-outer-spin-button,table.ptbl td.val input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  table.ptbl td.val input:focus{outline:2px solid var(--accent);background:var(--surface)}
+  table.ptbl td.val input.edited{background:rgba(42,120,214,.16);font-weight:600}
+  table.ptbl td.comp{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink2);background:rgba(128,128,128,.05)}
+  table.ptbl tr.lvl0 td{background:var(--hl);font-weight:700}
+  table.ptbl tr.lvl0 td.name{background:var(--hl);padding-left:8px}
+  table.ptbl tr.lvl1 td{background:var(--sec);font-weight:700}
+  table.ptbl tr.lvl1 td.name{background:var(--sec)}
+  table.ptbl tr.lvl2 td.name{color:var(--red);font-weight:700;padding-left:16px}
+  table.ptbl tr.leaf td.name{padding-left:24px;color:var(--ink)}
+  table.ptbl td.sep{border-left:2px solid var(--axis)}
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}
+  @media (max-width:820px){.pgrid{grid-template-columns:1fr}}
+  .kpis{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 14px}
+  .kpi{background:var(--surface);border:1px solid var(--grid);border-radius:6px;padding:8px 14px;min-width:132px}
+  .kpi .k{font-size:11px;color:var(--muted)} .kpi .v{font-size:21px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .kpi .d{font-size:11px;color:var(--ink2)}
+  button.act{font:inherit;font-size:12px;font-weight:600;padding:6px 14px;border:1px solid var(--axis);border-radius:5px;
+    background:var(--surface);color:var(--ink);cursor:pointer}
+  button.act:hover{border-color:var(--green);color:var(--green)}
+</style>
+<link rel="stylesheet" href="lock.css">
+</head>
+<body>
+<!-- barra de progresso de scroll -->
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<!-- Navbar GLOBAL. No monorepo Programs/: APAGUE este <nav class="topnav"> e o CSS .topnav*,
+     e inclua <script src="<rel>/shared-web/nav.js"></script> antes de </body> — a barra
+     global (switcher de projeto + pill Bloomberg) é injetada e define --jgp-nav-h.
+     Standalone (fora do monorepo): mantenha esta topnav autocontida. NUNCA use sidebar. -->
+<nav class="topnav">
+  <div class="topnav-left">
+    <span class="wordmark">JGP</span>
+    <span class="divider">&middot;</span>
+    <span class="breadcrumb">ESTUDO &middot; TRADES DO GESTOR</span>
+    <span class="divider">&middot;</span>
+    <a class="xlink on" href="estudo.html">An&aacute;lise anual</a>
+    <a class="xlink" href="trades.html">Trade a trade &amp; boletas</a>
+  </div>
+  <div class="topnav-right"><span class="pill" id="pillMeta">&mdash;</span></div>
+</nav>
+
+<nav class="tabbar" id="tabbar">
+  <button class="tabbtn on" data-tab="visao">Retrato do ano</button>
+  <!-- ⭐ "Posicao & risco" + "Sizing" FUNDIDAS (31/08/2026): as duas falavam de
+       TAMANHO — a 1a "quanto risco ele tinha e onde", a 2a "esse risco foi bem
+       alocado?". Sao a mesma materia em duas perguntas, e separadas obrigavam a
+       pular de aba para responder uma. A fusao liberou o slot do CUSTO, que
+       estava enterrado dentro de "Posicao & risco" e ninguem acharia la. -->
+  <button class="tabbtn" data-tab="portfolio">Tamanho &amp; risco</button>
+  <button class="tabbtn" data-tab="habilidade">Acerto &amp; payoff</button>
+  <button class="tabbtn" data-tab="custo">Custo</button>
+  <button class="tabbtn" data-tab="contratos">Contratos</button>
+  <button class="tabbtn" data-tab="metodo">Como &eacute; medido</button>
+  <span class="selwrap">
+    <label>Trader <select id="selTrader"></select></label>
+    <label>Ativo <select id="selGrupo"></select></label>
+    <label>Ano <select id="selAno"></select></label>
+    <!-- ⭐ AS FOTOS NO TEMPO (02/09/2026). ☠️ N&Atilde;O &eacute; o mesmo que o ANO:
+         `2024` &eacute; um ano fechado; `2026 &middot; base at&eacute; 15/08` &eacute; o ano CORRENTE
+         como ele era naquele dia. Nasce ESCONDIDO e o `ta-sel.js` mostra s&oacute; quando
+         o hist&oacute;rico daquele par tem mais de uma foto — um controle que n&atilde;o
+         controla nada sugere hist&oacute;rico vazio, que &eacute; pior que a aus&ecirc;ncia dele. -->
+    <label>Base at&eacute; <select id="selBase"></select></label>
+  </span>
+  <!-- ⭐ A R&Eacute;GUA DA P&Aacute;GINA (01/09/2026). Padr&atilde;o bps do NAV: &eacute; a &uacute;nica r&eacute;gua
+       compar&aacute;vel entre traders e entre anos — R$ 32 mil num livro de R$ 23 MM n&atilde;o
+       &eacute; o mesmo que R$ 32 mil num de R$ 200 MM, e o NAV alocado muda por decis&atilde;o
+       da casa. O RESULTADO TOTAL em R$ fica vis&iacute;vel nas DUAS r&eacute;guas.
+       ⚠️ Mora na tabbar, e n&atilde;o no header, pela mesma raz&atilde;o do interruptor de
+       detalhe: ele muda a p&aacute;gina inteira, ent&atilde;o precisa estar vis&iacute;vel em toda
+       aba. E N&Atilde;O recarrega a p&aacute;gina (ao contr&aacute;rio dos seletores de
+       trader/ativo/ano, que trocam o ARQUIVO de dados) — s&oacute; invalida o cache
+       `drawn` e redesenha. -->
+  <label class="swdet swreg" title="Troca a unidade das an&aacute;lises: bps do NAV do trader (padr&atilde;o, compar&aacute;vel entre traders e anos) ou reais. O resultado total em R$ aparece nas duas. DV01, giro e custo por perna ficam sempre em R$ &mdash; s&atilde;o sensibilidade e pre&ccedil;o unit&aacute;rio, n&atilde;o resultado.">
+    r&eacute;gua
+    <select id="selRegua">
+      <option value="bps">bps do NAV</option>
+      <option value="brl">reais</option>
+    </select>
+  </label>
+  <label class="swdet" title="Por padr&atilde;o a tela mostra s&oacute; o resultado L&Iacute;QUIDO (depois de corretagem, custos operacionais e carrego). Marque para abrir a quebra bruto &minus; custo = l&iacute;quido em todo n&uacute;mero da p&aacute;gina.">
+    <input type="checkbox" id="chkDetalhe"> detalhar bruto &times; custo
+  </label>
+</nav>
+
+  <main class="main-content">
+    <header class="page-header fade-up delay-1">
+      <div class="page-eyebrow"><span class="tag">ESTUDO INTERNO</span><span id="ehJanela"></span></div>
+      <h1 class="page-title" id="pgTitulo">&mdash;</h1>
+      <dl class="page-meta">
+        <div class="meta-item"><dt>Posi&ccedil;&atilde;o e resultado</dt><dd>JRS.VW_SOPHIS_TICKETS</dd></div>
+        <div class="meta-item"><dt>Ajuste di&aacute;rio</dt><dd>UP2DATA.SETTLEMENTPRICE</dd></div>
+        <div class="meta-item"><dt>Custos</dt><dd>corretagem + emolumento + contraparte</dd></div>
+        <div class="meta-item"><dt>Escopo</dt><dd>todos os trades &middot; fundos MM</dd></div>
+        <!-- ☠️ Era "Atualizado" com a data em que o SCRIPT rodou — e isso engana:
+             gerado no dia 01/09 sobre uma base que para em 28/08, o leitor le
+             "atualizado hoje". O rotulo agora e a DATA DO DADO; quando gerou
+             vira nota de rodape. -->
+        <div class="meta-item"><dt>Base at&eacute;</dt><dd id="mtBase">&mdash;</dd></div>
+      </dl>
+      <!-- ⛔ O que a base de an&aacute;lise deixou de fora, preenchido por app.js.
+           Fica no CABE&Ccedil;ALHO de prop&oacute;sito: vale para a p&aacute;gina inteira, n&atilde;o para
+           um gr&aacute;fico. -->
+      <div class="aviso" id="ehExcluidos" style="display:none;margin-top:14px"></div>
+    </header>
+
+
+    <!-- ══════════ RETRATO DO ANO ══════════ -->
+    <section id="tab-visao" class="tab on">
+      <h2>Retrato do ano <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <div class="kpis" id="kpisGeral"></div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3 class="chart-title">Resultado composto ao longo do ano</h3>
+          <div class="csub">curva de capital do livro, em bps do NAV, e o drawdown embaixo</div>
+          <div class="plot" id="figEquity"></div>
+          <div class="cfonte">JRS.VW_SOPHIS_TICKETS + ajuste B3 (UP2DATA) &middot; NAV do trader (JRS)</div>
+        </div>
+        <div class="card">
+          <h3 class="chart-title">Resultado por m&ecirc;s</h3>
+          <div class="plot" id="figMes"></div>
+          <div class="cfonte">JRS.VW_SOPHIS_TICKETS</div>
+        </div>
+      </div>
+
+      <!-- ☠️ Era "Os dois jogos dentro do mesmo livro" — literario, e o leitor
+           tinha de abrir a tabela para descobrir QUAIS jogos. O titulo agora
+           nomeia as duas linhas que estao ali. -->
+      <h2>Daytrade &times; posi&ccedil;&atilde;o carregada <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <div class="wrap"><table id="tblHorizonte"></table></div>
+
+      <!-- ⚠️ NAO e "por instrumento": a tabela lista `di`, `titulo` e `opcao` —
+           CLASSE de ativo. "Instrumento" faz esperar ODF28/ODF31, que e a aba
+           Contratos; o rotulo antigo mandava o leitor para a tabela errada. -->
+      <h2>Por classe de ativo <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <div class="wrap"><table id="tblBook"></table></div>
+    </section>
+
+    <!-- ══════════ POSI&Ccedil;&Atilde;O &amp; RISCO ══════════ -->
+    <section id="tab-portfolio" class="tab">
+      <!-- ①  QUANTO ELE CARREGOU — a foto do risco no tempo -->
+      <!-- ⭐ TODAS AS FICHAS ANTES DE TODOS OS GR&Aacute;FICOS (pedido do usu&aacute;rio,
+           01/09/2026). Antes era se&ccedil;&atilde;o 1 (n&uacute;meros + gr&aacute;fico) e depois se&ccedil;&atilde;o 2
+           (n&uacute;meros + gr&aacute;ficos): quem queria s&oacute; os n&uacute;meros tinha de rolar por um
+           gr&aacute;fico no meio, e a compara&ccedil;&atilde;o entre os dois blocos exigia mem&oacute;ria.
+           ⚠️ O cabe&ccedil;alho pr&oacute;prio &eacute; obrigat&oacute;rio: sob "Quanto ele tinha na m&atilde;o" as
+           fichas de sizing ficariam mal rotuladas. Cada ficha j&aacute; se nomeia, ent&atilde;o
+           o t&iacute;tulo aqui s&oacute; precisa cobrir as duas fam&iacute;lias. -->
+      <h2>Exposi&ccedil;&atilde;o e sizing</h2>
+      <div class="kpis" id="kpisRisco"></div>
+      <div class="kpis" id="kpisSizing"></div>
+
+      <h2>Quanto ele tinha na m&atilde;o <span class="esc">pap&eacute;is e DI</span></h2>
+
+      <div class="card">
+        <h3 class="chart-title">Tamanho da posi&ccedil;&atilde;o ao longo do ano</h3>
+        <!-- ⛔ SEM eixo duplo desde 01/09/2026 (pedido do usuario: "o 0 do PL e
+             do DV01 deve ser alinhado, 0 e 0"). #PL e DV01 sao a MESMA serie
+             sobre o NAV: dois eixos so acrescentavam um segundo zero. Hoje a
+             REGUA escolhe a unidade e o zero e um so. Ver o bloco no app.js. -->
+        <div class="csub">as duas <b>&aacute;reas</b> s&atilde;o as pontas vivas &mdash;
+          <b>tomado</b> acima do zero, <b>aplicado</b> abaixo &mdash; e a linha preta &eacute; o
+          <b>l&iacute;quido</b> (a soma delas). ⭐ Quando as duas existem no mesmo dia ele
+          carrega <b>incli&shy;na&ccedil;&atilde;o</b>, e a dist&acirc;ncia da linha at&eacute; a borda &eacute; a ponta
+          que est&aacute; sendo compensada. A unidade segue a <b>r&eacute;gua da tela</b>
+          (#PL ou R$/bp) &mdash; &eacute; a mesma posi&ccedil;&atilde;o nas duas</div>
+        <div class="plot" id="figRisco"></div>
+        <div class="cfonte">posi&ccedil;&atilde;o das boletas &times; DV01 do dia (ajuste da B3 no DI,
+          duration da NTN-B na <code>ODS.RISK_GOVBONDS</code>)</div>
+      </div>
+
+      <!-- ②  O TAMANHO ACERTOU? — era a aba "Sizing".
+           ⚠️ Vem ANTES da distribuicao (pedido do usuario, 31/08/2026):
+           depois de ver QUANTO ele carregou, a pergunta seguinte e se
+           aquilo foi bem alocado. Onde ele poe o risco e detalhe, e
+           detalhe vai por ultimo. -->
+      <!-- ⭐ A ETIQUETA DE ESCOPO MUDOU (01/09/2026): a opcao entrou no bloco
+           pela regua dela (premio em bps do NAV), normalizada contra a media do
+           proprio tipo. Ver §5.-54 do CLAUDE.md. -->
+      <h2>Ele aposta mais quando est&aacute; certo? <span class="esc">livro inteiro</span></h2>
+
+      <div class="card">
+        <h3 class="chart-title">Tamanho da aposta &times; retorno da aposta</h3>
+        <div class="csub">cada ciclo contra a m&eacute;dia da r&eacute;gua DELE &mdash;
+          <b>1,00&times;</b> &eacute; o tamanho t&iacute;pico do tipo do instrumento
+          (#PL no DI e no papel, pr&ecirc;mio em bps do NAV na op&ccedil;&atilde;o, que sai como
+          losango). ⚠️ o eixo do resultado &eacute; <b>normalizado pelo tamanho</b>: contra o
+          resultado cru a inclina&ccedil;&atilde;o seria mec&acirc;nica</div>
+        <div class="plot" id="figSizing"></div>
+        <div class="cfonte">ciclos fechados e materiais &mdash; a mesma nuvem que o contrafactual soma</div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3 class="chart-title">Por quartil de tamanho</h3>
+          <div class="csub">acerto e resultado nos trades pequenos &times; grandes</div>
+          <div class="plot" id="figQuartis"></div>
+          <div class="cfonte">quartis de tamanho relativo</div>
+        </div>
+        <div class="card">
+          <h3 class="chart-title">Contrafactual: e se todo trade fosse do mesmo tamanho?</h3>
+          <div class="csub">real contra tamanho igual, em bps do NAV</div>
+          <div class="plot" id="figContraf"></div>
+          <div class="cfonte">reescala cada trade pelo tamanho m&eacute;dio da r&eacute;gua dele</div>
+        </div>
+      </div>
+      <div class="wrap"><table id="tblQuartis"></table></div>
+      <!-- ③  COMO ELE DISTRIBUI — o habito de tamanho e onde ele o poe -->
+      <h2>Como ele distribui o risco <span class="esc">pap&eacute;is e DI</span></h2>
+      <div class="grid2">
+        <div class="card">
+          <h3 class="chart-title">Distribui&ccedil;&atilde;o do tamanho &mdash; t&iacute;tulos e DI</h3>
+          <div class="csub">#PL nos pregões com posi&ccedil;&atilde;o &mdash; onde ele costuma operar</div>
+          <div class="plot" id="figPlDist"></div>
+          <div class="cfonte">JRS.VW_SOPHIS_TICKETS + UP2DATA</div>
+        </div>
+        <div class="card">
+          <h3 class="chart-title">Onde na curva ele opera &mdash; t&iacute;tulos e DI</h3>
+          <div class="csub">giro em R$/bp por v&eacute;rtice. ⚠️ o papel entra com prefixo
+            <b>B</b> e cor pr&oacute;pria: NTN-B &eacute; taxa <b>real</b> e DI &eacute; <b>nominal</b> &mdash;
+            s&atilde;o curvas diferentes no mesmo eixo. ⛔ <b>sem op&ccedil;&atilde;o</b>: ela n&atilde;o ocupa
+            v&eacute;rtice de curva e n&atilde;o tem DV01 &mdash; a r&eacute;gua dela &eacute; o pr&ecirc;mio, no bloco
+            <i>O tamanho das op&ccedil;&otilde;es</i></div>
+          <div class="plot" id="figCurva"></div>
+          <div class="cfonte">JRS.VW_SOPHIS_TICKETS &times; DV01 do contrato (taxa de entrada, <code>du</code> congelado)</div>
+        </div>
+      </div>
+
+      <h3 class="chart-title">Tomado &times; aplicado</h3>
+      <div class="wrap"><table id="tblDirecao"></table></div>
+
+      <!-- ④  O TAMANHO DAS OP&Ccedil;&Otilde;ES — r&eacute;gua pr&oacute;pria, e por isso bloco pr&oacute;prio.
+           ⛔ N&Atilde;O se mistura com #PL: pr&ecirc;mio &eacute; R$ de pr&ecirc;mio sobre o NAV e #PL &eacute;
+           R$/bp sobre o NAV. Somar as duas ou p&ocirc;-las na mesma coluna &eacute; a
+           confus&atilde;o que a §5.-27 corrigiu. Aparece s&oacute; quando h&aacute; op&ccedil;&atilde;o — o
+           `blocoPremio()` do app.js esconde o bloco inteiro quando n&atilde;o h&aacute;. -->
+      <h2 id="secOpcoes">O tamanho das op&ccedil;&otilde;es &mdash; pr&ecirc;mio <span class="esc">s&oacute; op&ccedil;&otilde;es</span></h2>
+      <div class="kpis" id="kpisPremio"></div>
+      <div class="grid2" id="cardsPremio">
+        <div class="card">
+          <h3 class="chart-title">Pr&ecirc;mio vivo ao longo do ano</h3>
+          <div class="csub">pr&ecirc;mio marcado das op&ccedil;&otilde;es em carteira, em bps do NAV do dia</div>
+          <div class="plot" id="figPremio"></div>
+          <div class="cfonte">JRS.VW_SOPHIS_TICKETS &times; marca&ccedil;&atilde;o do dia (SOPHIS.HISTORIQUE;
+            estrutura de IDI sintetizada das pernas)</div>
+        </div>
+        <div class="card">
+          <h3 class="chart-title">Pr&ecirc;mio colocado &times; resultado, por trade</h3>
+          <!-- ⚠️ Era `pr&ecirc;mio × risco m&aacute;ximo`, que e a identidade x = x: para quem
+               COMPRA o risco maximo E o premio, e quase todo trade e comprado. -->
+          <div class="csub">p&otilde;e mais pr&ecirc;mio na mesa e ganha mais? &middot; <b>losango</b> =
+            vendido &middot; a <b>diagonal pontilhada</b> &eacute; o piso de quem compra (perder o
+            pr&ecirc;mio inteiro)</div>
+          <div class="plot" id="figPremioRisco"></div>
+          <div class="cfonte">teto = 100 pontos na digital de COPOM; dist&acirc;ncia entre
+            strikes na estrutura de IDI</div>
+        </div>
+      </div>
+      <div class="wrap"><table id="tblPremio"></table></div>
+
+    </section>
+
+    <!-- ══════════ ACERTO &amp; PAYOFF ══════════ -->
+    <section id="tab-habilidade" class="tab">
+      <h2>A pergunta central <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <div class="kpis" id="kpisHab"></div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3 class="chart-title">Acerto &times; payoff</h3>
+          <!-- ⚠️ O subt&iacute;tulo dizia s&oacute; "cada ponto &eacute; um corte do livro", o que n&atilde;o
+               diz QUAIS cortes nem o que o tamanho e a cor significam. O usu&aacute;rio
+               perguntou "o que &eacute; cada bola?" — a legenda tem de responder sozinha. -->
+          <div class="csub">cada bola &eacute; um <b>recorte dos trades</b> &mdash; por horizonte
+            (daytrade &times; carregou), por dire&ccedil;&atilde;o (tomado &times; aplicado) e por
+            vencimento de DI (com 3+ ciclos). <b>Tamanho</b> = n&ordm; de ciclos &middot;
+            <b>cor</b> = o recorte deu ou perdeu dinheiro. O <b>losango</b> &eacute; o livro
+            inteiro; a <b>linha tracejada</b> &eacute; o payoff m&iacute;nimo para empatar em cada
+            n&iacute;vel de acerto &mdash; acima dela o recorte paga, abaixo n&atilde;o.</div>
+          <div class="plot" id="figHitPayoff"></div>
+          <div class="cfonte">ciclos fechados e materiais</div>
+        </div>
+        <div class="card">
+          <h3 class="chart-title">Ganho &times; perda &mdash; m&eacute;dia e mediana</h3>
+          <div class="plot" id="figGanhoPerda"></div>
+          <div class="cfonte">ciclos fechados e materiais</div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3 class="chart-title">Movimento de taxa capturado por trade</h3>
+          <div class="csub"><code>bps_taxa</code> &mdash; quanto a taxa andou a favor dele, sem depender do tamanho</div>
+          <div class="plot" id="figBpsTaxa"></div>
+          <div class="cfonte">VWAP de entrada e de sa&iacute;da das boletas</div>
+        </div>
+        <div class="card">
+          <h3 class="chart-title">Dura&ccedil;&atilde;o &times; resultado</h3>
+          <!-- ⭐ Duas r&eacute;guas: R$ diz quanto DINHEIRO, bps diz quanto do
+               PATRIM&Ocirc;NIO. S&oacute; em R$ a nuvem se espalha pela ALOCA&Ccedil;&Atilde;O e n&atilde;o pela
+               decis&atilde;o, o que torna o gr&aacute;fico incompar&aacute;vel entre traders e anos.
+               ⚠️ O `<select>` PR&Oacute;PRIO deste card saiu em 01/09/2026: quem manda
+               agora &eacute; o seletor de r&eacute;gua da barra de abas, que vale para a p&aacute;gina
+               inteira. Dois seletores de r&eacute;gua na mesma tela podiam ficar em
+               estados contradit&oacute;rios, e o leitor n&atilde;o saberia qual estava lendo. -->
+          <div class="csub">vencedor dura mais que perdedor? (corta perda r&aacute;pido, deixa ganho correr)
+            &mdash; na r&eacute;gua escolhida na barra; o hover traz sempre a outra</div>
+          <div class="plot" id="figDuracao"></div>
+          <div class="cfonte">ciclos fechados e materiais</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ SIZING ══════════ -->
+    <!-- ══════════ CUSTO ══════════ -->
+    <section id="tab-custo" class="tab">
+      <h2>Para onde vai o custo <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <div class="kpis" id="kpisCusto"></div>
+
+      <div class="card">
+        <h3 class="chart-title">Custo ao longo do ano</h3>
+        <div class="plot" id="figCusto"></div>
+        <div class="cfonte">JRS.VW_SOPHIS_TICKETS &mdash; as 3 taxas por boleta, em BRL</div>
+      </div>
+    </section>
+
+    <!-- ══════════ CONTRATOS ══════════ -->
+    <section id="tab-contratos" class="tab">
+      <h2>Onde ele ganha e onde perde <span class="esc">pap&eacute;is e DI</span></h2>
+      <div class="card">
+        <h3 class="chart-title">Resultado por contrato</h3>
+        <!-- ⚠️ O subt&iacute;tulo dizia "em R$" e cravava a unidade: com o seletor de
+             r&eacute;gua da barra o eixo pode estar em bps do NAV, e o texto mentiria. -->
+        <div class="csub">com o n&uacute;mero de trades em cada um</div>
+        <div class="plot" id="figContratos"></div>
+        <div class="cfonte">ciclos fechados e materiais</div>
+      </div>
+      <h2>Detalhe por contrato <span class="esc">pap&eacute;is e DI</span></h2>
+      <div class="wrap"><table id="tblContratos"></table></div>
+    </section>
+
+    <!-- ══════════ COMO &Eacute; MEDIDO ══════════ -->
+    <section id="tab-metodo" class="tab">
+
+      <h2>A defini&ccedil;&atilde;o de &ldquo;um trade&rdquo;</h2>
+      <!-- ☠️ Esta se&ccedil;&atilde;o e a seguinte estavam VAZIAS — s&oacute; o &lt;h2&gt;, sem uma linha
+           de conte&uacute;do. A aba que explica a metodologia n&atilde;o explicava nada. -->
+      <p class="lede">Um trade &eacute; um <b>ciclo de posi&ccedil;&atilde;o de um ativo, de zero a zero</b>.
+        Comprou 5, mais 5, vendeu 5, mais 5, zerou 15 = <b>um</b> trade; o que houve de
+        boleta no meio foi negociado em volta da posi&ccedil;&atilde;o. Zerou e reabriu = trade novo.</p>
+      <ul class="lista">
+        <li><b>Virada de m&atilde;o</b> &mdash; tomado que vira aplicado sem passar por zero
+          <b>fecha um ciclo e abre outro</b>, ambos no pre&ccedil;o m&eacute;dio do dia. O dia &eacute;
+          fatiado pro-rata, ent&atilde;o o caixa fecha exato nos dois.</li>
+        <li><b>Op&ccedil;&atilde;o de IDI &eacute; ESTRUTURA</b> &mdash; pernas do mesmo vencimento operadas
+          juntas na mesma corretora (condor, butterfly, spread) s&atilde;o <b>um</b> trade, com
+          quantidade em n&ordm; de estruturas e pre&ccedil;o = pr&ecirc;mio l&iacute;quido. Digital de COPOM n&atilde;o:
+          ela se opera solta.</li>
+        <li><b>Posi&ccedil;&atilde;o herdada</b> &mdash; a boleta <code>pnl_eoy_open</code> de 31/12 traz a
+          quantidade e o pre&ccedil;o de fechamento do ano anterior, e entra como uma boleta comum
+          no 1&ordm; preg&atilde;o.</li>
+        <li><b>Posi&ccedil;&atilde;o ainda aberta</b> &mdash; fechada no <b>pre&ccedil;o de fechamento</b>, a
+          t&iacute;tulo de an&aacute;lise, para o trade entrar nas estat&iacute;sticas. A perna de sa&iacute;da
+          aparece com broker <code>(marca&ccedil;&atilde;o)</code> e n&atilde;o tem custo.</li>
+        <li><b>Daytrade dentro de um ciclo aberto</b> n&atilde;o vira trade pr&oacute;prio &mdash; entra no
+          ciclo. O total est&aacute; certo; a contagem &eacute; conservadora.</li>
+      </ul>
+
+      <h2>Como o resultado de um ciclo &eacute; calculado</h2>
+      <p class="lede">No <b>futuro de DI</b> o resultado &eacute; a soma dos <b>ajustes di&aacute;rios da
+        B3</b> &mdash; o dinheiro que de fato entrou e saiu da conta do fundo, dia a dia:</p>
+      <pre class="formula">AD(t) = (PA(t) &minus; PA(t&minus;1) &times; FC(t)) &times; posi&ccedil;&atilde;o carregada
+      + &Sigma; q(j) &times; (PA(t) &minus; PO(j))            &larr; o que foi negociado hoje
+FC(t) = (1 + CDI(t&minus;1)/100) ^ (1/252)
+PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
+      <p class="lede">Nos demais ativos &eacute; a varia&ccedil;&atilde;o de pre&ccedil;o mais o cupom recebido. E o
+        <b>l&iacute;quido</b>, em qualquer book, tem tr&ecirc;s parcelas:</p>
+      <pre class="formula">l&iacute;quido = bruto &minus; custo de transa&ccedil;&atilde;o + carrego do caixa</pre>
+      <ul class="lista">
+        <li><b>Custo</b> &mdash; corretagem, emolumento e contraparte, das <b>3 colunas da
+          pr&oacute;pria boleta</b>. Sem rateio e sem estimativa.</li>
+        <li><b>Carrego</b> &mdash; CDI sobre a <b>marca&ccedil;&atilde;o do dia</b> do capital preso. Futuro
+          n&atilde;o paga (&eacute; margem); NTN-B e pr&ecirc;mio de op&ccedil;&atilde;o pagam.</li>
+        <li>⚠️ <b>Ciclo fechado telescopa</b>: a soma dos resultados di&aacute;rios bate com o do
+          ciclo, e isso &eacute; conferido a cada rodada.</li>
+      </ul>
+
+      <h2>A unidade de cada instrumento</h2>
+      <p class="lede">Os tr&ecirc;s books n&atilde;o se medem na mesma escala, e for&ccedil;ar uma
+        r&eacute;gua &uacute;nica &eacute; o erro mais caro deste estudo:</p>
+      <ul class="lista">
+        <li><b>Futuro de DI</b> &mdash; o pre&ccedil;o &Eacute; a taxa. Tamanho em <b>#PL</b>
+          (<code>DV01 &times; 1e4 &divide; NAV</code>), movimento em <b>bps de taxa</b>.</li>
+        <li><b>NTN-B</b> &mdash; o pre&ccedil;o &eacute; o <b>PU em R$</b>. O tamanho tamb&eacute;m
+          &eacute; #PL (a dura&ccedil;&atilde;o vem da <code>ODS.RISK_GOVBONDS</code>), mas o movimento
+          de taxa <b>n&atilde;o sai do pre&ccedil;o</b>: &Delta;PU de 4.144 para 4.225 n&atilde;o &eacute;
+          &ldquo;81 bps&rdquo;, s&atilde;o 81 reais. A taxa vem de um VWAP paralelo sobre a
+          indicativa observada da ANBIMA.</li>
+        <li><b>Op&ccedil;&atilde;o</b> &mdash; n&atilde;o tem DV01. Tamanho &eacute; o <b>pr&ecirc;mio em bps do
+          NAV</b>; movimento &eacute; em <b>pontos de pre&ccedil;o</b>, e cada ponto &eacute; um ponto
+          <b>percentual</b>: de probabilidade na digital de COPOM (cotada de 0 a 100, vira
+          100 se o cen&aacute;rio ocorre) e de payoff na estrutura de IDI (teto 100).</li>
+      </ul>
+      <!-- ☠️ Isto NAO e trivia: sem tratar, 8 de 22 pares (trader x ano) com
+           digital saem 100x menores, e a tela nao da erro nenhum. -->
+      <p class="lede">⚠️ <b>E o ponto da digital mudou de valor.</b> At&eacute; <b>26/05/2025</b>
+        um ponto valia <b>R$ 100,00</b> por contrato; desde ent&atilde;o vale <b>R$ 1,00</b>. A
+        escala sai do <code>amount</code> da pr&oacute;pria boleta, <b>por instrumento</b> &mdash;
+        as duas s&eacute;ries coexistem no mesmo dia.</p>
+
+      <h2>A r&eacute;gua de leitura da tela</h2>
+      <p class="lede">O seletor na barra de abas troca <b>toda</b> a p&aacute;gina entre
+        <b>bps do NAV</b> e <b>reais</b>. Em bps nenhum n&uacute;mero aparece em R$, com tr&ecirc;s
+        exce&ccedil;&otilde;es que s&atilde;o unidade e n&atilde;o resultado: a linha
+        <i>&ldquo;Em reais&rdquo;</i>, o <b>NAV</b> (&eacute; o denominador) e o <b>custo por
+        contrato</b> (pre&ccedil;o unit&aacute;rio). O interruptor <i>detalhar bruto &times; custo</i>
+        abre a quebra; sem ele a tela &eacute; l&iacute;quida por defini&ccedil;&atilde;o.</p>
+
+      <h2>As r&eacute;guas</h2>
+      <div class="wrap"><table id="tblReguas"></table></div>
+
+      <h2>Proced&ecirc;ncia de cada n&uacute;mero</h2>
+      <div class="wrap"><table id="tblFontes"></table></div>
+
+      <h2>O NAV do trader &mdash; o denominador de tudo</h2>
+      <!-- ⭐ Veio de "Tamanho & risco" (pedido do usuario, 31/08/2026): nao e uma
+           conclusao sobre o gestor, e o denominador. Informacao de contexto, e o
+           lugar da informacao de contexto e a aba de metodo. -->
+      <div class="card">
+        <div class="csub">&eacute; o denominador de todo bps e de todo #PL &mdash; e ele muda por
+          decis&atilde;o da casa, n&atilde;o por decis&atilde;o do gestor</div>
+        <div class="plot" id="figNav"></div>
+        <div class="cfonte">JRS <code>fund=&#39;Trader NAV&#39;</code> (USD) &times; USDBRL da ODS.MACRO_BBG
+          &mdash; o &uacute;nico n&uacute;mero que o estudo tira do JRS, e s&oacute; como denominador</div>
+      </div>
+
+    </section>
+
+    <footer class="page-footer">
+      <div class="credits">Elabora&ccedil;&atilde;o &middot; <strong>JGP Macro</strong> &middot; estudo interno, fora do ambiente da mesa</div>
+      <div>JGP Macro</div>
+    </footer>
+  </main>
+
+<button class="back-to-top" id="backToTop" aria-label="Voltar ao topo">
+  <span class="arrow">&uarr;</span><span>TOP</span>
+</button>
+
+<script src="lib/plotly.min.js"></script>
+<script src="lib/plotly-jgp.js"></script>
+<script src="boot.js"></script>
+<script src="app.js"></script>
+<script>
+/* =====================================================================
+   chrome.js — casca editorial JGP (variante dashboard / abas)
+   Navegação por TABBAR no topo — SEM sidebar lateral / scroll-spy.
+   Requer no HTML:
+     <div class="scroll-progress" id="scrollProgress"></div>
+     <!-- navbar GLOBAL: shared-web/nav.js (monorepo) OU .topnav autocontida -->
+     <nav class="tabbar" id="tabbar"><button class="tabbtn on" data-tab="X">…</button>…</nav>
+     <main class="main-content">
+       <header class="page-header">…</header>
+       <section id="tab-X" class="tab on">…<h2>Seção</h2>…</section> …
+     </main>
+     <button class="back-to-top" id="backToTop"><span class="arrow">↑</span><span>TOP</span></button>
+
+   Um ÚNICO listener delegado no #tabbar troca as abas. Chame JGPChrome.init({onTab})
+   uma vez. `onTab(tabId)` é opcional — use para (re)desenhar/resize os gráficos ao
+   abrir a aba (painel display:none renderiza a 0px).
+   ===================================================================== */
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+window.JGPChrome = (function () {
+  const $ = (s, r = document) => r.querySelector(s);
+  let cfg = {};
+
+  function tabButtons() { return [].slice.call(document.querySelectorAll('#tabbar .tabbtn')); }
+  function activeTab() {
+    const b = tabButtons().find(b => b.classList.contains('on'));
+    return b ? b.dataset.tab : (tabButtons()[0] && tabButtons()[0].dataset.tab);
+  }
+
+  function showTab(id) {
+    tabButtons().forEach(b => b.classList.toggle('on', b.dataset.tab === id));
+    document.querySelectorAll('.tab').forEach(p => p.classList.toggle('on', p.id === 'tab-' + id));
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    if (typeof cfg.onTab === 'function') cfg.onTab(id);
+  }
+
+  function updateProgress() {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    document.documentElement.style.setProperty('--scroll-progress', (max > 0 ? Math.min(100, window.scrollY / max * 100) : 0) + '%');
+  }
+
+  function init(options) {
+    cfg = options || {};
+    const backTop = $('#backToTop');
+    const tabbar = $('#tabbar');
+    if (tabbar) tabbar.addEventListener('click', e => {
+      const btn = e.target.closest('.tabbtn');
+      if (btn) showTab(btn.dataset.tab);
+    });
+    window.addEventListener('scroll', () => {
+      updateProgress();
+      if (backTop) backTop.classList.toggle('visible', window.scrollY > 350);
+    }, { passive: true });
+    window.addEventListener('resize', updateProgress, { passive: true });
+    if (backTop) backTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    updateProgress();
+    if (typeof cfg.onTab === 'function') cfg.onTab(activeTab());
+  }
+
+  return { init, showTab, activeTab };
+})();
+
+// inicializa a casca; onTab(tabId) roda ao abrir cada aba (desenhe seus gr&aacute;ficos aqui)
+JGPChrome.init({ onTab: function (tab) { if (window.__taRender) window.__taRender(tab); } });
+</script>
+</body>
+</html>

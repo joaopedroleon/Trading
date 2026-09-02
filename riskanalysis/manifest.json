@@ -1,5 +1,5 @@
 {
- "gerado_em": "02/09/2026 12:02",
+ "gerado_em": "02/09/2026 12:16",
  "grupos": {
   "juros-br": "Juros Brasil",
   "brl": "BRL",
@@ -35,8 +35,8 @@
    "vintages": [
     {
      "d": "2025-12-30",
-     "sha": "58e9be282880d1a4851fdddbe7c26d780c11f2ad67bc008cbeb4df5a11451066",
-     "pub": "02/09/2026 08:52",
+     "sha": "b5c263491685241e368e38f467b3c25ed63488e811949262dd9b1144e0f922e7",
+     "pub": "02/09/2026 12:16",
      "arq": "dados/emota-juros-br-2025__2025-12-30.js"
     }
    ]
@@ -49,8 +49,8 @@
    "vintages": [
     {
      "d": "2024-12-30",
-     "sha": "940d04d1a0fdd64efabd762bbf2a7e04180ccde7b5dd0fc9bee670312faa85c8",
-     "pub": "02/09/2026 08:52",
+     "sha": "5bb05b85ec8c440276aa8303b70f7881048a2b30493e4c436c67f59e068d9e04",
+     "pub": "02/09/2026 12:16",
      "arq": "dados/emota-juros-br-2024__2024-12-30.js"
     }
    ]
@@ -63,8 +63,8 @@
    "vintages": [
     {
      "d": "2023-12-28",
-     "sha": "8979c21c41353f24d0b4a53852cd9f9f8cad22036ab68cbfa4c92ea28f67d22a",
-     "pub": "02/09/2026 08:52",
+     "sha": "40255c31704434cde687644875d5b66df4ea5c96949b7d28e4d1f4af8c8e7f18",
+     "pub": "02/09/2026 12:16",
      "arq": "dados/emota-juros-br-2023__2023-12-28.js"
     }
    ]
@@ -77,8 +77,8 @@
    "vintages": [
     {
      "d": "2022-12-29",
-     "sha": "e32f49ebadb75e736d4925af6b350352e6f1baa464142557818e5317544e3e91",
-     "pub": "02/09/2026 08:52",
+     "sha": "4ffdee19be8bc4f1cde4e37d9fe9604ed178a1a0eb4a6d5f66668fbd275212f0",
+     "pub": "02/09/2026 12:16",
      "arq": "dados/emota-juros-br-2022__2022-12-29.js"
     }
    ]
@@ -91,8 +91,8 @@
    "vintages": [
     {
      "d": "2021-12-30",
-     "sha": "b86ffad35797a42f2c4298996e0118c6666b2c2248fbdd4f7d64c70b5573b13c",
-     "pub": "02/09/2026 08:52",
+     "sha": "97caef9c19db25f12b02d4f2d87b07458fefd85661becdcafb6dc65722cab718",
+     "pub": "02/09/2026 12:16",
      "arq": "dados/emota-juros-br-2021__2021-12-30.js"
     }
    ]
@@ -105,8 +105,8 @@
    "vintages": [
     {
      "d": "2020-12-30",
-     "sha": "c85959befad822c031b907188f70a0b0378f473b0171a4971c4b38de923a4335",
-     "pub": "02/09/2026 08:52",
+     "sha": "a4225085768b4fc16cfea2e61ba11dc8418ba9a288a0ef44c430b57bb5b6c04e",
+     "pub": "02/09/2026 12:16",
      "arq": "dados/emota-juros-br-2020__2020-12-30.js"
     }
    ]

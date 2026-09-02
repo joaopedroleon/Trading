@@ -215,6 +215,24 @@
     });
   }
 
+  /* ⚠️ **OS LINKS ENTRE AS DUAS TELAS PERDIAM A SELEÇÃO.** `estudo.html` e
+     `trades.html` linkam um ao outro com href fixo, e o `boot` lê o par do
+     `location.search` — então ir do anual para o trade a trade (ou voltar)
+     caía no par PADRÃO. Ficava mascarado enquanto o par escolhido era justamente
+     o padrão; em qualquer outro (um ano fechado, outro trader) trocava o estudo
+     debaixo do leitor, sem avisar.
+     ⭐ Aqui os href da casca recebem o `?a=`/`&d=` da seleção corrente. */
+  function propagaSelecao() {
+    if (!SEL) return;
+    var q = 'a=' + encodeURIComponent(SEL.slug)
+          + (SEL.ultimo ? '' : '&d=' + encodeURIComponent(SEL.v.d));
+    document.querySelectorAll('a.xlink[href]').forEach(function (a) {
+      var h = a.getAttribute('href');
+      if (!h || h.indexOf('http') === 0 || h.indexOf('?') >= 0) return;
+      a.setAttribute('href', h + '?' + q);
+    });
+  }
+
   /* ── o aviso de "olhando o passado" ────────────────────────────────────── */
   function avisaVintage() {
     if (!SEL || SEL.ultimo) return;
@@ -253,6 +271,7 @@
     SEL = resolveSel();
     if (!SEL) return erroFatal('Nenhuma análise publicada ainda.');
     montaSeletores();
+    propagaSelecao();
 
     try { await injeta(SEL.v.arq); }
     catch (e) {
