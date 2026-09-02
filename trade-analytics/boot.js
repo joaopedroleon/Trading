@@ -182,8 +182,13 @@
     /* ⚠️ ao trocar trader/ativo/ano o VINTAGE não é carregado junto: aquele par
        pode não ter a mesma data de base. Vai sem `d`, e o boot escolhe o mais
        novo daquele par — que é o padrão certo. */
+    /* ⚠️ o fallback existe porque o par pode não ter o MESMO ano: trocar para um
+       trader que não operou em 2026 tem de cair em algum ano dele, não em nada.
+       (Havia aqui um `acha(v, a.grupo, null)` no meio que nunca casava — o
+       `acha` compara `String(ano)`, e `String(null)` é `"null"`. Código morto
+       que parecia fazer algo.) */
     troca('pubTrader', function (v) {
-      var alvo = acha(v, a.grupo, a.ano) || acha(v, a.grupo, null)
+      var alvo = acha(v, a.grupo, a.ano)
         || { slug: Object.keys(analises()).filter(function (k) {
                return analises()[k].trader === v; })[0] };
       if (alvo && alvo.slug) vai(alvo.slug, null);
