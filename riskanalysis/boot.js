@@ -180,6 +180,20 @@
         }).join('')
       + '</select></label>';
 
+    /* ⚠️ SELETOR COM UMA OPÇÃO SÓ FICA DESABILITADO E DIZ POR QUÊ (02/09/2026).
+       Publicar passou a subir só o ano selecionado na tela local, então o normal
+       é o site ter UM estudo — e quatro seletores inertes, de aparência normal,
+       leem-se como tela quebrada. É a lição do §5.-57 ao contrário: lá o
+       problema era esconder o seletor (o recurso parecia inexistir); aqui é
+       deixá-lo clicável sem ter para onde ir. */
+    ['pubTrader', 'pubGrupo', 'pubAno', 'pubVint'].forEach(function (id) {
+      var e = document.getElementById(id);
+      if (!e || e.options.length > 1) return;
+      e.disabled = true;
+      e.title = 'Só este estudo está publicado — cada publicação sobe o par '
+              + 'selecionado na tela de trabalho.';
+    });
+
     function troca(id, fn) {
       var e = document.getElementById(id);
       if (e) e.onchange = function () { fn(e.value); };
