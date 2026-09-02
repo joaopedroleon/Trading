@@ -1,5 +1,5 @@
 {
- "gerado_em": "02/09/2026 09:29",
+ "gerado_em": "02/09/2026 12:02",
  "grupos": {
   "juros-br": "Juros Brasil",
   "brl": "BRL",
@@ -15,8 +15,8 @@
    "vintages": [
     {
      "d": "2026-09-01",
-     "sha": "8853204c77f989f1e4ea623c9d750b6dbcb3e52f520f19f57f550e4af893d64f",
-     "pub": "02/09/2026 08:52",
+     "sha": "e1bbf3e582b13ab353d05c53f6ddd7c7b5837a803c895f5e54e13f9f47c137b8",
+     "pub": "02/09/2026 12:02",
      "arq": "dados/emota-juros-br-2026__2026-09-01.js"
     },
     {

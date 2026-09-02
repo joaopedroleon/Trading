@@ -97,6 +97,12 @@
     + (r && r.ativo_nome ? ' <span class="mdn">(' + r.ativo_nome + ')</span>' : '');
 
   const GLOSS = {
+    pos_fech: 'A posicao em contratos no fechamento do dia — a REAL, a que de fato '
+      + 'existia. ⚠️ Nao e a que a analise de CICLO usa: para fechar o trade, o '
+      + 'motor acrescenta uma perna sintetica de saida no preco de fechamento '
+      + '(e o que faz o resultado do dia telescopar no resultado do ciclo). '
+      + 'Aquela zera o ultimo pregao de um livro que terminou montado; esta '
+      + 'mostra a posicao que ele carregou.',
     result_bruto: 'No futuro de DI, a soma dos AJUSTES DIARIOS DA B3 do ciclo — o '
       + 'dinheiro que de fato entrou e saiu da conta do fundo. Nos demais ativos, o '
       + 'movimento de preco + cupom. Ainda SEM corretagem e SEM carrego do caixa. '
@@ -440,7 +446,13 @@
 
     /* posição e taxa dentro do trade */
     Plotly.newPlot(el('figDrill'), [
-      { x: b.map((x) => x.data), y: b.map((x) => x.pos_eod), name: 'posição (contratos)',
+      /* ⚠️ `pos_real`, não `pos_eod`: aquela traz o fechamento sintético que a
+         analise de CICLO usa (§5.-14) e desenhava a posição ZERADA no último
+         pregão de um livro montado — ao lado de DV01 e #PL cheios na mesma
+         linha da tabela. `pos_eod` fica onde é resultado. */
+      { x: b.map((x) => x.data),
+        y: b.map((x) => (x.pos_real != null ? x.pos_real : x.pos_eod)),
+        name: 'posição (contratos)',
         type: 'scatter', mode: 'lines+markers', line: { color: P()[0], width: 2, shape: 'hv' },
         fill: 'tozeroy', fillcolor: 'rgba(0,110,80,.14)',
         hovertemplate: '%{x|%d/%m}<br>%{y:,.0f} contratos<extra></extra>' },
@@ -493,7 +505,8 @@
       { t: 'pregão', f: (x) => x.data },
       { t: 'pos. abertura', num: 1, f: (x) => nf(x.pos_bod, 0) },
       { t: 'negociou', num: 1, f: (x) => (x.net ? nf(x.net, 0) : (x.negociou ? '0 (netou)' : '—')) },
-      { t: 'pos. fecham.', num: 1, f: (x) => nf(x.pos_eod, 0) },
+      { t: 'pos. fecham.', num: 1, tip: 'pos_fech',
+        f: (x) => nf(x.pos_real != null ? x.pos_real : x.pos_eod, 0) },
       { t: 'taxa ajuste', num: 1, f: (x) => nf(x.taxa_dia, 3) },
       { t: 'du dia', num: 1, f: (x) => nf(x.du_dia, 0) },
       { t: 'DV01', num: 1, f: (x) => nf(x.dv01_brl, 0) },
