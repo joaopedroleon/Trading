@@ -232,6 +232,24 @@
   .fichas{display:grid;gap:20px 30px;margin:2px 0 4px;width:100%;flex:1 1 100%;
     grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
   .ficha{min-width:0}
+  /* ⭐ **AS DUAS FAIXAS DA SEÇÃO 01 TÊM DE TER A MESMA LARGURA DE COLUNA**
+     (02/09/2026, pedido do usuário: *"os 2 primeiros blocos muito longos, os de
+     baixo pequenos"*).
+     ☠️ A causa era o `auto-fit`: `kpisRisco` tinha **2** fichas e `kpisSizing`
+     **3**, então a 1ª faixa dividia a largura em 2 (866px cada, com o rótulo num
+     canto e o valor no outro) e a 2ª em 3 (570px). Duas grades independentes na
+     MESMA seção não têm por que ter colunas de tamanhos diferentes.
+     ⭐ Hoje as duas são 3 × 1fr e a seção fecha um retângulo 3×2. O conteúdo foi
+     rebalanceado junto (a 4ª linha de "Existe relação?" virou a ficha
+     `Concentração`, e "Presença no mercado" ganhou a 3ª linha) — grade fixa com
+     fichas de 2 e 4 linhas continuaria irregular, só que alinhada.
+     ⚠️ Abaixo de 1100px volta ao `auto-fit`: 3 colunas ali dariam ~250px, e o
+     rótulo "Correlação tamanho × retorno" quebra em 3 linhas. */
+  #kpisRisco .fichas, #kpisSizing .fichas{grid-template-columns:repeat(3,1fr)}
+  @media (max-width:1100px){
+    #kpisRisco .fichas, #kpisSizing .fichas{
+      grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+  }
   .ficha-h{font:600 10.5px/1 var(--font);letter-spacing:.09em;text-transform:uppercase;
     color:var(--ink-tertiary);margin:0 0 7px;padding-bottom:6px;
     border-bottom:1px solid var(--grid)}
@@ -277,9 +295,24 @@
   th .hastip{border-bottom-color:rgba(255,255,255,.55)}
   /* o interruptor da quebra bruto x custo — mora na TABBAR (não no header) para
      ficar visível em todas as abas: ele muda a página inteira, não uma seção */
-  /* seletores de trader e grupo de ativo — mandam na pagina inteira, entao
-     ficam na TABBAR, visiveis em toda aba (mesma razao do .swdet) */
-  .selwrap{margin-left:auto;display:inline-flex;align-items:center;gap:10px;padding:4px 0}
+  /* ⭐ **A BARRA DE PARÂMETROS** (02/09/2026) — "qual estudo" e o que fazer com
+     ele, separada da barra de abas ("como olhar"). Ver o comentário em
+     `report/_content.html`.
+     ⚠️ Fundo CREME (`--bg-page`) contra o branco da tabbar: é o que faz as duas
+     faixas se lerem como duas coisas, sem precisar de título em cada uma.
+     ⚠️ O padding lateral tem de ser o MESMO da tabbar (`clamp(1rem,3vw,3rem)`),
+     senão os seletores desalinham das abas ao mudar a largura da janela. */
+  .parbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:7px clamp(1rem,3vw,3rem);background:var(--bg-page);
+    border-bottom:1px solid var(--rule-faint)}
+  .parbar-acoes{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
+  /* ⚠️ o grupo de VISTA (régua + quebra) fica à direita DA TABBAR, porque é
+     opção de leitura da aba aberta, não parâmetro do estudo */
+  .tabbar-vista{margin-left:auto;display:inline-flex;align-items:center;gap:8px;
+    padding:4px 0}
+  /* seletores de trader/ativo/ano/foto — hoje moram na `.parbar` (antes eram
+     empurrados para o meio das abas por um `margin-left:auto`) */
+  .selwrap{display:inline-flex;align-items:center;gap:10px;padding:0}
   .selwrap label{display:inline-flex;align-items:center;gap:5px;
     font:600 10px/1 var(--font);letter-spacing:.06em;text-transform:uppercase;
     color:var(--muted)}
@@ -339,7 +372,9 @@
      ⛔ Só a versão LOCAL tem estes elementos — o publicador arranca o
      `controle.js` do HTML que vai para o GitHub Pages. O CSS sobra lá sem uso,
      e é de propósito: uma folha por destino divergiria em silêncio. */
-  #ctlWrap{display:inline-flex;align-items:center;gap:7px;margin-left:12px}
+  /* o controle (pílula + Atualizar + Publicar) mora na `.parbar-acoes`, que já
+     dá o espaçamento — a margem antiga existia para separá-lo das ABAS */
+  #ctlWrap{display:inline-flex;align-items:center;gap:7px}
   .ctl-pill{font:600 10px/1 var(--font);letter-spacing:.04em;text-transform:uppercase;
     padding:4px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
   .ctl-ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,transparent)}
@@ -354,7 +389,15 @@
   .ctl-b:disabled{opacity:.42;cursor:not-allowed}
   .ctl-msg{font:400 11px/1.3 var(--font);color:var(--muted);max-width:280px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* ⚠️ abaixo de 1100px a tabbar já quebra em linhas com os 4 <select>; a
+  /* ⚠️ **ABAIXO DE 1000px O GRUPO DE VISTA CAI PARA A LINHA DE BAIXO.** Medido:
+     a 900px a régua + o interruptor entravam POR CIMA da última aba ("Como é
+     medido" acabava em 720px e a vista começava em 535px). O `margin-left:auto`
+     só empurra enquanto há espaço; sem largura ele deixa os dois grupos se
+     sobreporem no mesmo `flex-wrap`. */
+  @media (max-width:1000px){
+    .tabbar-vista{margin-left:0;width:100%;padding:2px 0 6px}
+  }
+  /* ⚠️ abaixo de 1100px a parbar já quebra em linhas com os 4 <select>; a
      mensagem de progresso é o primeiro item dispensável. */
   @media (max-width:1100px){ .ctl-msg{display:none} }
 
@@ -417,8 +460,11 @@
   <div class="topnav-right"><span class="pill" id="pillMeta">&mdash;</span></div>
 </nav>
 
-<nav class="tabbar" id="tabbar">
-  <button class="tabbtn on" data-tab="trades">Trade a trade</button>
+<!-- ⭐ As MESMAS três faixas da tela anual — ver o comentário longo em
+     `_content.html`. ☠️ Aqui o layout antigo era pior: com o `margin-left:auto`
+     do `.selwrap`, os seletores caíam ENTRE os dois botões de aba, e "Por boleta"
+     aparecia DEPOIS dos parâmetros. -->
+<nav class="parbar" id="parbar">
   <span class="selwrap">
     <label>Trader <select id="selTrader"></select></label>
     <label>Ativo <select id="selGrupo"></select></label>
@@ -426,6 +472,11 @@
     <!-- ⭐ a mesma foto no tempo da tela anual (ver `_content.html`) -->
     <label>Base at&eacute; <select id="selBase"></select></label>
   </span>
+  <span class="parbar-acoes" id="parAcoes"></span>
+</nav>
+
+<nav class="tabbar" id="tabbar">
+  <button class="tabbtn on" data-tab="trades">Trade a trade</button>
   <button class="tabbtn" data-tab="boletas">Por boleta</button>
 </nav>
 

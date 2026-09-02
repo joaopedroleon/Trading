@@ -1287,6 +1287,10 @@
 
   /* ══════════════════ TAMANHO & RISCO ══════════════════ */
   function tabPortfolio() {
+    /* ⚠️ o decil da ficha de Concentração vem do `sizing_skill` (o mesmo `S` do
+       `blocoSizing`), não do `resumo` — lido aqui porque a ficha mora na 1ª
+       faixa da seção, com as outras duas de tamanho carregado. */
+    const S = TA.sizing || {};
     /* cada KPI de posição central traz a irmã no rodapé, nomeada por extenso */
     /* ⛔ Tudo aqui e a regua de TAMANHO — logo, sem opcao (ver `_base_tamanho`
        no report.py). A ficha diz isso na nota, porque o leitor que ve "#PL
@@ -1327,7 +1331,34 @@
             'de ' + R.pregoes_total + ' no ano — contagem, não média', '', 'pregoes', true),
         linha('Tempo em risco', pct(R.tempo_em_risco, 0),
             'fração dos pregões com o livro montado', '', 'tempo_risco'),
-      ])
+        /* ⭐ ESTE NÚMERO SÓ EXISTIA DENTRO DE UMA FRASE (02/09/2026): era a
+           reconciliação do §5.-27 escrita na nota da ficha de tamanho por trade
+           ("...que soma as 1,8 posições vivas em média"). É um fato de PRESENÇA
+           NO MERCADO e merece linha própria — e é ele que fecha a conta entre o
+           `#PL do dia` (livro inteiro) e o `#PL por trade` (uma posição). */
+        linha('Posições vivas por pregão', nf(R.ativos_por_pregao_medio, 1),
+            'média nos dias com posição — é o que separa o #PL do dia do #PL por trade',
+            '', 'pl_dia'),
+      ]),
+
+      /* ⭐ **CONCENTRAÇÃO virou ficha** (02/09/2026, pedido do usuário: *"reorganiza
+         essas infos, não está bem formatado; os 2 primeiros blocos muito longos, os
+         de baixo pequenos"*). Era a 4ª linha de "Existe relação?" — o que deixava
+         aquela ficha com 4 linhas contra 2 das vizinhas — e as duas frações viviam
+         AMASSADAS no subtítulo, que quebrava em duas linhas.
+         ⚠️ O número grande continua sendo o ABSOLUTO, e isso é o §5.-20: fração de
+         um líquido quase zero explode (deu −187% no PAlves). As duas frações rodam
+         sobre bases que não trocam de sinal, então podem ser linha. */
+      (S.top10pct_bps == null ? '' : ficha('Concentração', [
+        linha('Os 10% maiores', bps(S.top10pct_bps),
+            'o que os ' + nf(S.top10pct_n, 0) + ' maiores trades fizeram, em bps do NAV',
+            sgn(S.top10pct_bps), 'top10', true),
+        linha('Fatia do movimento', pct(S.top10pct_share_mov, 0),
+            'Σ |bps| do decil ÷ Σ |bps| de todos', '', 'top10'),
+        linha('Fatia do risco', pct(S.top10pct_share_risco, 0),
+            'Σ #PL do decil ÷ Σ #PL de todos', '', 'top10'),
+      ], 'O número grande é o resultado ABSOLUTO do decil, não uma fração do '
+       + 'líquido — dividir por um líquido quase zero explode.'))
     );
 
     const x = D.map((r) => r.data);
@@ -1764,14 +1795,10 @@
         linha('Só em taxa (DI e papel)', nf(S.corr_tam_result, 3),
             'Pearson (#PL × bps de taxa) em ' + nf(S.n_corr_taxa, 0) + ' ciclos '
             + '— a leitura "ele leu a curva?"', sgn(S.corr_tam_result), 'corr_tam_taxa'),
-        /* ⚠️ O VALOR e o resultado ABSOLUTO do decil, nao uma fracao do livro:
-           fracao de um liquido quase zero explode (era −187% no PAlves). As
-           duas fracoes do detalhe rodam sobre bases que nao trocam de sinal. */
-        linha('Os 10% maiores', bps(S.top10pct_bps),
-            'o que os ' + nf(S.top10pct_n, 0) + ' maiores trades fizeram · '
-            + pct(S.top10pct_share_mov, 0) + ' do movimento e '
-            + pct(S.top10pct_share_risco, 0) + ' do risco do livro',
-            sgn(S.top10pct_bps), 'top10'),
+        /* ⛔ "Os 10% maiores" MUDOU DE FICHA (02/09/2026): virou a ficha
+           `Concentração`, na faixa de cima. Ele respondia outra pergunta
+           ("as apostas grandes puxam o livro?") e era a 4ª linha aqui, o que
+           deixava esta ficha 2× mais alta que as vizinhas. */
       ], 'Livro inteiro — ' + ((S.books || []).join(' · ') || 'todos os books')
        + '. Cada ciclo medido contra a média da régua DELE.'),
 
@@ -1788,9 +1815,9 @@
             'mediana ' + nf(S.tam_norm_mediano_perdedor, 2) + '× · em #PL (títulos e DI) '
             + nf(S.pl_medio_perdedor, 2), '', 'tam_norm'),
       ], '1,00× é o tamanho típico do tipo do instrumento — #PL no DI e no papel, '
-       + 'prêmio em bps do NAV na opção. Uma posição por vez: não confundir com o '
-       + '#PL do dia acima, que soma as '
-       + nf(R.ativos_por_pregao_medio, 1) + ' posições vivas em média.'),
+       + 'prêmio em bps do NAV na opção. ⚠️ É UMA posição por vez: não confundir '
+       + 'com o #PL do dia, que soma as posições vivas (a linha "Posições vivas '
+       + 'por pregão", acima, é a que fecha essa conta).'),
 
       ficha('Quanto o sizing valeu', [
         linha('Valor do sizing', bps(S.valor_do_sizing_bps), 'real − tamanho igual',
