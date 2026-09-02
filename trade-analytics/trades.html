@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Trades do gestor — análise anual · JGP Macro</title>
+<title>PAlves 2026 — trade a trade · JGP Macro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -411,54 +411,22 @@
     <span class="divider">&middot;</span>
     <span class="breadcrumb">ESTUDO &middot; TRADES DO GESTOR</span>
     <span class="divider">&middot;</span>
-    <a class="xlink on" href="index.html">An&aacute;lise anual</a>
-    <a class="xlink" href="trades.html">Trade a trade &amp; boletas</a>
+    <a class="xlink" href="index.html">An&aacute;lise anual</a>
+    <a class="xlink on" href="trades.html">Trade a trade &amp; boletas</a>
   </div>
   <div class="topnav-right"><span class="pill" id="pillMeta">&mdash;</span></div>
 </nav>
 
 <nav class="tabbar" id="tabbar">
-  <button class="tabbtn on" data-tab="visao">Retrato do ano</button>
-  <!-- ⭐ "Posicao & risco" + "Sizing" FUNDIDAS (31/08/2026): as duas falavam de
-       TAMANHO — a 1a "quanto risco ele tinha e onde", a 2a "esse risco foi bem
-       alocado?". Sao a mesma materia em duas perguntas, e separadas obrigavam a
-       pular de aba para responder uma. A fusao liberou o slot do CUSTO, que
-       estava enterrado dentro de "Posicao & risco" e ninguem acharia la. -->
-  <button class="tabbtn" data-tab="portfolio">Tamanho &amp; risco</button>
-  <button class="tabbtn" data-tab="habilidade">Acerto &amp; payoff</button>
-  <button class="tabbtn" data-tab="custo">Custo</button>
-  <button class="tabbtn" data-tab="contratos">Contratos</button>
-  <button class="tabbtn" data-tab="metodo">Como &eacute; medido</button>
+  <button class="tabbtn on" data-tab="trades">Trade a trade</button>
   <span class="selwrap">
     <label>Trader <select id="selTrader"></select></label>
     <label>Ativo <select id="selGrupo"></select></label>
     <label>Ano <select id="selAno"></select></label>
-    <!-- ⭐ AS FOTOS NO TEMPO (02/09/2026). ☠️ N&Atilde;O &eacute; o mesmo que o ANO:
-         `2024` &eacute; um ano fechado; `2026 &middot; base at&eacute; 15/08` &eacute; o ano CORRENTE
-         como ele era naquele dia. Nasce ESCONDIDO e o `ta-sel.js` mostra s&oacute; quando
-         o hist&oacute;rico daquele par tem mais de uma foto — um controle que n&atilde;o
-         controla nada sugere hist&oacute;rico vazio, que &eacute; pior que a aus&ecirc;ncia dele. -->
+    <!-- ⭐ a mesma foto no tempo da tela anual (ver `_content.html`) -->
     <label>Base at&eacute; <select id="selBase"></select></label>
   </span>
-  <!-- ⭐ A R&Eacute;GUA DA P&Aacute;GINA (01/09/2026). Padr&atilde;o bps do NAV: &eacute; a &uacute;nica r&eacute;gua
-       compar&aacute;vel entre traders e entre anos — R$ 32 mil num livro de R$ 23 MM n&atilde;o
-       &eacute; o mesmo que R$ 32 mil num de R$ 200 MM, e o NAV alocado muda por decis&atilde;o
-       da casa. O RESULTADO TOTAL em R$ fica vis&iacute;vel nas DUAS r&eacute;guas.
-       ⚠️ Mora na tabbar, e n&atilde;o no header, pela mesma raz&atilde;o do interruptor de
-       detalhe: ele muda a p&aacute;gina inteira, ent&atilde;o precisa estar vis&iacute;vel em toda
-       aba. E N&Atilde;O recarrega a p&aacute;gina (ao contr&aacute;rio dos seletores de
-       trader/ativo/ano, que trocam o ARQUIVO de dados) — s&oacute; invalida o cache
-       `drawn` e redesenha. -->
-  <label class="swdet swreg" title="Troca a unidade das an&aacute;lises: bps do NAV do trader (padr&atilde;o, compar&aacute;vel entre traders e anos) ou reais. O resultado total em R$ aparece nas duas. DV01, giro e custo por perna ficam sempre em R$ &mdash; s&atilde;o sensibilidade e pre&ccedil;o unit&aacute;rio, n&atilde;o resultado.">
-    r&eacute;gua
-    <select id="selRegua">
-      <option value="bps">bps do NAV</option>
-      <option value="brl">reais</option>
-    </select>
-  </label>
-  <label class="swdet" title="Por padr&atilde;o a tela mostra s&oacute; o resultado L&Iacute;QUIDO (depois de corretagem, custos operacionais e carrego). Marque para abrir a quebra bruto &minus; custo = l&iacute;quido em todo n&uacute;mero da p&aacute;gina.">
-    <input type="checkbox" id="chkDetalhe"> detalhar bruto &times; custo
-  </label>
+  <button class="tabbtn" data-tab="boletas">Por boleta</button>
 </nav>
 
   <main class="main-content">
@@ -466,358 +434,89 @@
       <div class="page-eyebrow"><span class="tag">ESTUDO INTERNO</span><span id="ehJanela"></span></div>
       <h1 class="page-title" id="pgTitulo">&mdash;</h1>
       <dl class="page-meta">
-        <div class="meta-item"><dt>Posi&ccedil;&atilde;o e resultado</dt><dd>JRS.VW_SOPHIS_TICKETS</dd></div>
-        <div class="meta-item"><dt>Ajuste di&aacute;rio</dt><dd>UP2DATA.SETTLEMENTPRICE</dd></div>
-        <div class="meta-item"><dt>Custos</dt><dd>corretagem + emolumento + contraparte</dd></div>
-        <div class="meta-item"><dt>Escopo</dt><dd>todos os trades &middot; fundos MM</dd></div>
+        <div class="meta-item"><dt>Trades (ciclos)</dt><dd id="mtNTrades">&mdash;</dd></div>
+        <div class="meta-item"><dt>Execu&ccedil;&otilde;es</dt><dd id="mtNExec">&mdash;</dd></div>
+        <div class="meta-item"><dt>Boletas cruas</dt><dd id="mtNBoletas">&mdash;</dd></div>
         <!-- ☠️ Era "Atualizado" com a data em que o SCRIPT rodou — e isso engana:
              gerado no dia 01/09 sobre uma base que para em 28/08, o leitor le
              "atualizado hoje". O rotulo agora e a DATA DO DADO; quando gerou
              vira nota de rodape. -->
         <div class="meta-item"><dt>Base at&eacute;</dt><dd id="mtBase">&mdash;</dd></div>
       </dl>
-      <!-- ⛔ O que a base de an&aacute;lise deixou de fora, preenchido por app.js.
-           Fica no CABE&Ccedil;ALHO de prop&oacute;sito: vale para a p&aacute;gina inteira, n&atilde;o para
-           um gr&aacute;fico. -->
-      <div class="aviso" id="ehExcluidos" style="display:none;margin-top:14px"></div>
     </header>
 
+    <!-- ══════════ TRADE A TRADE ══════════ -->
+    <section id="tab-trades" class="tab on">
+      <h2>Todos os trades</h2>
+      <div class="filtros" id="fTrades">
+        <label class="chk"><input type="checkbox" id="chkDT" checked> daytrades</label>
+        <label class="chk"><input type="checkbox" id="chkON" checked> carregou posi&ccedil;&atilde;o</label>
+        <label class="chk"><input type="checkbox" id="chkGanho" checked> ganhos</label>
+        <label class="chk"><input type="checkbox" id="chkPerda" checked> perdas</label>
+        <select id="selBook"><option value="">todos os books</option></select>
+        <select id="selAtivo"><option value="">todos os contratos</option></select>
+        <span class="fcount" id="cntTrades"></span>
+      </div>
+      <div class="wrap"><table id="tblTrades"></table></div>
 
-    <!-- ══════════ RETRATO DO ANO ══════════ -->
-    <section id="tab-visao" class="tab on">
-      <h2>Retrato do ano <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
-      <div class="kpis" id="kpisGeral"></div>
+      <div id="drill" class="drill" hidden>
+        <div class="drillhead">
+          <h3 id="drillTitulo">&mdash;</h3>
+          <button class="segbtn" id="drillFechar">fechar</button>
+        </div>
+        <div class="kpis" id="drillKpis"></div>
+        <div class="grid2">
+          <div class="card">
+            <h3 class="chart-title">Posi&ccedil;&atilde;o e taxa dentro do trade</h3>
+            <div class="csub">a posi&ccedil;&atilde;o em contratos (&aacute;rea) contra a taxa de ajuste (linha)</div>
+            <div class="plot" id="figDrill"></div>
+            <div class="cfonte">boletas do Sophis + ajuste di&aacute;rio da B3</div>
+          </div>
+          <div class="card">
+            <h3 class="chart-title">De onde veio o resultado</h3>
+            <div class="csub">caixa das boletas do dia e marca&ccedil;&atilde;o da posi&ccedil;&atilde;o carregada</div>
+            <div class="plot" id="figDrillPnl"></div>
+            <div class="cfonte">a soma telescopa no resultado do ciclo</div>
+          </div>
+        </div>
+        <h3>Blotter di&aacute;rio</h3>
+        <div class="wrap"><table id="tblDrillBlotter"></table></div>
+        <h3>Execu&ccedil;&otilde;es deste trade</h3>
+        <div class="wrap"><table id="tblDrillExec"></table></div>
+      </div>
+    </section>
 
+    <!-- ══════════ POR BOLETA ══════════ -->
+    <section id="tab-boletas" class="tab">
+      <h2>An&aacute;lise por boleta</h2>
+      <div class="filtros" id="fExec">
+        <select id="selExecBook"><option value="">todos os books</option></select>
+        <select id="selExecAtivo"><option value="">todos os contratos</option></select>
+        <select id="selExecBroker"><option value="">todos os brokers</option></select>
+        <select id="selExecLado"><option value="">compra e venda</option><option value="compra">s&oacute; compra</option><option value="venda">s&oacute; venda</option></select>
+        <label class="chk"><input type="checkbox" id="chkCanc"> mostrar cancelamentos</label>
+        <span class="fcount" id="cntExec"></span>
+      </div>
       <div class="grid2">
         <div class="card">
-          <h3 class="chart-title">Resultado composto ao longo do ano</h3>
-          <div class="csub">curva de capital do livro, em bps do NAV, e o drawdown embaixo</div>
-          <div class="plot" id="figEquity"></div>
-          <div class="cfonte">JRS.VW_SOPHIS_TICKETS + ajuste B3 (UP2DATA) &middot; NAV do trader (JRS)</div>
+          <h3 class="chart-title">Execu&ccedil;&otilde;es por broker</h3>
+          <div class="csub">giro em contratos e n&uacute;mero de execu&ccedil;&otilde;es</div>
+          <div class="plot" id="figBroker"></div>
+          <div class="cfonte">JRS.VW_SOPHIS_TICKETS</div>
         </div>
         <div class="card">
-          <h3 class="chart-title">Resultado por m&ecirc;s</h3>
-          <div class="plot" id="figMes"></div>
+          <h3 class="chart-title">O split entre fundos</h3>
+          <div class="csub">quantos fundos por execu&ccedil;&atilde;o</div>
+          <div class="plot" id="figSplit"></div>
           <div class="cfonte">JRS.VW_SOPHIS_TICKETS</div>
         </div>
       </div>
-
-      <!-- ☠️ Era "Os dois jogos dentro do mesmo livro" — literario, e o leitor
-           tinha de abrir a tabela para descobrir QUAIS jogos. O titulo agora
-           nomeia as duas linhas que estao ali. -->
-      <h2>Daytrade &times; posi&ccedil;&atilde;o carregada <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
-      <div class="wrap"><table id="tblHorizonte"></table></div>
-
-      <!-- ⚠️ NAO e "por instrumento": a tabela lista `di`, `titulo` e `opcao` —
-           CLASSE de ativo. "Instrumento" faz esperar ODF28/ODF31, que e a aba
-           Contratos; o rotulo antigo mandava o leitor para a tabela errada. -->
-      <h2>Por classe de ativo <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
-      <div class="wrap"><table id="tblBook"></table></div>
-    </section>
-
-    <!-- ══════════ POSI&Ccedil;&Atilde;O &amp; RISCO ══════════ -->
-    <section id="tab-portfolio" class="tab">
-      <!-- ①  QUANTO ELE CARREGOU — a foto do risco no tempo -->
-      <!-- ⭐ TODAS AS FICHAS ANTES DE TODOS OS GR&Aacute;FICOS (pedido do usu&aacute;rio,
-           01/09/2026). Antes era se&ccedil;&atilde;o 1 (n&uacute;meros + gr&aacute;fico) e depois se&ccedil;&atilde;o 2
-           (n&uacute;meros + gr&aacute;ficos): quem queria s&oacute; os n&uacute;meros tinha de rolar por um
-           gr&aacute;fico no meio, e a compara&ccedil;&atilde;o entre os dois blocos exigia mem&oacute;ria.
-           ⚠️ O cabe&ccedil;alho pr&oacute;prio &eacute; obrigat&oacute;rio: sob "Quanto ele tinha na m&atilde;o" as
-           fichas de sizing ficariam mal rotuladas. Cada ficha j&aacute; se nomeia, ent&atilde;o
-           o t&iacute;tulo aqui s&oacute; precisa cobrir as duas fam&iacute;lias. -->
-      <h2>Exposi&ccedil;&atilde;o e sizing</h2>
-      <div class="kpis" id="kpisRisco"></div>
-      <div class="kpis" id="kpisSizing"></div>
-
-      <h2>Quanto ele tinha na m&atilde;o <span class="esc">pap&eacute;is e DI</span></h2>
-
-      <div class="card">
-        <h3 class="chart-title">Tamanho da posi&ccedil;&atilde;o ao longo do ano</h3>
-        <!-- ⛔ SEM eixo duplo desde 01/09/2026 (pedido do usuario: "o 0 do PL e
-             do DV01 deve ser alinhado, 0 e 0"). #PL e DV01 sao a MESMA serie
-             sobre o NAV: dois eixos so acrescentavam um segundo zero. Hoje a
-             REGUA escolhe a unidade e o zero e um so. Ver o bloco no app.js. -->
-        <div class="csub">as duas <b>&aacute;reas</b> s&atilde;o as pontas vivas &mdash;
-          <b>tomado</b> acima do zero, <b>aplicado</b> abaixo &mdash; e a linha preta &eacute; o
-          <b>l&iacute;quido</b> (a soma delas). ⭐ Quando as duas existem no mesmo dia ele
-          carrega <b>incli&shy;na&ccedil;&atilde;o</b>, e a dist&acirc;ncia da linha at&eacute; a borda &eacute; a ponta
-          que est&aacute; sendo compensada. A unidade segue a <b>r&eacute;gua da tela</b>
-          (#PL ou R$/bp) &mdash; &eacute; a mesma posi&ccedil;&atilde;o nas duas</div>
-        <div class="plot" id="figRisco"></div>
-        <div class="cfonte">posi&ccedil;&atilde;o das boletas &times; DV01 do dia (ajuste da B3 no DI,
-          duration da NTN-B na <code>ODS.RISK_GOVBONDS</code>)</div>
-      </div>
-
-      <!-- ②  O TAMANHO ACERTOU? — era a aba "Sizing".
-           ⚠️ Vem ANTES da distribuicao (pedido do usuario, 31/08/2026):
-           depois de ver QUANTO ele carregou, a pergunta seguinte e se
-           aquilo foi bem alocado. Onde ele poe o risco e detalhe, e
-           detalhe vai por ultimo. -->
-      <!-- ⭐ A ETIQUETA DE ESCOPO MUDOU (01/09/2026): a opcao entrou no bloco
-           pela regua dela (premio em bps do NAV), normalizada contra a media do
-           proprio tipo. Ver §5.-54 do CLAUDE.md. -->
-      <h2>Ele aposta mais quando est&aacute; certo? <span class="esc">livro inteiro</span></h2>
-
-      <div class="card">
-        <h3 class="chart-title">Tamanho da aposta &times; retorno da aposta</h3>
-        <div class="csub">cada ciclo contra a m&eacute;dia da r&eacute;gua DELE &mdash;
-          <b>1,00&times;</b> &eacute; o tamanho t&iacute;pico do tipo do instrumento
-          (#PL no DI e no papel, pr&ecirc;mio em bps do NAV na op&ccedil;&atilde;o, que sai como
-          losango). ⚠️ o eixo do resultado &eacute; <b>normalizado pelo tamanho</b>: contra o
-          resultado cru a inclina&ccedil;&atilde;o seria mec&acirc;nica</div>
-        <div class="plot" id="figSizing"></div>
-        <div class="cfonte">ciclos fechados e materiais &mdash; a mesma nuvem que o contrafactual soma</div>
-      </div>
-
-      <div class="grid2">
-        <div class="card">
-          <h3 class="chart-title">Por quartil de tamanho</h3>
-          <div class="csub">acerto e resultado nos trades pequenos &times; grandes</div>
-          <div class="plot" id="figQuartis"></div>
-          <div class="cfonte">quartis de tamanho relativo</div>
-        </div>
-        <div class="card">
-          <h3 class="chart-title">Contrafactual: e se todo trade fosse do mesmo tamanho?</h3>
-          <div class="csub">real contra tamanho igual, em bps do NAV</div>
-          <div class="plot" id="figContraf"></div>
-          <div class="cfonte">reescala cada trade pelo tamanho m&eacute;dio da r&eacute;gua dele</div>
-        </div>
-      </div>
-      <div class="wrap"><table id="tblQuartis"></table></div>
-      <!-- ③  COMO ELE DISTRIBUI — o habito de tamanho e onde ele o poe -->
-      <h2>Como ele distribui o risco <span class="esc">pap&eacute;is e DI</span></h2>
-      <div class="grid2">
-        <div class="card">
-          <h3 class="chart-title">Distribui&ccedil;&atilde;o do tamanho &mdash; t&iacute;tulos e DI</h3>
-          <div class="csub">#PL nos pregões com posi&ccedil;&atilde;o &mdash; onde ele costuma operar</div>
-          <div class="plot" id="figPlDist"></div>
-          <div class="cfonte">JRS.VW_SOPHIS_TICKETS + UP2DATA</div>
-        </div>
-        <div class="card">
-          <h3 class="chart-title">Onde na curva ele opera &mdash; t&iacute;tulos e DI</h3>
-          <div class="csub">giro em R$/bp por v&eacute;rtice. ⚠️ o papel entra com prefixo
-            <b>B</b> e cor pr&oacute;pria: NTN-B &eacute; taxa <b>real</b> e DI &eacute; <b>nominal</b> &mdash;
-            s&atilde;o curvas diferentes no mesmo eixo. ⛔ <b>sem op&ccedil;&atilde;o</b>: ela n&atilde;o ocupa
-            v&eacute;rtice de curva e n&atilde;o tem DV01 &mdash; a r&eacute;gua dela &eacute; o pr&ecirc;mio, no bloco
-            <i>O tamanho das op&ccedil;&otilde;es</i></div>
-          <div class="plot" id="figCurva"></div>
-          <div class="cfonte">JRS.VW_SOPHIS_TICKETS &times; DV01 do contrato (taxa de entrada, <code>du</code> congelado)</div>
-        </div>
-      </div>
-
-      <h3 class="chart-title">Tomado &times; aplicado</h3>
-      <div class="wrap"><table id="tblDirecao"></table></div>
-
-      <!-- ④  O TAMANHO DAS OP&Ccedil;&Otilde;ES — r&eacute;gua pr&oacute;pria, e por isso bloco pr&oacute;prio.
-           ⛔ N&Atilde;O se mistura com #PL: pr&ecirc;mio &eacute; R$ de pr&ecirc;mio sobre o NAV e #PL &eacute;
-           R$/bp sobre o NAV. Somar as duas ou p&ocirc;-las na mesma coluna &eacute; a
-           confus&atilde;o que a §5.-27 corrigiu. Aparece s&oacute; quando h&aacute; op&ccedil;&atilde;o — o
-           `blocoPremio()` do app.js esconde o bloco inteiro quando n&atilde;o h&aacute;. -->
-      <h2 id="secOpcoes">O tamanho das op&ccedil;&otilde;es &mdash; pr&ecirc;mio <span class="esc">s&oacute; op&ccedil;&otilde;es</span></h2>
-      <div class="kpis" id="kpisPremio"></div>
-      <div class="grid2" id="cardsPremio">
-        <div class="card">
-          <h3 class="chart-title">Pr&ecirc;mio vivo ao longo do ano</h3>
-          <div class="csub">pr&ecirc;mio marcado das op&ccedil;&otilde;es em carteira, em bps do NAV do dia</div>
-          <div class="plot" id="figPremio"></div>
-          <div class="cfonte">JRS.VW_SOPHIS_TICKETS &times; marca&ccedil;&atilde;o do dia (SOPHIS.HISTORIQUE;
-            estrutura de IDI sintetizada das pernas)</div>
-        </div>
-        <div class="card">
-          <h3 class="chart-title">Pr&ecirc;mio colocado &times; resultado, por trade</h3>
-          <!-- ⚠️ Era `pr&ecirc;mio × risco m&aacute;ximo`, que e a identidade x = x: para quem
-               COMPRA o risco maximo E o premio, e quase todo trade e comprado. -->
-          <div class="csub">p&otilde;e mais pr&ecirc;mio na mesa e ganha mais? &middot; <b>losango</b> =
-            vendido &middot; a <b>diagonal pontilhada</b> &eacute; o piso de quem compra (perder o
-            pr&ecirc;mio inteiro)</div>
-          <div class="plot" id="figPremioRisco"></div>
-          <div class="cfonte">teto = 100 pontos na digital de COPOM; dist&acirc;ncia entre
-            strikes na estrutura de IDI</div>
-        </div>
-      </div>
-      <div class="wrap"><table id="tblPremio"></table></div>
-
-    </section>
-
-    <!-- ══════════ ACERTO &amp; PAYOFF ══════════ -->
-    <section id="tab-habilidade" class="tab">
-      <h2>A pergunta central <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
-      <div class="kpis" id="kpisHab"></div>
-
-      <div class="grid2">
-        <div class="card">
-          <h3 class="chart-title">Acerto &times; payoff</h3>
-          <!-- ⚠️ O subt&iacute;tulo dizia s&oacute; "cada ponto &eacute; um corte do livro", o que n&atilde;o
-               diz QUAIS cortes nem o que o tamanho e a cor significam. O usu&aacute;rio
-               perguntou "o que &eacute; cada bola?" — a legenda tem de responder sozinha. -->
-          <div class="csub">cada bola &eacute; um <b>recorte dos trades</b> &mdash; por horizonte
-            (daytrade &times; carregou), por dire&ccedil;&atilde;o (tomado &times; aplicado) e por
-            vencimento de DI (com 3+ ciclos). <b>Tamanho</b> = n&ordm; de ciclos &middot;
-            <b>cor</b> = o recorte deu ou perdeu dinheiro. O <b>losango</b> &eacute; o livro
-            inteiro; a <b>linha tracejada</b> &eacute; o payoff m&iacute;nimo para empatar em cada
-            n&iacute;vel de acerto &mdash; acima dela o recorte paga, abaixo n&atilde;o.</div>
-          <div class="plot" id="figHitPayoff"></div>
-          <div class="cfonte">ciclos fechados e materiais</div>
-        </div>
-        <div class="card">
-          <h3 class="chart-title">Ganho &times; perda &mdash; m&eacute;dia e mediana</h3>
-          <div class="plot" id="figGanhoPerda"></div>
-          <div class="cfonte">ciclos fechados e materiais</div>
-        </div>
-      </div>
-
-      <div class="grid2">
-        <div class="card">
-          <h3 class="chart-title">Movimento de taxa capturado por trade</h3>
-          <div class="csub"><code>bps_taxa</code> &mdash; quanto a taxa andou a favor dele, sem depender do tamanho</div>
-          <div class="plot" id="figBpsTaxa"></div>
-          <div class="cfonte">VWAP de entrada e de sa&iacute;da das boletas</div>
-        </div>
-        <div class="card">
-          <h3 class="chart-title">Dura&ccedil;&atilde;o &times; resultado</h3>
-          <!-- ⭐ Duas r&eacute;guas: R$ diz quanto DINHEIRO, bps diz quanto do
-               PATRIM&Ocirc;NIO. S&oacute; em R$ a nuvem se espalha pela ALOCA&Ccedil;&Atilde;O e n&atilde;o pela
-               decis&atilde;o, o que torna o gr&aacute;fico incompar&aacute;vel entre traders e anos.
-               ⚠️ O `<select>` PR&Oacute;PRIO deste card saiu em 01/09/2026: quem manda
-               agora &eacute; o seletor de r&eacute;gua da barra de abas, que vale para a p&aacute;gina
-               inteira. Dois seletores de r&eacute;gua na mesma tela podiam ficar em
-               estados contradit&oacute;rios, e o leitor n&atilde;o saberia qual estava lendo. -->
-          <div class="csub">vencedor dura mais que perdedor? (corta perda r&aacute;pido, deixa ganho correr)
-            &mdash; na r&eacute;gua escolhida na barra; o hover traz sempre a outra</div>
-          <div class="plot" id="figDuracao"></div>
-          <div class="cfonte">ciclos fechados e materiais</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════ SIZING ══════════ -->
-    <!-- ══════════ CUSTO ══════════ -->
-    <section id="tab-custo" class="tab">
-      <h2>Para onde vai o custo <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
-      <div class="kpis" id="kpisCusto"></div>
-
-      <div class="card">
-        <h3 class="chart-title">Custo ao longo do ano</h3>
-        <div class="plot" id="figCusto"></div>
-        <div class="cfonte">JRS.VW_SOPHIS_TICKETS &mdash; as 3 taxas por boleta, em BRL</div>
-      </div>
-    </section>
-
-    <!-- ══════════ CONTRATOS ══════════ -->
-    <section id="tab-contratos" class="tab">
-      <h2>Onde ele ganha e onde perde <span class="esc">pap&eacute;is e DI</span></h2>
-      <div class="card">
-        <h3 class="chart-title">Resultado por contrato</h3>
-        <!-- ⚠️ O subt&iacute;tulo dizia "em R$" e cravava a unidade: com o seletor de
-             r&eacute;gua da barra o eixo pode estar em bps do NAV, e o texto mentiria. -->
-        <div class="csub">com o n&uacute;mero de trades em cada um</div>
-        <div class="plot" id="figContratos"></div>
-        <div class="cfonte">ciclos fechados e materiais</div>
-      </div>
-      <h2>Detalhe por contrato <span class="esc">pap&eacute;is e DI</span></h2>
-      <div class="wrap"><table id="tblContratos"></table></div>
-    </section>
-
-    <!-- ══════════ COMO &Eacute; MEDIDO ══════════ -->
-    <section id="tab-metodo" class="tab">
-
-      <h2>A defini&ccedil;&atilde;o de &ldquo;um trade&rdquo;</h2>
-      <!-- ☠️ Esta se&ccedil;&atilde;o e a seguinte estavam VAZIAS — s&oacute; o &lt;h2&gt;, sem uma linha
-           de conte&uacute;do. A aba que explica a metodologia n&atilde;o explicava nada. -->
-      <p class="lede">Um trade &eacute; um <b>ciclo de posi&ccedil;&atilde;o de um ativo, de zero a zero</b>.
-        Comprou 5, mais 5, vendeu 5, mais 5, zerou 15 = <b>um</b> trade; o que houve de
-        boleta no meio foi negociado em volta da posi&ccedil;&atilde;o. Zerou e reabriu = trade novo.</p>
-      <ul class="lista">
-        <li><b>Virada de m&atilde;o</b> &mdash; tomado que vira aplicado sem passar por zero
-          <b>fecha um ciclo e abre outro</b>, ambos no pre&ccedil;o m&eacute;dio do dia. O dia &eacute;
-          fatiado pro-rata, ent&atilde;o o caixa fecha exato nos dois.</li>
-        <li><b>Op&ccedil;&atilde;o de IDI &eacute; ESTRUTURA</b> &mdash; pernas do mesmo vencimento operadas
-          juntas na mesma corretora (condor, butterfly, spread) s&atilde;o <b>um</b> trade, com
-          quantidade em n&ordm; de estruturas e pre&ccedil;o = pr&ecirc;mio l&iacute;quido. Digital de COPOM n&atilde;o:
-          ela se opera solta.</li>
-        <li><b>Posi&ccedil;&atilde;o herdada</b> &mdash; a boleta <code>pnl_eoy_open</code> de 31/12 traz a
-          quantidade e o pre&ccedil;o de fechamento do ano anterior, e entra como uma boleta comum
-          no 1&ordm; preg&atilde;o.</li>
-        <li><b>Posi&ccedil;&atilde;o ainda aberta</b> &mdash; fechada no <b>pre&ccedil;o de fechamento</b>, a
-          t&iacute;tulo de an&aacute;lise, para o trade entrar nas estat&iacute;sticas. A perna de sa&iacute;da
-          aparece com broker <code>(marca&ccedil;&atilde;o)</code> e n&atilde;o tem custo.</li>
-        <li><b>Daytrade dentro de um ciclo aberto</b> n&atilde;o vira trade pr&oacute;prio &mdash; entra no
-          ciclo. O total est&aacute; certo; a contagem &eacute; conservadora.</li>
-      </ul>
-
-      <h2>Como o resultado de um ciclo &eacute; calculado</h2>
-      <p class="lede">No <b>futuro de DI</b> o resultado &eacute; a soma dos <b>ajustes di&aacute;rios da
-        B3</b> &mdash; o dinheiro que de fato entrou e saiu da conta do fundo, dia a dia:</p>
-      <pre class="formula">AD(t) = (PA(t) &minus; PA(t&minus;1) &times; FC(t)) &times; posi&ccedil;&atilde;o carregada
-      + &Sigma; q(j) &times; (PA(t) &minus; PO(j))            &larr; o que foi negociado hoje
-FC(t) = (1 + CDI(t&minus;1)/100) ^ (1/252)
-PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
-      <p class="lede">Nos demais ativos &eacute; a varia&ccedil;&atilde;o de pre&ccedil;o mais o cupom recebido. E o
-        <b>l&iacute;quido</b>, em qualquer book, tem tr&ecirc;s parcelas:</p>
-      <pre class="formula">l&iacute;quido = bruto &minus; custo de transa&ccedil;&atilde;o + carrego do caixa</pre>
-      <ul class="lista">
-        <li><b>Custo</b> &mdash; corretagem, emolumento e contraparte, das <b>3 colunas da
-          pr&oacute;pria boleta</b>. Sem rateio e sem estimativa.</li>
-        <li><b>Carrego</b> &mdash; CDI sobre a <b>marca&ccedil;&atilde;o do dia</b> do capital preso. Futuro
-          n&atilde;o paga (&eacute; margem); NTN-B e pr&ecirc;mio de op&ccedil;&atilde;o pagam.</li>
-        <li>⚠️ <b>Ciclo fechado telescopa</b>: a soma dos resultados di&aacute;rios bate com o do
-          ciclo, e isso &eacute; conferido a cada rodada.</li>
-      </ul>
-
-      <h2>A unidade de cada instrumento</h2>
-      <p class="lede">Os tr&ecirc;s books n&atilde;o se medem na mesma escala, e for&ccedil;ar uma
-        r&eacute;gua &uacute;nica &eacute; o erro mais caro deste estudo:</p>
-      <ul class="lista">
-        <li><b>Futuro de DI</b> &mdash; o pre&ccedil;o &Eacute; a taxa. Tamanho em <b>#PL</b>
-          (<code>DV01 &times; 1e4 &divide; NAV</code>), movimento em <b>bps de taxa</b>.</li>
-        <li><b>NTN-B</b> &mdash; o pre&ccedil;o &eacute; o <b>PU em R$</b>. O tamanho tamb&eacute;m
-          &eacute; #PL (a dura&ccedil;&atilde;o vem da <code>ODS.RISK_GOVBONDS</code>), mas o movimento
-          de taxa <b>n&atilde;o sai do pre&ccedil;o</b>: &Delta;PU de 4.144 para 4.225 n&atilde;o &eacute;
-          &ldquo;81 bps&rdquo;, s&atilde;o 81 reais. A taxa vem de um VWAP paralelo sobre a
-          indicativa observada da ANBIMA.</li>
-        <li><b>Op&ccedil;&atilde;o</b> &mdash; n&atilde;o tem DV01. Tamanho &eacute; o <b>pr&ecirc;mio em bps do
-          NAV</b>; movimento &eacute; em <b>pontos de pre&ccedil;o</b>, e cada ponto &eacute; um ponto
-          <b>percentual</b>: de probabilidade na digital de COPOM (cotada de 0 a 100, vira
-          100 se o cen&aacute;rio ocorre) e de payoff na estrutura de IDI (teto 100).</li>
-      </ul>
-      <!-- ☠️ Isto NAO e trivia: sem tratar, 8 de 22 pares (trader x ano) com
-           digital saem 100x menores, e a tela nao da erro nenhum. -->
-      <p class="lede">⚠️ <b>E o ponto da digital mudou de valor.</b> At&eacute; <b>26/05/2025</b>
-        um ponto valia <b>R$ 100,00</b> por contrato; desde ent&atilde;o vale <b>R$ 1,00</b>. A
-        escala sai do <code>amount</code> da pr&oacute;pria boleta, <b>por instrumento</b> &mdash;
-        as duas s&eacute;ries coexistem no mesmo dia.</p>
-
-      <h2>A r&eacute;gua de leitura da tela</h2>
-      <p class="lede">O seletor na barra de abas troca <b>toda</b> a p&aacute;gina entre
-        <b>bps do NAV</b> e <b>reais</b>. Em bps nenhum n&uacute;mero aparece em R$, com tr&ecirc;s
-        exce&ccedil;&otilde;es que s&atilde;o unidade e n&atilde;o resultado: a linha
-        <i>&ldquo;Em reais&rdquo;</i>, o <b>NAV</b> (&eacute; o denominador) e o <b>custo por
-        contrato</b> (pre&ccedil;o unit&aacute;rio). O interruptor <i>detalhar bruto &times; custo</i>
-        abre a quebra; sem ele a tela &eacute; l&iacute;quida por defini&ccedil;&atilde;o.</p>
-
-      <h2>As r&eacute;guas</h2>
-      <div class="wrap"><table id="tblReguas"></table></div>
-
-      <h2>Proced&ecirc;ncia de cada n&uacute;mero</h2>
-      <div class="wrap"><table id="tblFontes"></table></div>
-
-      <h2>O NAV do trader &mdash; o denominador de tudo</h2>
-      <!-- ⭐ Veio de "Tamanho & risco" (pedido do usuario, 31/08/2026): nao e uma
-           conclusao sobre o gestor, e o denominador. Informacao de contexto, e o
-           lugar da informacao de contexto e a aba de metodo. -->
-      <div class="card">
-        <div class="csub">&eacute; o denominador de todo bps e de todo #PL &mdash; e ele muda por
-          decis&atilde;o da casa, n&atilde;o por decis&atilde;o do gestor</div>
-        <div class="plot" id="figNav"></div>
-        <div class="cfonte">JRS <code>fund=&#39;Trader NAV&#39;</code> (USD) &times; USDBRL da ODS.MACRO_BBG
-          &mdash; o &uacute;nico n&uacute;mero que o estudo tira do JRS, e s&oacute; como denominador</div>
-      </div>
-
+      <div class="wrap"><table id="tblExec"></table></div>
     </section>
 
     <footer class="page-footer">
       <div class="credits">Elabora&ccedil;&atilde;o &middot; <strong>JGP Macro</strong> &middot; estudo interno, fora do ambiente da mesa</div>
-      <div>JGP Macro</div>
+      <div>JGP &middot; 2026</div>
     </footer>
   </main>
 
@@ -828,7 +527,7 @@ PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
 <script src="lib/plotly.min.js"></script>
 <script src="lib/plotly-jgp.js"></script>
 <script src="boot.js"></script>
-<script src="app.js"></script>
+<script src="trades.js"></script>
 <script>
 /* =====================================================================
    chrome.js — casca editorial JGP (variante dashboard / abas)
