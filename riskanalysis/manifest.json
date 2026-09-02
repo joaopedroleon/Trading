@@ -1,5 +1,5 @@
 {
- "gerado_em": "02/09/2026 12:16",
+ "gerado_em": "02/09/2026 12:29",
  "grupos": {
   "juros-br": "Juros Brasil",
   "brl": "BRL",
@@ -24,90 +24,6 @@
      "sha": "12c90f80c6e0f6fc7098bc12327a71c164ee5dd94e17fbdd7da1196e741d939f",
      "pub": "02/09/2026 08:40",
      "arq": "dados/emota-juros-br-2026__2026-08-31.js"
-    }
-   ]
-  },
-  "emota-juros-br-2025": {
-   "trader": "EMota",
-   "grupo": "juros-br",
-   "grupo_rotulo": "Juros Brasil",
-   "ano": 2025,
-   "vintages": [
-    {
-     "d": "2025-12-30",
-     "sha": "b5c263491685241e368e38f467b3c25ed63488e811949262dd9b1144e0f922e7",
-     "pub": "02/09/2026 12:16",
-     "arq": "dados/emota-juros-br-2025__2025-12-30.js"
-    }
-   ]
-  },
-  "emota-juros-br-2024": {
-   "trader": "EMota",
-   "grupo": "juros-br",
-   "grupo_rotulo": "Juros Brasil",
-   "ano": 2024,
-   "vintages": [
-    {
-     "d": "2024-12-30",
-     "sha": "5bb05b85ec8c440276aa8303b70f7881048a2b30493e4c436c67f59e068d9e04",
-     "pub": "02/09/2026 12:16",
-     "arq": "dados/emota-juros-br-2024__2024-12-30.js"
-    }
-   ]
-  },
-  "emota-juros-br-2023": {
-   "trader": "EMota",
-   "grupo": "juros-br",
-   "grupo_rotulo": "Juros Brasil",
-   "ano": 2023,
-   "vintages": [
-    {
-     "d": "2023-12-28",
-     "sha": "40255c31704434cde687644875d5b66df4ea5c96949b7d28e4d1f4af8c8e7f18",
-     "pub": "02/09/2026 12:16",
-     "arq": "dados/emota-juros-br-2023__2023-12-28.js"
-    }
-   ]
-  },
-  "emota-juros-br-2022": {
-   "trader": "EMota",
-   "grupo": "juros-br",
-   "grupo_rotulo": "Juros Brasil",
-   "ano": 2022,
-   "vintages": [
-    {
-     "d": "2022-12-29",
-     "sha": "4ffdee19be8bc4f1cde4e37d9fe9604ed178a1a0eb4a6d5f66668fbd275212f0",
-     "pub": "02/09/2026 12:16",
-     "arq": "dados/emota-juros-br-2022__2022-12-29.js"
-    }
-   ]
-  },
-  "emota-juros-br-2021": {
-   "trader": "EMota",
-   "grupo": "juros-br",
-   "grupo_rotulo": "Juros Brasil",
-   "ano": 2021,
-   "vintages": [
-    {
-     "d": "2021-12-30",
-     "sha": "97caef9c19db25f12b02d4f2d87b07458fefd85661becdcafb6dc65722cab718",
-     "pub": "02/09/2026 12:16",
-     "arq": "dados/emota-juros-br-2021__2021-12-30.js"
-    }
-   ]
-  },
-  "emota-juros-br-2020": {
-   "trader": "EMota",
-   "grupo": "juros-br",
-   "grupo_rotulo": "Juros Brasil",
-   "ano": 2020,
-   "vintages": [
-    {
-     "d": "2020-12-30",
-     "sha": "a4225085768b4fc16cfea2e61ba11dc8418ba9a288a0ef44c430b57bb5b6c04e",
-     "pub": "02/09/2026 12:16",
-     "arq": "dados/emota-juros-br-2020__2020-12-30.js"
     }
    ]
   }
