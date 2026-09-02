@@ -1,5 +1,5 @@
 {
- "gerado_em": "02/09/2026 08:41",
+ "gerado_em": "02/09/2026 08:51",
  "grupos": {
   "juros-br": "Juros Brasil",
   "brl": "BRL",
@@ -13,6 +13,12 @@
    "grupo_rotulo": "Juros Brasil",
    "ano": 2026,
    "vintages": [
+    {
+     "d": "2026-09-01",
+     "sha": "3756ce8e8e8c1a64cdaa47732d1725afdd7d5031d925580f493eb2d5c526d122",
+     "pub": "02/09/2026 08:51",
+     "arq": "dados/emota-juros-br-2026__2026-09-01.js"
+    },
     {
      "d": "2026-08-31",
      "sha": "12c90f80c6e0f6fc7098bc12327a71c164ee5dd94e17fbdd7da1196e741d939f",
@@ -29,8 +35,8 @@
    "vintages": [
     {
      "d": "2025-12-30",
-     "sha": "3e3caef6c23b2d368515b52959fe3c54cb7563b38b6260ca3297576015b14380",
-     "pub": "02/09/2026 08:40",
+     "sha": "843617da5ac4977031578aee63e94c29dcaa0cf02bfc0c7a067450b7416e7066",
+     "pub": "02/09/2026 08:51",
      "arq": "dados/emota-juros-br-2025__2025-12-30.js"
     }
    ]
@@ -43,8 +49,8 @@
    "vintages": [
     {
      "d": "2024-12-30",
-     "sha": "1d0d14dce254284f524ce8f8dc148dc37ab9679789d1cd9c14bb045caeb52567",
-     "pub": "02/09/2026 08:40",
+     "sha": "27fdb79bf713fdc4707384bafe89d1d5540a5679661d20f2a8d4e22e62e165a3",
+     "pub": "02/09/2026 08:51",
      "arq": "dados/emota-juros-br-2024__2024-12-30.js"
     }
    ]
@@ -57,8 +63,8 @@
    "vintages": [
     {
      "d": "2023-12-28",
-     "sha": "a26ce70b8667b034fa60134e64bd19b02ea564f59363b762ba045ce2dd5d6b61",
-     "pub": "02/09/2026 08:40",
+     "sha": "524450191518f4c31278d1fb901480df266510923718d54b015435f970c7a149",
+     "pub": "02/09/2026 08:51",
      "arq": "dados/emota-juros-br-2023__2023-12-28.js"
     }
    ]
@@ -71,8 +77,8 @@
    "vintages": [
     {
      "d": "2022-12-29",
-     "sha": "5ccae0b3288be5b8ca4291e6e219a7819fcf7ab7783cb9d61bb894456bcdce4b",
-     "pub": "02/09/2026 08:40",
+     "sha": "d705cbca7191cff224134c7c1065327be861d73b27bc70786dd646181e6e8dd4",
+     "pub": "02/09/2026 08:51",
      "arq": "dados/emota-juros-br-2022__2022-12-29.js"
     }
    ]
@@ -85,8 +91,8 @@
    "vintages": [
     {
      "d": "2021-12-30",
-     "sha": "79cf0d9322acb67b6f801357aa87812ae628c9364390ca9a4eb88d20b9f56dd8",
-     "pub": "02/09/2026 08:40",
+     "sha": "377a0433f509466da6a338f92adb17d3e3dfad5042199c4c3f19835ff1ab6fab",
+     "pub": "02/09/2026 08:51",
      "arq": "dados/emota-juros-br-2021__2021-12-30.js"
     }
    ]
@@ -99,8 +105,8 @@
    "vintages": [
     {
      "d": "2020-12-30",
-     "sha": "197f7861b67c8b4c85d724904e359b96e5b84a6ad9e6e6b7336ff0327248804e",
-     "pub": "02/09/2026 08:40",
+     "sha": "c53b39c7cb812d26157d050602b2bd21dd493f3d26b1976bbbbf14969b5def68",
+     "pub": "02/09/2026 08:51",
      "arq": "dados/emota-juros-br-2020__2020-12-30.js"
     }
    ]
