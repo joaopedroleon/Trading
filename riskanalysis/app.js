@@ -1146,17 +1146,31 @@
         fillcolor: 'rgba(200,60,60,.16)', yaxis: 'y2',
         hovertemplate: '%{x|%d/%m/%Y}<br>DD %{y:.0f} bps<extra></extra>' },
     ], baseLayout(t, {
-      height: H_FULL(),
+      /* ⭐ **`H_HALF`, NAO `H_FULL`** (02/09/2026, pedido do usuario: *"pode
+         diminuir o grafico do resultado composto com seu drawdown, para ficar do
+         mesmo tamanho do resultado por mes"*). E a convencao da casa, escrita no
+         `shared-web/plotly-jgp.js`: **`H_FULL` e card de largura inteira,
+         `H_HALF` e card na `.grid2`** — e este mora na `.grid2`, ao lado do
+         "Resultado por mes", que sempre usou `H_HALF`. Media: 620px contra 437px
+         no mesmo viewport, ou seja **183px de desalinho** entre dois cards
+         vizinhos.
+         ⚠️ O `lineFig` da camada-casa detecta a grade sozinho (`_inGrid2`), mas
+         este grafico e `Plotly.newPlot` direto — aqui a altura vai explicita. */
+      height: H_HALF(),
       /* ⚠️ DOIS PAINEIS EMPILHADOS (`domain`), nao eixo duplo sobreposto: o
          drawdown vive colado no zero e so desce, e sobrepo-lo a curva composta
          faria as duas se cruzarem sem que nenhuma leitura ganhasse. Empilhado,
          cada painel tem o SEU zero e o eixo x e compartilhado (`anchor: 'y2'`).
          ⚠️ A curva fica em BPS nas duas reguas, de proposito: ela e COMPOSTA
          (multiplica 1 + ret do dia), e composicao so existe sobre uma fracao —
-         em reais a mesma serie seria uma soma, que e outra conta. */
-      yaxis: { domain: [0.34, 1], title: { text: 'bps do NAV (composto)' },
+         em reais a mesma serie seria uma soma, que e outra conta.
+         ⚠️ **O VAO ENTRE OS PAINEIS ENCOLHEU JUNTO** (0,10 → 0,07 do dominio):
+         ele era espaco morto de 35px na altura nova, num grafico que perdeu 183.
+         O drawdown ganhou 2 pontos (0,24 → 0,26) para nao virar uma tira ilegivel
+         — medido, ele fica com ~91px de area de plot. */
+      yaxis: { domain: [0.33, 1], title: { text: 'bps do NAV (composto)' },
                zeroline: true },
-      yaxis2: { domain: [0, 0.24], title: { text: 'drawdown' } },
+      yaxis2: { domain: [0, 0.26], title: { text: 'drawdown' } },
       xaxis: { anchor: 'y2' }, showlegend: DETALHE, legend: { orientation: 'h' },
       hovermode: 'x unified',
     }), CFG);
