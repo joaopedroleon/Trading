@@ -50,3 +50,35 @@
   #ta-lock-i { background: #16150f; border-color: #34322a; color: #efeade; }
   .ta-pub-sel { background: #1e1d16; border-color: #34322a; color: #d8d3c6; }
 }
+
+/* ── seletor de vintage e avisos de versão (ver publicar/boot.js) ───────────
+   ⚠️ Só a versão PUBLICADA tem isto: a tela local não cria estes elementos. */
+.selwrap .pubvint select { max-width: 150px; }
+
+/* "você está vendo o passado" — dentro do fluxo, no topo do conteúdo */
+.ta-vint-aviso {
+  margin: 0 0 18px; padding: 9px 13px; border-radius: 7px;
+  background: #fff6e0; border: 1px solid #f0d9a8; color: #5a4a20;
+  font-size: 12.5px; line-height: 1.5;
+}
+.ta-vint-aviso a { color: #128a4a; font-weight: 600; }
+
+/* "base nova disponível" — tarja fixa, com botão. ⛔ NÃO recarrega sozinho com
+   a aba à vista: recarregar por baixo de quem está lendo uma tabela é hostil. */
+#ta-novo {
+  position: fixed; z-index: 9998; left: 50%; transform: translateX(-50%);
+  bottom: 22px; display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 999px;
+  background: #128a4a; color: #fff; font-size: 13px; font-weight: 600;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .18);
+  font-family: Inter, system-ui, sans-serif;
+}
+#ta-novo-b {
+  border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  background: #fff; color: #0f7540; font-weight: 700; font-size: 12.5px;
+  font-family: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ta-vint-aviso { background: #2a2519; border-color: #4a3f22; color: #e8dcbf; }
+}
