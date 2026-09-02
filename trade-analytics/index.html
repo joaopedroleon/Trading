@@ -335,6 +335,28 @@
   .lado.venda{color:var(--red)}
   .vaziofig{display:flex;align-items:center;justify-content:center;height:180px;
     color:var(--muted);font-size:13px;font-style:italic}
+  /* ==== controle da tela local: atualizar / publicar (report/controle.js) ====
+     ⛔ Só a versão LOCAL tem estes elementos — o publicador arranca o
+     `controle.js` do HTML que vai para o GitHub Pages. O CSS sobra lá sem uso,
+     e é de propósito: uma folha por destino divergiria em silêncio. */
+  #ctlWrap{display:inline-flex;align-items:center;gap:7px;margin-left:12px}
+  .ctl-pill{font:600 10px/1 var(--font);letter-spacing:.04em;text-transform:uppercase;
+    padding:4px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+  .ctl-ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,transparent)}
+  .ctl-run{color:#b36f00;border-color:#e8c98a;background:#fff6e0}
+  .ctl-err{color:var(--red);border-color:color-mix(in srgb,var(--red) 40%,transparent)}
+  .ctl-off{color:var(--muted)}
+  .ctl-b{font:600 11.5px/1 var(--font);color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer}
+  .ctl-b:hover:not(:disabled){border-color:var(--green);color:var(--green)}
+  /* ⚠️ desabilitado tem de PARECER desabilitado: sem o controle no ar o clique
+     não faz nada, e um botão de aparência normal viraria "a tela travou". */
+  .ctl-b:disabled{opacity:.42;cursor:not-allowed}
+  .ctl-msg{font:400 11px/1.3 var(--font);color:var(--muted);max-width:280px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* ⚠️ abaixo de 1100px a tabbar já quebra em linhas com os 4 <select>; a
+     mensagem de progresso é o primeiro item dispensável. */
+  @media (max-width:1100px){ .ctl-msg{display:none} }
 
   /* ==== Responsivo ==== */
   @media (max-width:1100px){
@@ -411,6 +433,12 @@
     <label>Trader <select id="selTrader"></select></label>
     <label>Ativo <select id="selGrupo"></select></label>
     <label>Ano <select id="selAno"></select></label>
+    <!-- ⭐ AS FOTOS NO TEMPO (02/09/2026). ☠️ N&Atilde;O &eacute; o mesmo que o ANO:
+         `2024` &eacute; um ano fechado; `2026 &middot; base at&eacute; 15/08` &eacute; o ano CORRENTE
+         como ele era naquele dia. Nasce ESCONDIDO e o `ta-sel.js` mostra s&oacute; quando
+         o hist&oacute;rico daquele par tem mais de uma foto — um controle que n&atilde;o
+         controla nada sugere hist&oacute;rico vazio, que &eacute; pior que a aus&ecirc;ncia dele. -->
+    <label style="display:none">Base at&eacute; <select id="selBase"></select></label>
   </span>
   <!-- ⭐ A R&Eacute;GUA DA P&Aacute;GINA (01/09/2026). Padr&atilde;o bps do NAV: &eacute; a &uacute;nica r&eacute;gua
        compar&aacute;vel entre traders e entre anos — R$ 32 mil num livro de R$ 23 MM n&atilde;o

@@ -1,12 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    boot.js — carga de dados da versão PUBLICADA (substitui o `ta-sel.js`).
 
-   Faz quatro coisas que o `ta-sel.js` não faz:
+   Faz três coisas que o `ta-sel.js` não faz:
      1. pede a SENHA e decifra (o repo é público — ver `publicar/pipeline.py`);
      2. monta os seletores a partir do `manifest.json` (só o que está no ar);
      3. acrescenta o seletor **"base até"** — o VINTAGE, a foto daquele ano num
-        dia passado;
-     4. fica de olho em versão nova e recarrega (o "refresh automático").
+        dia passado.
+
+   ⛔ **A PÁGINA PUBLICADA NÃO SE ATUALIZA SOZINHA** (decisão do usuário,
+   02/09/2026: *"eu não quero que a página do github atualize sozinha"*). Ela é
+   uma FOTO: o que está no link é o que foi publicado, e ponto. Houve aqui um
+   poll do manifest com tarja de "base nova" e recarga automática — saiu, junto
+   com a tarefa agendada que republicava. Quem decide publicar é o operador, na
+   tela local (ver `report/controle.js`).
 
    ☠️ **O REPO É PÚBLICO.** O GitHub Pages em plano normal não tem página
    privada. O payload sobe cifrado com **PBKDF2-HMAC-SHA256 (200.000 iterações)
@@ -26,7 +32,6 @@
   'use strict';
 
   var CHAVE_PW = 'ta_pub_pw';        // senha: sessão, nunca localStorage
-  var POLL_MS = 5 * 60 * 1000;       // 5 min — a publicação é 1x/dia
   var MAN = null, SEL = null, SENHA = null;
 
   /* ── util ──────────────────────────────────────────────────────────────── */
@@ -49,10 +54,10 @@
     var p = String(iso).split('-');
     return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso;
   }
-  /* ⚠️ `?t=` em TODO fetch do manifest: o GitHub Pages serve com cache, e sem
-     furar o cache o poll nunca veria a versão nova — que é a razão de ele
-     existir. O payload cifrado é imutável por nome (tem a data dentro), então
-     esse só é buscado uma vez e pode cachear à vontade. */
+  /* ⚠️ `?t=` no fetch do manifest: o GitHub Pages serve com cache, e um manifest
+     velho ofereceria uma análise que já saiu (ou esconderia uma que entrou). O
+     payload cifrado é imutável por NOME (tem a data dentro), então esse pode
+     cachear à vontade. */
   function pegaManifest() {
     return fetch('manifest.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
@@ -221,45 +226,6 @@
     if (m) m.insertBefore(d, m.firstChild);
   }
 
-  /* ── refresh automático ────────────────────────────────────────────────────
-     ⭐ O "refresh" é: a tarefa agendada publicou base nova → o poll vê → a
-     página se atualiza. ⚠️ Só age quando o leitor está na ÚLTIMA: quem escolheu
-     uma data antiga pediu para ficar nela.
-     ⚠️ E não recarrega na cara de quem está lendo — recarrega sozinho só com a
-     aba ESCONDIDA (o caso do link deixado aberto); com a aba à vista mostra uma
-     tarja com botão. Recarregar por baixo de quem está no meio de uma tabela é
-     hostil, e o dado é de D-1: nada se perde esperando o clique. */
-  function banner(dnovo) {
-    if (document.getElementById('ta-novo')) return;
-    var d = document.createElement('div');
-    d.id = 'ta-novo';
-    d.innerHTML = '<span>📈 Base nova disponível: <b>' + br(dnovo) + '</b></span>'
-      + '<button id="ta-novo-b">Atualizar</button>';
-    document.body.appendChild(d);
-    document.getElementById('ta-novo-b').onclick = function () { location.reload(); };
-  }
-  function vigia() {
-    setInterval(function () {
-      if (!SEL || !SEL.ultimo) return;
-      pegaManifest().then(function (m) {
-        var a = (m.analises || {})[SEL.slug];
-        var novo = a && a.vintages && a.vintages[0];
-        if (!novo || novo.d <= SEL.v.d) return;
-        if (document.hidden) location.reload();
-        else banner(novo.d);
-      }).catch(function () { /* offline: o próximo tick tenta */ });
-    }, POLL_MS);
-    /* volta do background: confere na hora, sem esperar o tick */
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden || !SEL || !SEL.ultimo) return;
-      pegaManifest().then(function (m) {
-        var a = (m.analises || {})[SEL.slug];
-        var novo = a && a.vintages && a.vintages[0];
-        if (novo && novo.d > SEL.v.d) banner(novo.d);
-      }).catch(function () {});
-    });
-  }
-
   /* ── carga do payload ──────────────────────────────────────────────────── */
   function injeta(src) {
     return new Promise(function (res, rej) {
@@ -308,7 +274,6 @@
         window.TA = dados;
         if (window.__taData) window.__taData(dados);
         avisaVintage();
-        vigia();
         return;
       } catch (e) {
         try { sessionStorage.removeItem(CHAVE_PW); } catch (e2) { /* modo restrito */ }
