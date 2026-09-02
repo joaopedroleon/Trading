@@ -373,6 +373,15 @@
     ponto_brl: 'Quantos REAIS vale 1 ponto de premio, por contrato. A digital de '
       + 'COPOM foi REDENOMINADA em 26/05/2025: valia R$ 100,00 por ponto e passou '
       + 'a valer R$ 1,00. Sem isso o premio de 2020-2024 sairia 100x menor.',
+    /* ⭐ verbete PROPRIO desta linha (§5.-17: tooltip que nao e do campo
+       explica o numero errado). Ele reusava o `pl_dia`, que fala do #PL. */
+    ativos_pregao: 'Quantos ATIVOS DISTINTOS com posicao ele tinha no fechamento '
+      + 'de cada pregao — cada contrato de DI, papel e opcao conta UM —, na media '
+      + 'dos dias em que havia posicao. 1,0 seria "uma posicao por vez"; 1,9 e '
+      + '"quase sempre duas". ⭐ E a PONTE entre as duas reguas de #PL: a do DIA '
+      + 'soma todas as posicoes vivas e a do TRADE olha uma so, entao '
+      + '#PL do dia ÷ #PL por trade ≈ este numero. Foi para isso que ele veio '
+      + 'para a tela (§5.-27).',
     pl_dia: 'O #PL do LIVRO INTEIRO num pregao: a soma de TODAS as posicoes '
       + 'vivas naquele dia. #PL = DV01 x 1e4 / NAV, que se le "% do patrimonio '
       + 'do trader por 100 bp de movimento da taxa". ⚠️ E maior que o #PL por '
@@ -1370,9 +1379,21 @@
            ("...que soma as 1,8 posições vivas em média"). É um fato de PRESENÇA
            NO MERCADO e merece linha própria — e é ele que fecha a conta entre o
            `#PL do dia` (livro inteiro) e o `#PL por trade` (uma posição). */
+        /* ☠️ **O SUBTÍTULO CITAVA A CONSEQUÊNCIA E NUNCA DIZIA O QUE É O
+           NÚMERO** (02/09/2026, reportado pelo usuário: *"aqui parece errada a
+           descrição, não é o número de posições? O que é essa info?"*). Era
+           *"média nos dias com posição — é o que separa o #PL do dia do #PL por
+           trade"*: a 1ª metade diz sobre QUE DIAS a média corre, a 2ª diz para
+           que serve, e nenhuma das duas diz que se está CONTANDO POSIÇÕES.
+           ⭐ É sim o número de posições: ativos DISTINTOS com posição no
+           fechamento de cada pregão (cada contrato de DI, papel e opção conta
+           um), na média dos dias com posição. A ponte entre as duas réguas de
+           #PL (§5.-27) foi para o tooltip, que é o lugar do "para que serve". */
         linha('Posições vivas por pregão', nf(R.ativos_por_pregao_medio, 1),
-            'média nos dias com posição — é o que separa o #PL do dia do #PL por trade',
-            '', 'pl_dia'),
+            'ativos distintos com posição ao mesmo tempo — média nos dias com posição'
+            + (R.ativos_por_pregao_max
+               ? ' · máximo ' + nf(R.ativos_por_pregao_max, 0) : ''),
+            '', 'ativos_pregao'),
       ]),
 
       /* ⭐ **CONCENTRAÇÃO virou ficha** (02/09/2026, pedido do usuário: *"reorganiza
