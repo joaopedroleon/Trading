@@ -48,7 +48,9 @@
   <div class="eyebrow"><span class="tag">JGP MACRO</span> Risk Analysis</div>
   <h1>Estudo dos trades do gestor</h1>
   <div class="sub">Hit ratio, ganho &times; perda e sizing, a partir das boletas do Sophis.
-    1 estudo(s) publicado(s) &middot; atualizado em 02/09/2026 12:44.</div>
+    1 estudo(s) publicado(s) &middot; atualizado em
+    <span id="ger">02/09/2026 13:05</span>.</div>
+  <div class="aviso" id="stale" hidden></div>
   <div class="aviso">🔒 Cada estudo pede uma <b>senha</b>. Os dados sobem
     <b>cifrados</b> (AES-256-GCM, PBKDF2 200k) &mdash; quem tem s&oacute; o link n&atilde;o
     l&ecirc; nada. ⚠️ Cada p&aacute;gina &eacute; uma <b>foto</b>: mostra a base do dia em que
@@ -63,4 +65,46 @@
     <a href="../Options/">Tickers de op&ccedil;&atilde;o</a>
   </footer>
 </div>
+<script>
+/* ☠️ **O HUB DIZIA A HORA DE UMA PUBLICAÇÃO ANTERIOR** (02/09/2026, §5.-65).
+   Reportado assim: *"eu rodei, diz que rodou, mas a tela ainda diz a última vez
+   que rodou (12:44) quando eu rodei um 12:55"*. A causa principal era outra (um
+   controle com código velho publicando na pasta antiga), mas há uma 2ª, que
+   sobrevive a qualquer conserto do publicador: **o GitHub Pages serve o HTML com
+   `Cache-Control: max-age=600`**, então por até 10 minutos o browser mostra a
+   página anterior mesmo com o push correto no ar. F5 não resolve — a resposta
+   vem do cache.
+   ⭐ A página passa a conferir a PRÓPRIA idade contra o `manifest.json` e a se
+   recarregar UMA vez com `?v=<gerado_em>`: URL nova é chave nova no cache do
+   browser e do CDN, então o HTML vem fresco.
+   ⚠️ **Uma vez, nunca em laço** — se depois do reload ainda divergir, mostra o
+   aviso e para. Reload automático que não converge é pior que página velha.
+   ⚠️ O `?ts=` no fetch é o que fura o cache do manifest (medido: com ele o
+   `Age` do CDN vem 0; sem ele, não). */
+(function () {
+  var GER = document.getElementById('ger');
+  var baked = GER ? GER.textContent.trim() : '';
+  var jaTentou = new URLSearchParams(location.search).get('v');
+  fetch('manifest.json?ts=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (m) {
+      var novo = (m && m.gerado_em) || '';
+      if (!novo || novo === baked) return;
+      /* o número na tela passa a ser o verdadeiro, mesmo antes de recarregar */
+      if (GER) GER.textContent = novo;
+      if (jaTentou !== novo) {
+        location.replace(location.pathname + '?v=' + encodeURIComponent(novo));
+        return;
+      }
+      var av = document.getElementById('stale');
+      if (!av) return;
+      av.hidden = false;
+      av.innerHTML = '⚠️ O servidor j&aacute; tem a publica&ccedil;&atilde;o de <b>'
+        + novo + '</b>, mas o seu navegador est&aacute; servindo esta p&aacute;gina '
+        + 'do cache (o GitHub Pages manda guardar por 10 min). Recarregue com '
+        + '<b>Ctrl+F5</b> para ver a lista atualizada.';
+    })
+    .catch(function () { /* sem rede: a página baked continua valendo */ });
+})();
+</script>
 </body></html>
