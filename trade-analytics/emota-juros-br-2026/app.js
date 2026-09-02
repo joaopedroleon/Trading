@@ -1570,9 +1570,14 @@
        existe, e a ficha DIZ isso em vez de assumir 100 (regra da §5.-24). */
     const semTeto = R.n_sem_teto || 0;
     el('kpisPremio').innerHTML = fichas(
+      /* ⭐ MEDIA no numero grande, mediana embaixo — as TRES linhas de destaque
+         deste bloco (01/09/2026, pedido do usuario: "a secao 5 do Tamanho &
+         risco fugiu do padrao geral da pagina"). Era o ultimo bloco da tela
+         ainda liderando com mediana; §5.-53 ja tinha virado o #PL e a duracao.
+         ⛔ O par continua obrigatorio (§5.3) — mudou QUAL dos dois e o grande. */
       ficha('Prêmio na mesa', [
-        linha('Prêmio por trade', bps(R.premio_bps_mediano),
-            'mediana · média ' + bps(R.premio_bps_medio)
+        linha('Prêmio por trade', bps(R.premio_bps_medio),
+            'média · mediana ' + bps(R.premio_bps_mediano)
             + ' · maior ' + bps(R.premio_bps_max), '', 'premio', true),
         linha('Prêmio somado', bps(R.premio_bps_soma),
             kbrl(R.premio_brl_soma) + ' em ' + nf(R.n_premio, 0) + ' trades',
@@ -1592,16 +1597,21 @@
        + '— o paralelo do #PL, e nunca a mesma coluna que ele.'),
 
       ficha('Prêmio vivo, por dia', [
-        linha('Prêmio do dia', bps(R.premio_pl_mediano_dia),
-            'mediana · média ' + bps(R.premio_pl_medio_dia)
+        linha('Prêmio do dia', bps(R.premio_pl_medio_dia),
+            'média · mediana ' + bps(R.premio_pl_mediano_dia)
             + ' · máximo ' + bps(R.premio_pl_max_dia), '', 'premio_dia', true),
         linha('Pregões com opção', nf(R.pregoes_com_opcao, 0),
             'de ' + R.pregoes_total + ' no ano', '', 'premio_dia'),
       ], 'Soma TODAS as opções vivas no pregão; a ficha ao lado é uma posição só.'),
 
       ficha('Pior caso', [
-        linha('Risco máximo por trade', bps(R.risco_max_bps_mediano),
-            'mediana · maior ' + bps(R.risco_max_bps_max), '', 'risco_max', true),
+        /* ⚠️ Esta linha nao tinha a irma NENHUMA — so `mediana · maior`. O campo
+           `risco_max_bps_medio` foi criado no `report.py` junto com esta troca:
+           inverter o destaque sem a media existir deixaria a ficha com um par
+           quebrado, que e o que a §5.3 proibe. */
+        linha('Risco máximo por trade', bps(R.risco_max_bps_medio),
+            'média · mediana ' + bps(R.risco_max_bps_mediano)
+            + ' · maior ' + bps(R.risco_max_bps_max), '', 'risco_max', true),
         linha('Risco máximo somado', bps(R.risco_max_bps_soma),
             'se tudo virasse contra ao mesmo tempo', '', 'risco_max'),
       ], semTeto
@@ -1961,13 +1971,23 @@
       ]),
 
       ficha('O que sobra por trade', [
-        /* ⭐ BPS na frente (pedido do usuario): e a regua comparavel entre
-           traders e entre anos. O financeiro vai no detalhe. */
-        linha('Expectativa média', bps(R.exp_bps),
-            'mediana ' + K(R.exp_mediana_bps, R.exp_mediana_brl)
-            + ' · ' + Kalt(R.exp_bps, R.exp_brl)
-            + ' (mediana ' + Kalt(R.exp_mediana_bps, R.exp_mediana_brl) + ')',
-            sgn(R.exp_bps), 'expectativa', true),
+        /* ☠️ ESTA LINHA NAO SEGUIA A REGUA, e o defeito so aparecia no modo
+           REAIS (01/09/2026, achado pela varredura de "quem lidera com
+           mediana"). O valor estava cravado em `bps(...)` enquanto o subtitulo
+           usava `K()`/`Kalt()`, que seguem o seletor — entao em reais a ficha
+           mostrava `0,1 bps` em cima de `mediana −R$ 1,1 mil`: **o numero e a
+           irma dele em reguas diferentes, lado a lado**, que e exatamente a
+           incoerencia da §5.-27 e o modo de falhar da §5.-37 (um call site fica
+           para tras quando o helper migra).
+           ⚠️ E o subtitulo dava a MEDIANA DUAS VEZES, uma em cada regua
+           (`mediana X · Y (mediana Z)`) — ruido que so existia porque o valor
+           nao acompanhava. ⭐ Agora e identico ao da ficha do Retrato do ano,
+           que ja estava certo: valor em `K()`, irma em `K()`, e a outra regua
+           nomeada no fim. */
+        linha('Expectativa média', K(R.exp_bps, R.exp_brl),
+            'mediana ' + K(R.exp_mediana_bps, R.exp_mediana_brl) + ' · '
+            + Kalt(R.exp_bps, R.exp_brl) + ' na outra régua',
+            sgn(emBps() ? R.exp_bps : R.exp_brl), 'expectativa', true),
         /* ☠️ ESTAS DUAS LINHAS SAO DE OUTRA REGUA, e o subtitulo dizia "e a que
            da o dinheiro" — verdade ate o ajuste da B3 entrar (§5.-10), FALSA
            depois. `bps_taxa` e o movimento de TAXA com `du` congelado: bruto,
