@@ -511,10 +511,11 @@
       + '⭐ Roda no livro INTEIRO: cada ciclo e medido contra a media da regua '
       + 'DELE (#PL no DI e no papel, premio em bps do NAV na opcao), e a razao e '
       + 'adimensional — as duas reguas nunca se somam.',
-    corr_tam_taxa: 'A leitura SO DO DI E DO PAPEL: #PL de pico contra o movimento '
-      + 'da TAXA em bps. Responde "ele leu a curva?", que e outra pergunta — e '
-      + 'nao inclui opcao porque o preco dela nao e taxa. Fica ao lado da de '
-      + 'cima para as duas nao serem confundidas.',
+    /* ⛔ `corr_tam_taxa` SAIU (02/09/2026): aquela linha passou a usar o tooltip
+       CALCULADO (`tipCorr('taxa', …)`), que diz a mesma coisa E o veredito do
+       número. Verbete sem call site é o §5.-17 esperando para acontecer: alguém
+       o lê, acha que é o que a tela mostra, e ele já não é. O `corr_tam` fica —
+       é o fallback de quando a correlação vem nula. */
     tam_norm: 'TAMANHO RELATIVO: o tamanho do ciclo dividido pela MEDIA dos '
       + 'ciclos da mesma regua. 1,00x e o tipico do tipo dele, 2,00x e o dobro. '
       + '⭐ Existe para pôr books de reguas diferentes no mesmo eixo: no DI e no '
@@ -574,7 +575,117 @@
   /* tip(chave) -> atributos prontos para o rotulo. Devolve string vazia quando a
      chave nao existe, para o call site nao precisar de guarda. */
   const _esc = (t) => t.replace(/"/g, '&quot;');
-  const tip = (k) => (GLOSS[k] ? ' class="hastip" title="' + _esc(GLOSS[k]) + '"' : '');
+  /* ⭐ **`tip()` aceita chave DO GLOSSÁRIO ou o texto pronto** (02/09/2026). Os
+     verbetes fixos continuam sendo o normal; o texto direto existe para o
+     tooltip que precisa do NÚMERO da tela — é o caso das 3 correlações, cujo
+     veredito de significância depende do valor e do `n` daquele par (ver
+     `tipCorr`). Um verbete fixo ali só poderia explicar o CONCEITO, e a pergunta
+     do leitor é sobre o número que ele está vendo. */
+  const tip = (k) => {
+    const t = GLOSS[k] || (k && k.length > 40 ? k : '');
+    return t ? ' class="hastip" title="' + _esc(t) + '"' : '';
+  };
+
+  /* ══════════════ SIGNIFICÂNCIA DE UMA CORRELAÇÃO ══════════════
+     ⭐ Pedido do usuário (02/09/2026): *"nos tooltips escreva os comentários de
+     significância do resultado, e a leitura de forma intuitiva do número, ao
+     invés do que está lá hoje"*. Os verbetes antigos explicavam o CONCEITO
+     ("positiva = ele concentra risco nos trades bons") e deixavam o leitor
+     sozinho na única pergunta que importa: **este 0,144 quer dizer algo?**
+
+     ⭐ **O intervalo de confiança é a resposta honesta**, não o p-valor: ele diz
+     ao mesmo tempo se cruza o zero E até onde o dado admite ir. Fisher-z:
+         IC = tanh( atanh(r) ± 1,96/√(n−3) )
+     ⚠️ E o limiar prático `2/√n` fica no texto porque é o que o leitor consegue
+     refazer de cabeça no ano seguinte, com outro n.
+     ⚠️ **`n` é o número de CICLOS**, e ciclos de um mesmo ano não são
+     independentes (mesmo regime, posições sobrepostas) — então o `n` efetivo é
+     menor que a contagem e o limiar real é MAIOR que o `2/√n`. O texto diz isso
+     em vez de fingir precisão. */
+  function _icFisher(r, n) {
+    if (r == null || !n || n < 5) return null;
+    const z = Math.atanh(Math.max(-0.999, Math.min(0.999, r)));
+    const d = 1.96 / Math.sqrt(n - 3);
+    return [Math.tanh(z - d), Math.tanh(z + d)];
+  }
+
+  /* leitura intuitiva + veredito, na régua de correlação */
+  function _forca(r) {
+    const a = Math.abs(r);
+    if (a < 0.10) return 'praticamente nenhuma relação';
+    if (a < 0.20) return 'tendência fraca';
+    if (a < 0.40) return 'relação moderada';
+    if (a < 0.60) return 'relação forte';
+    return 'relação muito forte';
+  }
+
+  function _vereditoCorr(r, n) {
+    const ic = _icFisher(r, n);
+    if (!ic) {
+      return n ? 'Com apenas ' + n + ' ciclos não há como separar sinal de ruído — '
+                 + 'ignore o número.'
+               : 'Sem ciclos suficientes para medir.';
+    }
+    const lim = 2 / Math.sqrt(n);
+    const cruza = ic[0] < 0 && ic[1] > 0;
+    const s = (v) => (v >= 0 ? '+' : '−') + nf(Math.abs(v), 2);
+    return 'SIGNIFICÂNCIA: com ' + n + ' ciclos, o intervalo de 95% vai de '
+      + s(ic[0]) + ' a ' + s(ic[1]) + '. '
+      /* ⚠️ **SEM O JARGÃO "CRUZA O ZERO"** (02/09/2026): o usuário perguntou o
+         que era, e a pergunta é a prova de que o texto falhou — ele foi escrito
+         justamente para dizer a leitura de forma intuitiva. Hoje o texto DIZ o
+         que a faixa inclui, em vez de nomear a propriedade dela. */
+      + (cruza
+         ? 'Essa faixa vai de um valor NEGATIVO a um POSITIVO, então ela inclui '
+           + 'o zero: com esta amostra a relação pode ser positiva (' + s(ic[1])
+           + '), inexistente (0) ou negativa (' + s(ic[0]) + ') — o dado não '
+           + 'decide nem o SINAL. É a leitura de uma pesquisa eleitoral cuja '
+           + 'margem de erro cobre os dois candidatos: ela não diz quem está na '
+           + 'frente. ⚠️ Então não leia o ' + nf(r, 3) + ' como "existe, mas é '
+           + 'fraca" — ele é o MEIO de uma faixa que inclui o contrário. Para o '
+           + 'dado decidir o sinal, |r| precisaria passar de ' + nf(lim, 2)
+           + ' (≈2/√n); e a faixa encolhe com a RAIZ do n — para reduzi-la à '
+           + 'metade seriam 4× mais ciclos.'
+         : 'Essa faixa fica TODA do mesmo lado do zero (não inclui o zero), '
+           + 'então o dado decide o sinal: a relação é '
+           + (r > 0 ? 'POSITIVA' : 'NEGATIVA') + ' e sobrevive ao ruído desta '
+           + 'amostra (|r| acima do limiar de ' + nf(lim, 2) + ' ≈ 2/√n). '
+           + 'Sobra a dúvida do TAMANHO dela, que é a largura da faixa.')
+      + ' ⚠️ Ciclos do mesmo ano não são independentes (mesmo regime, posições '
+      + 'sobrepostas), então o limiar de verdade é um pouco MAIOR que esse. '
+      + '⚠️ E um ano isolado dando significância entre os 25 pares do estudo é o '
+      + 'que o azar produz: sinal é o MESMO sinal repetindo em anos diferentes.';
+  }
+
+  function tipCorr(tipo, r, n) {
+    if (r == null) return 'corr_tam';
+    const v = nf(r, 3);
+    if (tipo === 'pearson') {
+      return 'LEITURA: ' + v + ' é ' + _forca(r) + ' entre apostar MAIOR e o '
+        + 'resultado por unidade de tamanho. A escala vai de −1 a +1: +1 seria '
+        + '"toda aposta maior saiu melhor", 0 "o tamanho não carrega informação", '
+        + '−1 "toda aposta maior saiu pior". Em variação explicada são '
+        + nf(r * r * 100, 1) + '% (r²) — mesmo um 0,25 explicaria só 6%. '
+        + '⚠️ Pearson usa os VALORES e mede o quanto a nuvem chega perto de uma '
+        + 'RETA, então um ciclo grande e distante puxa a reta sozinho. '
+        + _vereditoCorr(r, n);
+    }
+    if (tipo === 'spearman') {
+      return 'LEITURA: ' + v + ' é ' + _forca(r) + ' na ORDEM — troca-se cada '
+        + 'valor pela posição na fila (1º, 2º, …) e mede-se se as apostas maiores '
+        + 'tendem a ficar mais para cima. Responde "na maioria das vezes vai '
+        + 'junto?", não "quanto". ⭐ Por isso um ciclo extremo aqui vale só '
+        + '"último da fila" e não desloca o número — quando ele diverge do '
+        + 'Pearson, a diferença É a informação: a ordenação inclina para um lado '
+        + 'e as magnitudes não, sinal de que poucos ciclos grandes mandam na '
+        + 'reta. ' + _vereditoCorr(r, n);
+    }
+    return 'LEITURA: ' + v + ' é ' + _forca(r) + ' entre o TAMANHO da aposta '
+      + '(#PL de pico) e o MOVIMENTO DA TAXA a favor, em bps. É outra pergunta — '
+      + '"ele leu a curva?" —, e não a de sizing: aqui o resultado nem entra, só '
+      + 'o quanto a taxa andou. ⛔ Cobre só DI e papel, porque o preço da opção '
+      + 'não é taxa. ' + _vereditoCorr(r, n);
+  }
 
   /* ⚠️ POR QUE O KPI DE CIMA E OS TOTAIS DAS TABELAS NAO BATEM.
      A regua do KPI e DIARIA: marca toda posicao todo pregao, inclusive a que
@@ -954,7 +1065,19 @@
         : 'sem operação no período';
     }
     if (el('pillMeta')) el('pillMeta').textContent = 'SOPHIS · ' + (TA.gerado_em || '—');
-    document.title = TA.trader + ' — ' + (TA.grupo_rotulo || TA.grupo) + ' · JGP Macro';
+    /* ⛔ **O TÍTULO DA ABA É FIXO — não segue trader/ativo/ano** (03/09/2026,
+       pedido do usuário: *"quando eu mudo o gestor e ativos na tela live, o label
+       da página no Chrome muda; não tem como deixar esse label fixo, com o nome
+       da tela?"*). Ele vem do `<title>` estático que o `ta/build_html.py` grava
+       (`PAGINAS`), e este arquivo NÃO o sobrescreve mais.
+       ⚠️ O par continua declarado onde se lê a página: no `<h1>` do cabeçalho
+       ("EMota — Juros Brasil, 2026") e nos três `<select>` da barra de
+       parâmetros. Na aba, o que importa é achar a tela entre as outras 20 abas
+       abertas — e para isso o nome tem de ser ESTÁVEL.
+       ⚠️ E o título das DUAS telas segue distinguível ("análise anual" ×
+       "trade a trade"): elas são feitas para ficarem abertas ao mesmo tempo (é
+       o que a navegação do topo faz), e dois rótulos idênticos seriam piores que
+       um que muda. */
 
     /* ⛔ **O AVISO DE "AS ANÁLISES DE TAMANHO NÃO INCLUEM OPÇÕES" FOI REMOVIDO**
        (02/09/2026, reportado pelo usuário: *"aqui está desatualizado, acho que
@@ -1839,17 +1962,25 @@
            nenhuma). `bps_eq` e o resultado NORMALIZADO pelo tamanho, entao a
            correlacao mede so a decisao — e e a mesma nuvem que o contrafactual
            soma logo abaixo. */
+        /* ⭐ **TOOLTIP CALCULADO** (02/09/2026, pedido do usuário): leitura
+           intuitiva do número + veredito de significância PARA AQUELE valor e
+           aquele `n`. Ver `tipCorr`. O `n` de cada uma é diferente e sai do
+           payload — aferido que `n_base` é exatamente o nº de pares
+           (`tam_norm`, `bps_eq`) e `n_corr_taxa` o de (`#PL`, `bps_taxa`). */
         linha('Correlação tamanho × retorno', nf(S.corr_tam_bps_eq, 3),
             'Pearson · tamanho relativo × resultado no tamanho típico',
-            sgn(S.corr_tam_bps_eq), 'corr_tam', true),
+            sgn(S.corr_tam_bps_eq),
+            tipCorr('pearson', S.corr_tam_bps_eq, S.n_base), true),
         linha('Spearman', nf(S.corr_tam_bps_eq_spearman, 3),
-            'por ordem — imune a outlier', sgn(S.corr_tam_bps_eq_spearman), 'corr_tam'),
+            'por ordem — imune a outlier', sgn(S.corr_tam_bps_eq_spearman),
+            tipCorr('spearman', S.corr_tam_bps_eq_spearman, S.n_base)),
         /* ⛔ a leitura SO DO DI, que responde outra pergunta ("ele leu a
            curva?") e por isso nao substitui a de cima: `bps_taxa` e movimento
            de TAXA, que a opcao nao tem. */
         linha('Só em taxa (DI e papel)', nf(S.corr_tam_result, 3),
             'Pearson (#PL × bps de taxa) em ' + nf(S.n_corr_taxa, 0) + ' ciclos '
-            + '— a leitura "ele leu a curva?"', sgn(S.corr_tam_result), 'corr_tam_taxa'),
+            + '— a leitura "ele leu a curva?"', sgn(S.corr_tam_result),
+            tipCorr('taxa', S.corr_tam_result, S.n_corr_taxa)),
         /* ⛔ "Os 10% maiores" MUDOU DE FICHA (02/09/2026): virou a ficha
            `Concentração`, na faixa de cima. Ele respondia outra pergunta
            ("as apostas grandes puxam o livro?") e era a 4ª linha aqui, o que

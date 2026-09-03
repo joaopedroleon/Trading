@@ -151,6 +151,27 @@
         + '>' + (rot ? rot(v) : v) + '</option>';
     }).join('');
   }
+  /* ⭐ **NA PUBLICADA O TÍTULO DA ABA CARIMBA O PAR** (03/09/2026, pedido do
+     usuário: *"sim, eu quero que a publicada seja específica com o trader, ativo
+     e ano como era antes"*). Na tela LOCAL ele é fixo (§5.-75) porque lá o par
+     muda a toda hora e um rótulo que dança é o que você não acha entre 20 abas;
+     aqui é o oposto — cada link é UMA análise, e quem recebe o link quer ver de
+     quem é a foto sem abrir.
+     ⚠️ **Tem de ser no JS, não no `<title>` estático:** `estudo.html` é UM
+     arquivo servindo todas as análises (o par vem do `?a=<slug>`), então não há
+     título de build que sirva. E porque é aqui, ele acompanha a troca de
+     seletor: mudar de análise recarrega com outro `?a=` e o título vem junto.
+     ⚠️ O `<title>` do HTML continua valendo como fallback (JS desligado, ou
+     antes de o manifest chegar). */
+  function titulaAba() {
+    var a = SEL && SEL.a;
+    if (!a) return;
+    var GR = (MAN && MAN.grupos) || {};
+    var qual = /trades\.html/.test(location.pathname) ? ' · trade a trade' : '';
+    document.title = a.trader + ' — ' + (GR[a.grupo] || a.grupo_rotulo || a.grupo)
+      + ', ' + a.ano + qual + ' · JGP Macro';
+  }
+
   function montaSeletores() {
     var w = document.querySelector('.selwrap');
     if (!w || !SEL) return;
@@ -284,6 +305,7 @@
 
     SEL = resolveSel();
     if (!SEL) return erroFatal('Nenhuma análise publicada ainda.');
+    titulaAba();
     montaSeletores();
     propagaSelecao();
 

@@ -316,8 +316,7 @@
     if (el('mtNTrades')) el('mtNTrades').textContent = (TA.trades || []).length;
     if (el('mtNExec')) el('mtNExec').textContent = (TA.execucoes || []).length;
     if (el('mtNBoletas')) el('mtNBoletas').textContent = (TA.resumo || {}).boletas || 0;
-    document.title = TA.trader + ' — ' + (TA.grupo_rotulo || TA.grupo)
-      + ' · trade a trade · JGP Macro';
+    /* ⛔ Título de aba FIXO — ver o comentário longo no `app.js`. */
   }
 
   function telaVazia() {

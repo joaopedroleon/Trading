@@ -14,12 +14,14 @@
      baseLayout(theme(), extra)                -> layout base p/ qualquer outro tipo (barras etc.)
 
    `series` = [{name, x[], y[], color, w?, dash?, mode?, noLabel?,
-                marker?, customdata?, hovertemplate?, showlegend?, yaxis?, shape?}]
-              os 6 últimos são passthrough opt-in p/ Plotly: série de marcadores com
+                marker?, customdata?, hovertemplate?, showlegend?, yaxis?, shape?,
+                legendgroup?}]
+              os 7 últimos são passthrough opt-in p/ Plotly: série de marcadores com
               tamanho por ponto e hover próprio (leilões no monitor-rf.html), eixo
-              secundário (yaxis:'y2', fora do yExtent do principal) e `shape:'hv'`
+              secundário (yaxis:'y2', fora do yExtent do principal), `shape:'hv'`
               p/ linha em DEGRAU — limite que muda de vigência numa data salta ali,
-              em vez de virar rampa (bandas do PAF na divida.html)
+              em vez de virar rampa — e `legendgroup`, p/ um único item de legenda
+              ligar/desligar o par mín+máx de uma banda (bandas do PAF na divida.html)
    `opts`   = {x0, suffix, zero, log, targetBand, h, noLabel, layout}
    ========================================================================== */
 const $=(s,r=document)=>r.querySelector(s);
@@ -149,6 +151,9 @@ function lineFig(el,series,opts){opts=opts||{};const t=theme();
     if(s.customdata)tr.customdata=s.customdata;
     if(s.hovertemplate)tr.hovertemplate=s.hovertemplate;
     if(s.showlegend!==undefined)tr.showlegend=s.showlegend;
+    /* legendgroup: UMA entrada de legenda liga/desliga VÁRIAS séries (par mín+máx de
+       uma banda-limite). Sem isso a banda pede 2 cliques e ocupa 2 itens.           */
+    if(s.legendgroup)tr.legendgroup=s.legendgroup;
     if(s.yaxis)tr.yaxis=s.yaxis;             // 'y2' = eixo secundário (unidade diferente)
     if(s.shape)tr.line.shape=s.shape;        // 'hv' = DEGRAU (limite que muda de vigência
     // numa data: a banda do PAF salta no mês da revisão, não sobe em rampa entre os dois)
