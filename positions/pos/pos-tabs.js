@@ -257,6 +257,10 @@ function renderSectionsForTab(tabId, allRows) {
   const displayRows = wdoUcAggregated.has(tabId) ? applyWdoUcAggregation(allRows) : allRows;
   const sections   = getSections(displayRows);
   const container  = document.getElementById(`posContainer-${tabId}`);
+  // Container do card COLAPSADO de MM Prev, que vive no FIM da aba (ver o comentário de
+  // ordem em positions.html). Ausente no snapshot estático (snapshot/viewer/index.html só
+  // declara #posContainer-*) → cai de volta no container principal e nada muda lá.
+  const prevContainer = document.getElementById(`posPrevContainer-${tabId}`);
   const navMap     = data?.traders ?? {};
 
   const hasFundBreak  = tabId === 'portfoliorf' && !!(data?.fund_rows?.length);
@@ -266,13 +270,29 @@ function renderSectionsForTab(tabId, allRows) {
 
   container.style.display       = 'inline-flex';
   container.style.flexDirection = 'column';
+  // ⚠️ `flex` + `align-items:flex-start`, NÃO o `inline-flex` do container principal: os dois
+  // blocos do fim da aba são IRMÃOS adjacentes, e dois inline-flex caem na MESMA linha —
+  // medido, o card de detalhe do PnL e o de MM Prev nasciam lado a lado. Block-level dá uma
+  // linha a cada um, e o `flex-start` mantém o card encolhendo até o conteúdo (o mesmo
+  // shrink-to-fit que o inline-flex dava, e de que a tabela `width:auto` depende).
+  if (prevContainer) {
+    prevContainer.style.display       = 'flex';
+    prevContainer.style.flexDirection = 'column';
+    prevContainer.style.alignItems    = 'flex-start';
+    prevContainer.innerHTML           = '';   // trader sem MM Prev não deixa card velho no fim
+  }
 
   if (!sections.length) {
     container.innerHTML = '<div class="card no-data">Não há posição para este trader.</div>';
     return;
   }
 
-  container.innerHTML = sections.map((s, _i) => {
+  // Dois destinos: o card de MM Prev vai para #posPrevContainer-* (fim da aba) e o resto
+  // fica no #posContainer-*. Sem `prevContainer` (snapshot) tudo volta a sair junto, na
+  // ordem do GROUP_ORDER — que é o comportamento antigo.
+  const prevCards = [];
+  const mainCards = [];
+  sections.forEach((s, _i) => {
     const nav      = navMap[s.trader];
     const effDate  = tabId === 'portfoliorf' ? pnlNavDate : navDate;
     const navStr   = fmtNav(nav, effDate, openingDate);
@@ -283,7 +303,7 @@ function renderSectionsForTab(tabId, allRows) {
     const hasFund  = hasFundBreak && s.group === 'Todos';
 
     if (isMmPrev) {
-      return `
+      (prevContainer ? prevCards : mainCards).push(`
       <div class="card">
         <div style="cursor:pointer;user-select:none" onclick="(function(btn,wrap){
           var open=wrap.style.display!=='none';
@@ -302,10 +322,11 @@ function renderSectionsForTab(tabId, allRows) {
             <tbody id="${sectionBodyId(s)}"></tbody>
           </table>
         </div>
-      </div>`;
+      </div>`);
+      return;
     }
 
-    return `
+    mainCards.push(`
     <div class="card">
       <div style="display:flex;gap:40px;align-items:flex-start">
         <div class="section-copy-target">
@@ -328,8 +349,11 @@ function renderSectionsForTab(tabId, allRows) {
           <div id="fund_break_portfoliorf"></div>
         </div>` : ''}
       </div>
-    </div>`;
-  }).join('');
+    </div>`);
+  });
+
+  container.innerHTML = mainCards.join('');
+  if (prevContainer) prevContainer.innerHTML = prevCards.join('');
 
   for (const s of sections) {
     const rows = filterRows(sortRows(

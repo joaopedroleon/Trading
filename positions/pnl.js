@@ -800,6 +800,10 @@ function renderPnlSections(data, tabId) {
   const sections  = getSections(tabRows).filter(s => _isPnlGroup(s.group));
   const traders   = data.traders || {};
   const container = document.getElementById(`pnlContainer-${tabId}`);
+  // Container dos cards COLAPSADOS "(detalhe)", que vivem no fim da aba, abaixo do
+  // Assistente (ver o comentário de ordem em positions.html). Ausente → os cards saem
+  // logo depois do resumo, como antes (é o caso do snapshot estático).
+  const detailContainer = document.getElementById(`pnlDetailContainer-${tabId}`);
 
   const mmRows = tabRows.filter(r => _isPnlGroup(r.group));   // tabRows já filtrado (ver rerenderPnlValues)
 
@@ -809,7 +813,14 @@ function renderPnlSections(data, tabId) {
   // containing block é o #pnlSection-*, de largura conhecida) faz o `overflow-x:auto` da
   // `.pnl-fund-row` rolar DENTRO da seção em vez de a página inteira rolar de lado.
   container.style.maxWidth      = _pnlFundConfig() ? '100%' : '';
-  container.innerHTML = renderPnlSummaryBlock(mmRows) + sections.map(s => {
+  // `flex` (block-level) + `align-items:flex-start` — ver a nota no `prevContainer` do
+  // pos-tabs.js: dois inline-flex irmãos dividem a mesma linha.
+  if (detailContainer) {
+    detailContainer.style.display       = 'flex';
+    detailContainer.style.flexDirection = 'column';
+    detailContainer.style.alignItems    = 'flex-start';
+  }
+  const detailCards = sections.map(s => {
     const nav    = traders[s.trader];
     const navStr = nav
       ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}</span>`
@@ -837,6 +848,11 @@ function renderPnlSections(data, tabId) {
       </div>
     </div>`;
   }).join('');
+
+  // ⚠️ O resumo tem de ser o `firstElementChild` do #pnlContainer-*: é por ele que o
+  // `rerenderPnlSummary` troca o bloco sem remontar a seção inteira.
+  container.innerHTML = renderPnlSummaryBlock(mmRows) + (detailContainer ? '' : detailCards);
+  if (detailContainer) detailContainer.innerHTML = detailCards;
 
   for (const s of sections) {
     const bodyId = pnlBodyId(s.group, s.trader);

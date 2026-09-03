@@ -57,9 +57,13 @@ const PosBusy = (() => {
     // estado "Configure e clique Gerar boletas". `also` = sources que só a acendem.
     'rol:bol':   { src: 'boletas',  also: ['rolagem'], containers: ['rolagemBoletaPanel'] },
   };
+  // Cada seção de aba de trader pinta DOIS containers: o principal e o bloco colapsado
+  // que desceu p/ o fim da aba (#posPrevContainer-* / #pnlDetailContainer-*, ver a ordem
+  // documentada em positions.html). Os dois saem do MESMO /reference, então o véu tem de
+  // cobrir ambos — senão o card colapsado ficaria "aceso" com o número velho.
   for (const t of TRADER_TABS) {
-    SECTIONS[`pos:${t.id}`] = { src: `ref:${t.id}`, containers: [`posContainer-${t.id}`] };
-    SECTIONS[`pnl:${t.id}`] = { src: `ref:${t.id}`, containers: [`pnlContainer-${t.id}`] };
+    SECTIONS[`pos:${t.id}`] = { src: `ref:${t.id}`, containers: [`posContainer-${t.id}`, `posPrevContainer-${t.id}`] };
+    SECTIONS[`pnl:${t.id}`] = { src: `ref:${t.id}`, containers: [`pnlContainer-${t.id}`, `pnlDetailContainer-${t.id}`] };
   }
 
   /* ── Refetch por source. `ref:<tab>` é dinâmico (um por aba de trader). ───── */
@@ -92,6 +96,14 @@ const PosBusy = (() => {
      um card de barras cinzas ali só pesa. #rolagemControls é a tira de filtros — o
      esqueleto do "Resumo" logo abaixo já carrega o recado. Véu continua valendo. */
   const NO_SKEL = new Set(['rolagemControls']);
+  // Os blocos colapsados do fim da aba de trader: não são a tabela que a mesa está
+  // olhando, e podem ficar legitimamente VAZIOS (trader sem grupo MM Prev). Esqueleto ali
+  // só pesa — e sem esqueleto o `_paintContainer` também não escreve o "Sem dados", que
+  // num container vazio por natureza seria mentira. O véu continua valendo.
+  for (const t of TRADER_TABS) {
+    NO_SKEL.add(`posPrevContainer-${t.id}`);
+    NO_SKEL.add(`pnlDetailContainer-${t.id}`);
+  }
 
   const _SKEL = '<div class="card pos-busy-skel">'
     + '<div class="lbl">Carregando…</div><div class="bar head"></div>'

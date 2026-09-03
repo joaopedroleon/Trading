@@ -153,11 +153,28 @@ const ALLOC_TOL     = 0.02;
    nesses trades a boleta do Prev sai proporcionalmente menor — só entram os demais fundos.
    Target = ALLOC_TARGET × (NAV do grupo ex-bloqueados / NAV do grupo). O fator vem do
    backend (`prev_short_br_equity_factor`, calculado com o NAV do dia); sem ele, o check
-   mantém o target cheio e a tabela avisa. */
+   mantém o target cheio e a tabela avisa.
+
+   ⚠️ A restrição é de BOLSA ONSHORE — vale para o que é negociado no Brasil, não para o
+   risco Brasil comprado lá fora. `Directional Brazil` carrega os dois: MINI BOVESPA e ação
+   local (BRL) de um lado; EWZ, ADR (PBR/ITUB), XP e MELI (USD) do outro. Sem o corte por
+   moeda, uma put de EWZ comprada (direção short) puxava o target para ALLOC × 0,71 e a
+   boleta correta do Prev (70%) aparecia fora da faixa. Onshore ≡ instrumento em BRL. */
+// Moeda do instrumento — onshore é BRL. Vem do JRS (`currency`) e, na linha que só tem
+// boleta, do JDS (`currency_name`), então está preenchida nos dois caminhos.
+function isOnshoreBr(r) {
+  const ccy = (r.currency ?? '').toUpperCase();
+  if (ccy) return ccy === 'BRL';
+  // Sem moeda (caso raro): só o nome inequívoco de índice local vale como onshore.
+  const name = (r.instrument_name ?? '').toUpperCase();
+  return name.startsWith('IBOV') || name.includes('BOVESPA');
+}
+
 function isBrEquity(r) {
   const area = r.area    ?? '';
   const sub  = r.subarea ?? '';
   if (sub === 'Hedge_Cambial') return false;                     // WDO dentro de Equities
+  if (!isOnshoreBr(r)) return false;                             // EWZ/ADR/XP/MELI ficam fora
   if (area === 'Equities' && /bra[sz]il/i.test(sub)) return true;
   const name = (r.instrument_name ?? '').toUpperCase();
   return name.startsWith('IBOV') || name.includes('BOVESPA');    // opção/futuro de índice

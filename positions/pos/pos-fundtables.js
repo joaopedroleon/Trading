@@ -70,7 +70,8 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   let prevSubarea = null;
   let subareaIdx  = -1;
 
-  // Short de bolsa BR: o Sulamérica não entra → target proporcional ao NAV do resto do grupo.
+  // Short de bolsa BR ONSHORE (BRL): o Sulamérica não entra → target proporcional ao NAV do
+  // resto do grupo. Risco Brasil comprado lá fora (EWZ, ADR, XP) não conta — ver isBrEquity.
   const shortFactor  = prevShortBrEquityFactor();
   let   usedReduced  = false;   // alguma linha usou o target reduzido
   let   missingFactor = false;  // linha de short de bolsa BR sem o NAV do grupo (target cheio)
@@ -93,7 +94,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     const rowTarget = isShortBr && shortFactor != null ? target * shortFactor : target;
     if (isShortBr && shortFactor != null) usedReduced = true;
     const shortMark = isShortBr
-      ? ` <span class="alloc-short-br" title="Short de bolsa BR — Sulamérica não entra. Target ${
+      ? ` <span class="alloc-short-br" title="Short de bolsa BR onshore — Sulamérica não entra. Target ${
           shortFactor != null ? fmtPct(rowTarget) : fmtPct(target) + ' (NAV do grupo Prev indisponível)'}">↓</span>`
       : '';
 
@@ -174,9 +175,10 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     const blocked = (posDataByTab[activeTraderTab]?.prev_no_br_equity_short_funds ?? [])
       .map(fl => fl.replace(/-A$/, '')).join(', ') || 'Sulamérica';
     const note = usedReduced
-      ? `↓ short de bolsa BR: target ${fmtPct(target * shortFactor)} (= ${fmtPct(target)} × ${
-          fmtPct(shortFactor)}) — ${blocked} não pode ficar vendido em bolsa BR e fica fora do trade.`
-      : `↓ short de bolsa BR: target deveria ser reduzido (${blocked} fica fora), mas o NAV do grupo Prev `
+      ? `↓ short de bolsa BR onshore: target ${fmtPct(target * shortFactor)} (= ${fmtPct(target)} × ${
+          fmtPct(shortFactor)}) — ${blocked} não pode ficar vendido em bolsa BR e fica fora do trade. `
+        + `Posição de risco Brasil negociada fora (EWZ, ADR) não entra na regra.`
+      : `↓ short de bolsa BR onshore: target deveria ser reduzido (${blocked} fica fora), mas o NAV do grupo Prev `
         + `não veio — check usando o target cheio de ${fmtPct(target)}.`;
     const color = usedReduced ? 'var(--text-muted)' : 'var(--red)';
     footTr = `<tr><td colspan="6" style="white-space:normal;font-size:11px;color:${color}">${note}</td></tr>`;
