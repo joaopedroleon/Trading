@@ -651,15 +651,31 @@
       + 'pico da posicao. E a regua de TAMANHO da opcao — o paralelo do #PL para '
       + 'quem nao tem DV01. ⛔ Nao se soma nem se compara com #PL: um e R$ de '
       + 'premio sobre o NAV, o outro e R$/bp sobre o NAV.',
-    premio_dia: 'O premio de TODAS as opcoes vivas naquele pregao, em bps do NAV '
-      + 'do dia. ⚠️ Maior que o premio por trade porque soma as posicoes '
-      + 'simultaneas — a mesma relacao que ha entre o #PL do dia e o por trade.',
-    risco_max: 'O PIOR CASO daquele trade, em bps do NAV. Comprado perde no '
-      + 'maximo o premio; VENDIDO perde o teto do payoff menos o premio. Medido '
-      + 'nas digitais vendidas da base, essa razao vai de 0,14 a 4,56 — o premio '
-      + 'sozinho superestima o risco de um vendido caro em 7x e subestima o de um '
-      + 'vendido barato em 4,6x. ⛔ Fica "nao determinado" quando o payoff e '
-      + 'ilimitado de um lado (perna solta, estrutura com razoes que nao netam): '
+    premio_dia: 'O premio COLOCADO por TODAS as opcoes vivas naquele pregao, em '
+      + 'bps do NAV do dia — comprada coloca o premio pago, vendida coloca o '
+      + 'teto menos o premio. ⚠️ Maior que o premio por trade porque soma as '
+      + 'posicoes simultaneas — a mesma relacao que ha entre o #PL do dia e o '
+      + 'por trade. ⛔ Dia cujo teto nao e derivavel fica FORA desta media (mas '
+      + 'conta em "pregoes com opcao"): assumir um teto seria inventar.',
+    /* ☠️ **HAVIA DUAS CHAVES `risco_max` NESTE MESMO OBJETO** (achado em
+       04/09/2026): esta e outra ~35 linhas abaixo. Em JS a ULTIMA vence, então
+       este texto nunca foi servido a ninguem — e ele e o que tinha a medicao
+       (os multiplos de 7x e 4,6x). E a mesma familia do §5.-19, onde um rotulo
+       era apagado pela ordem do spread: chave repetida nao da erro, da a versao
+       errada em silencio.
+       ⭐ Fundidas numa so, com o nome novo (`premio_risco`). */
+    premio_risco: 'O PREMIO EM RISCO daquele trade, em bps do NAV — o capital '
+      + 'que pode virar prejuizo. COMPRADO poe o premio pago; VENDIDO poe '
+      + 'o TETO DO PAYOFF menos o premio recebido: vender a 70 num instrumento '
+      + 'que vai a 100 poe 30 na mesa, nao 70. '
+      + 'Medido nas 51 vendas da base, a razao em-risco/premio vai de 0,14 a '
+      + '4,56 — o premio bruto superestima o vendido CARO e subestima o vendido '
+      + 'BARATO, e 26 das 51 sairam abaixo de 50% do teto contra 25 acima, '
+      + 'entao o erro nao tinha um sinal so. '
+      + 'O teto e 100 pontos na digital de COPOM (definicao do contrato) e a '
+      + 'distancia entre strikes na estrutura de IDI. '
+      + '⭐ E a REGUA DE TAMANHO da opcao (o paralelo do #PL). '
+      + '⚠️ Sem teto derivavel o premio em risco cai no proprio premio — '
       + 'assumir 100 ali seria inventar.',
     regua: 'A UNIDADE das analises da pagina, escolhida na barra de abas. '
       + 'BPS DO NAV (padrao) = resultado dividido pelo patrimonio alocado ao '
@@ -687,13 +703,6 @@
       + 'preco medio de entrada, sobre o NAV do dia do pico. E o paralelo exato '
       + 'do #PL por trade. ⚠️ E MAGNITUDE: comprado e vendido aparecem os dois '
       + 'positivos, e o lado esta na coluna de direcao.',
-    risco_max: 'O pior caso da posicao. COMPRADO perde no maximo o premio pago. '
-      + 'VENDIDO perde o TETO DO PAYOFF menos o premio recebido — e a diferenca '
-      + 'nao e pequena: nas digitais vendidas da base a razao risco/premio vai de '
-      + '0,14 a 4,56. O teto e 100 pontos na digital de COPOM (definicao do '
-      + 'contrato) e a distancia entre strikes na estrutura de IDI (a B3 lista o '
-      + 'IDI em passo 100). ⛔ Perna solta e estrutura de payoff ilimitado saem '
-      + 'como "nao determinado" — nunca se assume 100.',
     ponto_brl: 'Quantos REAIS vale 1 ponto de premio, por contrato. A digital de '
       + 'COPOM foi REDENOMINADA em 26/05/2025: valia R$ 100,00 por ponto e passou '
       + 'a valer R$ 1,00. Sem isso o premio de 2020-2024 sairia 100x menor.',
@@ -735,6 +744,9 @@
       + '(US$ 50.000) com o mini WDO (US$ 10.000), que sao o mesmo risco em '
       + 'tamanhos 5x diferentes. E o mesmo motivo de o juros medir giro em '
       + 'R$/bp e nao em contratos.',
+    /* ⛔ O verbete `premio_bruto` foi APAGADO com a coluna dele (04/09/2026):
+       verbete sem call site e o §5.-17 esperando acontecer — alguem o le, acha
+       que descreve o numero da tela, e ja nao descreve. */
     pernas: 'Quantas PERNAS de DI foram negociadas no periodo. Um contrato '
       + 'comprado e depois vendido conta 2x, porque a corretora cobra nas duas. '
       + 'E o denominador do custo por perna.',
@@ -2274,12 +2286,21 @@
          ainda liderando com mediana; §5.-53 ja tinha virado o #PL e a duracao.
          ⛔ O par continua obrigatorio (§5.3) — mudou QUAL dos dois e o grande. */
       ficha('Prêmio na mesa', [
-        linha('Prêmio por trade', bps(R.premio_bps_medio),
-            'média · mediana ' + bps(R.premio_bps_mediano)
-            + ' · maior ' + bps(R.premio_bps_max), '', 'premio', true),
-        linha('Prêmio somado', bps(R.premio_bps_soma),
-            kbrl(R.premio_brl_soma) + ' em ' + nf(R.n_premio, 0) + ' trades',
-            '', 'premio'),
+        /* ☠️ **ERA O PRÊMIO BRUTO, E NUMA VENDA ISSO NÃO É O QUE SE COLOCA**
+           (usuário, 04/09/2026): vender a 70 num instrumento que vai a 100 põe
+           **30** na mesa, não 70 — os 70 são CAIXA RECEBIDO. Hoje o número
+           grande é o COLOCADO (`teto − prêmio` na venda, prêmio pago na compra),
+           que é a mesma régua que o sizing usa, e o bruto desceu para a linha de
+           caixa logo abaixo — que é informação legítima e OUTRA. */
+        /* ⭐ **"PRÊMIO EM RISCO" é o nome, em toda a tela** (decisão do
+           usuário, 04/09/2026) — antes "prêmio colocado". Uma nomenclatura só.
+           ⛔ E o PRÊMIO BRUTO saiu da tela inteira, a pedido dele: as linhas
+           "somado" e "movimentado" foram removidas aqui, na tabela e na ficha do
+           dia. Ele continua no contrato de dados (`premio_bps` — é o caixa que
+           trocou de mãos), mas deixou de disputar espaço com a régua. */
+        linha('Prêmio em risco por trade', bps(R.premio_risco_bps_medio),
+            'média · mediana ' + bps(R.premio_risco_bps_mediano)
+            + ' · maior ' + bps(R.premio_risco_bps_max), '', 'premio', true),
         /* ⭐ A regua NATURAL da opcao: cada ponto do preco e um ponto percentual
            de probabilidade (digital) ou de payoff (estrutura de IDI, teto 100). */
         /* ☠️ Era "pontos SOMADOS no ano" e a soma nao queria dizer nada
@@ -2291,52 +2312,68 @@
             'ponderado pelo tamanho · mediana ' + nf(R.result_pts_mediano, 1)
             + ' pt por trade · média ' + nf(R.result_pts_medio, 1) + ' pt',
             sgn(R.result_pts_ponderado), 'pts'),
-      ], 'É o dinheiro que ele pôs na mesa, sobre o NAV do dia do pico da posição '
-       + '— o paralelo do #PL, e nunca a mesma coluna que ele.'),
+      ], 'O que ele pôs EM RISCO, sobre o NAV do dia do pico — o paralelo do '
+       + '#PL, e nunca a mesma coluna que ele. <b>Comprado</b> coloca o prêmio '
+       + 'pago; <b>vendido</b> coloca o <b>teto menos o prêmio</b>.'
+       + (semTeto ? ' ⚠️ ' + nf(semTeto, 0) + ' trade'
+            + (semTeto > 1 ? 's' : '') + ' sem teto derivável: ali o colocado é o '
+            + 'próprio prêmio, porque o payoff é ilimitado de um lado e assumir '
+            + 'um teto seria inventar.' : '')),
 
-      ficha('Prêmio vivo, por dia', [
-        linha('Prêmio do dia', bps(R.premio_pl_medio_dia),
+      ficha('Prêmio em risco, por dia', [
+        /* ⭐ **TAMBÉM O EM RISCO** (04/09/2026): esta ficha mediava
+           `posição × prêmio`, que numa VENDA não é o que está em risco. */
+        linha('Prêmio em risco no dia', bps(R.premio_pl_medio_dia),
             'média · mediana ' + bps(R.premio_pl_mediano_dia)
             + ' · máximo ' + bps(R.premio_pl_max_dia), '', 'premio_dia', true),
         linha('Pregões com opção', nf(R.pregoes_com_opcao, 0),
             'de ' + R.pregoes_total + ' no ano', '', 'premio_dia'),
-      ], 'Soma TODAS as opções vivas no pregão; a ficha ao lado é uma posição só.'),
+      ], 'Soma TODAS as opções vivas no pregão; a ficha ao lado é uma posição só. '
+       + '⚠️ Um dia cujo teto não é derivável entra em "pregões com opção" e fica '
+       + 'fora do prêmio em risco — assumir um teto seria inventar.'),
 
-      ficha('Pior caso', [
-        /* ⚠️ Esta linha nao tinha a irma NENHUMA — so `mediana · maior`. O campo
-           `risco_max_bps_medio` foi criado no `report.py` junto com esta troca:
-           inverter o destaque sem a media existir deixaria a ficha com um par
-           quebrado, que e o que a §5.3 proibe. */
-        linha('Risco máximo por trade', bps(R.risco_max_bps_medio),
-            'média · mediana ' + bps(R.risco_max_bps_mediano)
-            + ' · maior ' + bps(R.risco_max_bps_max), '', 'risco_max', true),
-        linha('Risco máximo somado', bps(R.risco_max_bps_soma),
-            'se tudo virasse contra ao mesmo tempo', '', 'risco_max'),
-      ], semTeto
-         ? '⚠️ ' + nf(semTeto, 0) + ' trade' + (semTeto > 1 ? 's' : '')
-           + ' sem teto derivável ficam FORA desta conta — payoff ilimitado de um '
-           + 'lado, e assumir 100 seria inventar.'
-         : 'Comprado perde o prêmio; vendido perde o teto do payoff menos o prêmio.')
+      /* ⛔ **A FICHA "PIOR CASO" SAIU, e não por corte de conteúdo:** ela
+         mostrava `risco_max`, que É o prêmio colocado — o capital que pode
+         virar prejuízo. Com a ficha de cima passando a liderar por esse mesmo
+         número, as duas exibiriam **o mesmo valor sob nomes diferentes**, que é
+         exatamente a incoerência da §5.-27 (e foi ela que fez o usuário ler
+         "prêmio colocado" como uma coisa e "risco máximo" como outra).
+         ⭐ Um número, um nome — o que a mesa usa. */
     );
 
     const t = theme();
     const x = D.map((r) => r.data);
     Plotly.newPlot(el('figPremio'), [
-      { x, y: D.map((r) => r.premio_pl), name: 'prêmio vivo (bps)',
+      /* ☠️ **ESTA SÉRIE ERA O PRÊMIO BRUTO** (`premio_pl`) — a mesma falha da
+         ficha, no gráfico do ano: numa posição VENDIDA o prêmio marcado não é o
+         que está em risco. Hoje é `premio_risco_pl` (§5.-85).
+         ⚠️ `|| r.premio_pl` como piso: uma FOTO publicada antes de 04/09/2026
+         não tem o campo novo, e sem o fallback a linha sairia VAZIA na página
+         do Pages — é a regra do §5.-68. */
+      { x, y: D.map((r) => (r.premio_risco_pl != null ? r.premio_risco_pl
+                                                      : r.premio_pl)),
+        name: 'prêmio em risco (bps)',
         type: 'scatter', mode: 'lines', fill: 'tozeroy',
         line: { color: P()[2], width: 1.6 }, fillcolor: 'rgba(120,120,120,.12)',
         hovertemplate: '%{x|%d/%m/%Y}<br>%{y:.1f} bps do NAV<extra></extra>' },
     ], baseLayout(t, {
       height: Math.round(H_HALF() * 0.75),
-      yaxis: { title: { text: 'prêmio vivo (bps do NAV)' }, rangemode: 'tozero' },
+      yaxis: { title: { text: 'prêmio em risco (bps do NAV)' }, rangemode: 'tozero' },
       showlegend: false,
     }), CFG);
 
     /* premio x risco maximo: a diagonal e onde os dois coincidem (o COMPRADO).
        Tudo acima dela e vendido — e a distancia ate a diagonal E o que o premio
        sozinho esconderia. */
-    const O = (TR || []).filter((r) => r.book === 'opcao' && r.premio_bps != null);
-    const mx = Math.max(1, ...O.map((r) => Math.max(r.premio_bps || 0, r.risco_max_bps || 0)));
+    /* ☠️ **O EIXO X ERA O PRÊMIO BRUTO COM O RÓTULO DO COLOCADO** — pior que
+       antes da correção, porque o eixo prometia uma coisa e mostrava outra.
+       Reportado pelo usuário sobre a `CPMFV84` (vendida): o ponto aparecia em
+       **33,0 bps** de "prêmio colocado", que é o prêmio RECEBIDO; o colocado
+       dela é `teto − preço`.
+       ⚠️ O filtro passou a ser pelo COLOCADO: um trade sem teto derivável não
+       tem x, e plotá-lo em 0 diria "não colocou nada". */
+    const O = (TR || []).filter((r) => r.book === 'opcao'
+                                       && r.premio_risco_bps != null);
     /* ☠️ ESTE GRAFICO ERA `premio × risco maximo`, e nao dizia NADA — era a
        identidade x = x. Motivo: para quem COMPRA, o risco maximo E o premio, e
        quase todo trade do livro e comprado, entao os pontos caiam todos na
@@ -2347,37 +2384,68 @@
        ⚠️ Os dois eixos em bps do NAV: e a unica unidade em que premio e
        resultado se comparam. O y segue a regua; o x NAO — premio e sempre
        exposicao, e ve-lo em R$ nao ajuda a comparar entre anos. */
-    const pmx = Math.max(1, ...O.map((r) => r.premio_bps || 0));
+    const pmx = Math.max(1, ...O.map((r) => r.premio_risco_bps || 0));
     Plotly.newPlot(el('figPremioRisco'), [
       /* a horizontal do zero: acima ganhou, abaixo perdeu */
       { x: [0, pmx * 1.05], y: [0, 0], name: 'zero', type: 'scatter', mode: 'lines',
         line: { color: REF(), width: 1, dash: 'dash' }, hoverinfo: 'skip',
         showlegend: false },
-      /* ⚠️ a diagonal NEGATIVA e o piso de quem COMPRA: perder todo o premio.
-         Nenhum comprado pode ficar abaixo dela, e encostar nela e a opcao ter
-         virado po. E referencia, nao serie — por isso tracejada e sem legenda. */
-      { x: [0, pmx * 1.05], y: [0, -pmx * 1.05], name: 'perde todo o prêmio',
+      /* ⭐ **COM O COLOCADO NO EIXO X A DIAGONAL VALE PARA OS DOIS LADOS.**
+         Ela é o piso: perder tudo o que se colocou. Antes (com o prêmio bruto)
+         ela só era o piso do COMPRADO — o vendido podia ficar abaixo dela sem
+         nada de errado, porque o que ele arrisca não é o prêmio. Agora nenhum
+         ponto, comprado ou vendido, pode ficar abaixo: encostar nela é a
+         posição ter virado pó. É referência, não série. */
+      { x: [0, pmx * 1.05], y: [0, -pmx * 1.05], name: 'perde tudo o que colocou',
         type: 'scatter', mode: 'lines', line: { color: NEG(), width: 1, dash: 'dot' },
-        hovertemplate: 'piso do comprado: perder o prêmio inteiro<extra></extra>' },
-      { x: O.map((r) => r.premio_bps),
+        hovertemplate: 'piso: perder tudo o que se colocou<extra></extra>' },
+      { x: O.map((r) => r.premio_risco_bps),
         y: O.map((r) => (emBps() ? r.bps_nav_liq : r.result_liq_brl)),
         text: O.map(rotHover),
         name: 'trades', type: 'scatter', mode: 'markers',
         marker: { size: 12, opacity: 0.82,
                   color: O.map((r) => ((r.bps_nav_liq || 0) < 0 ? NEG() : P()[0])),
                   symbol: O.map((r) => (r.direcao === 'vendido' ? 'diamond' : 'circle')) },
+        /* ⛔ O PRÊMIO BRUTO SAIU DO HOVER TAMBÉM (04/09/2026). O usuário
+           mandou tirá-lo da ficha, da tabela e da linha do dia; deixá-lo aqui
+           faria dele a única sobra da nomenclatura antiga — e a régua da tela é
+           uma só. */
         customdata: O.map((r) => [r.direcao, r.result_pts,
                                   (emBps() ? r.result_liq_brl : r.bps_nav_liq)]),
         hovertemplate: '<b>%{text}</b> (%{customdata[0]})'
-                     + '<br>prêmio %{x:.1f} bps do NAV'
+                     + '<br>prêmio <b>em risco</b> %{x:.1f} bps do NAV'
                      + (emBps() ? '<br>resultado %{y:.1f} bps · R$ %{customdata[2]:,.0f}'
                                 : '<br>resultado R$ %{y:,.0f} · %{customdata[2]:.1f} bps')
                      + '<br>%{customdata[1]:.1f} pontos de preço<extra></extra>' },
     ], baseLayout(t, {
       height: Math.round(H_HALF() * 0.75),
-      xaxis: { title: { text: 'prêmio colocado (bps do NAV)' }, rangemode: 'tozero' },
-      yaxis: { title: { text: 'resultado (' + uni() + ')' }, zeroline: false },
-      legend: { orientation: 'h' },
+      xaxis: { title: { text: 'prêmio em risco (bps do NAV)' }, rangemode: 'tozero' },
+      /* ☠️ **A DIAGONAL DITAVA O EIXO Y.** Ela vai de 0 a `−x_max`, e o x_max é
+         o maior prêmio em risco do ano — que pode ser MÚLTIPLOS do resultado de
+         qualquer trade. 📏 Medido no EMota 2023: os resultados vivem em
+         **−28 a +3 bps** e o eixo ia a **−140**, porque uma trava vendida tem
+         129 bps em risco. Os pontos ficavam esmagados numa faixa de 20% da
+         altura para uma LINHA DE REFERÊNCIA caber inteira.
+         ⭐ O range sai do DADO e o Plotly recorta a diagonal — que é o que se
+         faz com referência: ela existe para o leitor ver que nenhum ponto a
+         cruza NA REGIÃO ONDE HÁ PONTOS, não para ocupar a tela. */
+      yaxis: { title: { text: 'resultado (' + uni() + ')' }, zeroline: false,
+               range: (function () {
+                 const ys = O.map((r) => (emBps() ? r.bps_nav_liq : r.result_liq_brl))
+                             .filter((v) => v != null && isFinite(v));
+                 if (!ys.length) return undefined;
+                 const lo = Math.min(0, ...ys), hi = Math.max(0, ...ys);
+                 const f = Math.max((hi - lo) * 0.12, 1e-9);
+                 return [lo - f, hi + f];
+               })() },
+      /* ☠️ **`orientation:'h'` SOZINHO JOGA A LEGENDA PARA BAIXO DO EIXO** — o
+         `baseLayout` do `plotly-jgp` faz `Object.assign`, que substitui o
+         OBJETO INTEIRO, e sem a âncora da casa o Plotly cai no default dele. É
+         o §5.-50, e aqui ele MORDEU: com o rótulo da diagonal virando "perde
+         tudo o que colocou" (mais longo que "perde todo o prêmio") a legenda
+         passou a encostar no título do eixo. 📏 Medido: colide em 1500, 1366 e
+         1100px — e não em 1920, que é onde eu teria olhado. */
+      legend: { orientation: 'h', yanchor: 'bottom', y: 1.0, xanchor: 'left', x: 0 },
     }), CFG);
 
     table(el('tblPremio'), [
@@ -2385,10 +2453,12 @@
         f: (r) => '<span title="' + _esc(r.ativo) + '">' + rotLongo(r) + '</span>' },
       { t: 'direção', f: (r) => r.direcao },
       { t: 'abertura', f: (r) => r.abertura },
-      { t: 'prêmio<br><i>bps do NAV</i>', num: 1, tip: 'premio',
-        f: (r) => bps(r.premio_bps) },
-      { t: 'risco máximo<br><i>bps do NAV</i>', num: 1, tip: 'risco_max',
-        f: (r) => (r.risco_max_bps == null ? 'não determinado' : bps(r.risco_max_bps)) },
+      /* ⛔ A coluna do prêmio BRUTO saiu (pedido do usuário, 04/09/2026): a
+         régua da tela é uma só, e uma 2ª coluna de prêmio ao lado dela só
+         reabre a dúvida de qual é qual. */
+      { t: 'prêmio em risco<br><i>bps do NAV</i>', num: 1, tip: 'premio_risco',
+        f: (r) => (r.premio_risco_bps == null ? 'não determinado'
+                                              : bps(r.premio_risco_bps)) },
       /* ⭐ RESULTADO EM PONTOS (pedido do usuario): a digital e cotada em
          PROBABILIDADE (0 a 100) e a estrutura de IDI e montada para payoff
          maximo 100 — entao "capturou 28 pontos" se le direto, e "R$ 129,7 mil"
@@ -2398,7 +2468,8 @@
         cls: (r) => sgn(r.result_pts).trim() },
       { t: 'resultado', num: 1, f: (r) => K(r.bps_nav_liq, r.result_liq_brl),
         cls: (r) => sgn(r.result_liq_brl).trim() },
-    ], O.slice().sort((a, b) => (b.premio_bps || 0) - (a.premio_bps || 0)));
+    ], O.slice().sort((a, b) => (b.premio_risco_bps || 0)
+                                 - (a.premio_risco_bps || 0)));
   }
 
   /* ⭐ ERA A ABA "SIZING" — hoje o 3o bloco de "Tamanho & risco" (31/08/2026).
@@ -2551,7 +2622,8 @@
        e a legenda do card promete as duas reguas no mesmo eixo. */
     const _simb = (r) => (r.book === 'opcao' ? 'diamond' : 'circle');
     const _rot = (r) => rotLongo(r) + ' · ' + r.abertura
-                 + (r.book === 'opcao' ? ' · prêmio ' + nf(r.premio_bps, 1) + ' bps'
+                 + (r.book === 'opcao' ? ' · prêmio em risco '
+                    + nf(r.premio_risco_bps, 1) + ' bps'
                                        : ' · #PL ' + nf(r.pl_pico, 2));
     const _serie = (ok, nome, cor) => ({
       x: sz.filter((r) => !!r.ganhou === ok).map((r) => r.tam_norm),
@@ -3062,8 +3134,9 @@
         f: (r) => (MOV().fx
                    ? par(r.pct_nav_medio, r.pct_nav_mediano, (v) => nf(v, 1) + '%')
                    : (r.book === 'opcao'
-                      ? (r.premio_bps_mediano == null ? '—'
-                         : nf(r.premio_bps_mediano, 1) + ' bps')
+                      /* ⭐ o COLOCADO, como no resto da tela */
+                      ? (r.premio_risco_bps_mediano == null ? '—'
+                         : nf(r.premio_risco_bps_mediano, 1) + ' bps')
                       : par(r.pl_medio, r.pl_mediano))) },
       { t: 'giro', num: 1, f: (r) => nf(r.giro_contratos, 0), tip: 'giro_ct' },
     ].concat(colsResultado())
@@ -3140,14 +3213,30 @@
        + 'módulo é cheio com o líquido em zero', '<strong>real do dia</strong>'],
       /* ⭐ as reguas que nasceram em 01/09/2026 — sem elas a aba descrevia um
          motor de tres meses atras */
-      ['<strong><code>premio_bps</code></strong>',
-       'prêmio de pico ÷ NAV do dia do pico',
-       '<strong>o tamanho da OPÇÃO</strong> — o paralelo do #PL para quem não tem DV01. '
-       + '⛔ nunca na mesma coluna que ele', 'real do dia'],
-      ['<code>risco_max_bps</code>',
-       'pior caso: o prêmio se comprado, <code>teto − prêmio</code> se vendido',
-       'o prêmio não descreve o risco de quem VENDE — medido, a razão vai de 0,14 a 4,56. '
-       + '“não determinado” quando o payoff é ilimitado de um lado', 'real do dia'],
+      /* ☠️ **AS DUAS LINHAS ESTAVAM INVERTIDAS DE PAPEL** (04/09/2026): a de
+         cima dizia que o `premio_bps` (BRUTO) era "o tamanho da OPÇÃO", e a de
+         baixo tratava o `teto − prêmio` como um qualificador de pior caso. É o
+         contrário: o que mede TAMANHO é o que se coloca em risco. */
+      ['<strong><code>premio_risco_bps</code></strong>',
+       'o <strong>prêmio EM RISCO</strong> ÷ NAV do dia do pico — o prêmio pago '
+       + 'se comprado, <code>teto − prêmio</code> se vendido',
+       '<strong>o tamanho da OPÇÃO</strong> — o paralelo do #PL para quem não tem '
+       + 'DV01, e é ele que entra no sizing. ⛔ nunca na mesma coluna que o #PL. '
+       + '⚠️ vender a 70 num instrumento que vai a 100 põe <b>30</b> na mesa: '
+       + 'medido, a razão em-risco/prêmio vai de 0,14 a 4,56, e das 51 vendas da '
+       + 'base <b>26 saíram abaixo de 50% do teto e 25 acima</b> — o prêmio bruto '
+       + 'erra para os dois lados. Sem teto derivável cai no próprio prêmio',
+       'real do dia'],
+      /* ⚠️ A linha do `premio_bps` (bruto) FICA nesta tabela, mas dizendo que
+         ele NÃO é régua e não aparece em tela. A aba documenta o contrato de
+         dados, e um campo que existe no payload sem estar aqui é pior: quem lê o
+         JSON o encontra e supõe que é o número da tela. */
+      ['<code>premio_bps</code>',
+       'o prêmio BRUTO de pico ÷ NAV — pago nas compras, <b>recebido</b> nas vendas',
+       '⛔ <strong>não é régua e não aparece na tela</strong> (04/09/2026): é '
+       + '<strong>caixa</strong>, não risco — numa venda ele ENTRA. Fica no '
+       + 'payload porque é uma grandeza real; quem mede tamanho é a linha acima',
+       'real do dia'],
       ['<strong><code>result_pts</code></strong>',
        'pontos de preço capturados, com o sinal da direção',
        'a régua NATURAL da opção: cada ponto é um ponto percentual — de probabilidade na '

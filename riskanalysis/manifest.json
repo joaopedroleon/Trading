@@ -1,5 +1,5 @@
 {
- "gerado_em": "04/09/2026 11:29",
+ "gerado_em": "04/09/2026 14:48",
  "grupos": {
   "juros-br": "Juros Brasil",
   "brl": "BRL",
@@ -22,9 +22,9 @@
    "grupo": "juros-br",
    "grupo_rotulo": "Juros Brasil",
    "ano": 2026,
-   "d": "2026-09-02",
-   "sha": "a6a532653ebb3fd49a4d801590a33c64e023ec75ce885eca5a41fe127f6df547",
-   "pub": "03/09/2026 08:43",
+   "d": "2026-09-03",
+   "sha": "b40df5b8607b0ed097dedc5be9357d05691d084e69f81e15ad5b88987f4c33ba",
+   "pub": "04/09/2026 14:48",
    "arq": "dados/gbranquinho-juros-br-2026.js"
   }
  }

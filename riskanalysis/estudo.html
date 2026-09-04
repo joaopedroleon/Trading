@@ -792,19 +792,30 @@
       <div class="kpis" id="kpisPremio"></div>
       <div class="grid2" id="cardsPremio">
         <div class="card">
-          <h3 class="chart-title">Pr&ecirc;mio vivo ao longo do ano</h3>
-          <div class="csub">pr&ecirc;mio marcado das op&ccedil;&otilde;es em carteira, em bps do NAV do dia</div>
+          <h3 class="chart-title">Pr&ecirc;mio em risco ao longo do ano</h3>
+          <!-- ⚠️ Era "pr&ecirc;mio vivo" e a s&eacute;rie era o pr&ecirc;mio BRUTO marcado. Numa
+               posi&ccedil;&atilde;o VENDIDA aquilo n&atilde;o &eacute; o que est&aacute; em risco (§5.-85), e o
+               nome &uacute;nico da tela passou a ser "pr&ecirc;mio em risco". -->
+          <div class="csub">o que as op&ccedil;&otilde;es em carteira podem <b>perder</b>, em bps do
+            NAV do dia &mdash; comprada: o pr&ecirc;mio pago; vendida: o teto menos o pr&ecirc;mio</div>
           <div class="plot" id="figPremio"></div>
           <div class="cfonte">JRS.VW_SOPHIS_TICKETS &times; marca&ccedil;&atilde;o do dia (SOPHIS.HISTORIQUE;
             estrutura de IDI sintetizada das pernas)</div>
         </div>
         <div class="card">
-          <h3 class="chart-title">Pr&ecirc;mio colocado &times; resultado, por trade</h3>
+          <h3 class="chart-title">Pr&ecirc;mio em risco &times; resultado, por trade</h3>
           <!-- ⚠️ Era `pr&ecirc;mio × risco m&aacute;ximo`, que e a identidade x = x: para quem
                COMPRA o risco maximo E o premio, e quase todo trade e comprado. -->
-          <div class="csub">p&otilde;e mais pr&ecirc;mio na mesa e ganha mais? &middot; <b>losango</b> =
-            vendido &middot; a <b>diagonal pontilhada</b> &eacute; o piso de quem compra (perder o
-            pr&ecirc;mio inteiro)</div>
+          <!-- ⚠️ O subtitulo dizia "o piso de quem COMPRA (perder o premio
+               inteiro)" — verdade enquanto o eixo x era o premio BRUTO. Com o
+               premio COLOCADO no eixo (04/09/2026) a diagonal e o piso dos DOIS
+               lados, e o texto tinha de acompanhar: rotulo que descreve o eixo
+               antigo e pior que rotulo nenhum. -->
+          <div class="csub">p&otilde;e mais pr&ecirc;mio em risco e ganha mais? &middot;
+            <b>losango</b> = vendido &middot; o eixo x &eacute; o que ele pode
+            <b>perder</b> (comprado: o pr&ecirc;mio pago; vendido: o teto menos o
+            pr&ecirc;mio) &middot; a <b>diagonal pontilhada</b> &eacute; o piso &mdash; perder
+            tudo o que colocou &mdash; e nenhum trade pode ficar abaixo dela</div>
           <div class="plot" id="figPremioRisco"></div>
           <div class="cfonte">teto = 100 pontos na digital de COPOM; dist&acirc;ncia entre
             strikes na estrutura de IDI</div>
@@ -1007,7 +1018,7 @@ PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
 <script src="lib/plotly.min.js?v=6d21266c"></script>
 <script src="lib/plotly-jgp.js?v=ed7aae05"></script>
 <script src="boot.js?v=c820ac19"></script>
-<script src="app.js?v=26d515de"></script>
+<script src="app.js?v=49dfc2c9"></script>
 <script>
 /* =====================================================================
    chrome.js — casca editorial JGP (variante dashboard / abas)
