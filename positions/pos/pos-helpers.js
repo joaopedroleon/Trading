@@ -13,6 +13,58 @@ function swapEffQty(r) {
   return { opening, traded, final };
 }
 
+/* ── Valores EFETIVOS de UMA linha da tabela de Posição — fonte única ─────────────────
+   Extraído VERBATIM do `renderTable` (pos-render.js) quando o resumo "net por grupo de
+   ativo" (a tira abaixo da tabela) passou a precisar do MESMO número que a coluna #PL
+   imprime. Duas implementações divergiriam na 1ª marreta, e em SILÊNCIO — e o resumo mora
+   colado na tabela que ele soma, então a divergência seria lida como erro de conta.
+   Devolve quantidades + #PL/DV01 já com as marretas de QUANTIDADE aplicadas
+   (abertura/operada/DV01 do SWAP).
+   ⚠️ A marreta DIRETA de #PL (`plOverrides`) NÃO entra aqui: ela é do #PL e não escala o
+   DV01 (a célula de DV01 continua mostrando o derivado da quantidade). Quem quer o número
+   COMO A COLUNA MOSTRA chama `effectiveRowPl`. */
+function effectiveRowValues(r) {
+  const isSwap     = r.swap_detail != null;
+  const k          = rowKey(r);
+  const nav        = r.nav ?? (posDataByTab[activeTraderTab] ?? positionsData)?.traders?.[r.trader];
+  const hasOpenOvr = swapOpeningOverrides.has(k);
+  const hasTrdOvr  = swapTradedOverrides.has(k);
+  const hasDv01Ovr = isSwap && swapDv01Overrides.has(k);
+  const qtyOvr     = hasOpenOvr || hasTrdOvr || hasDv01Ovr;
+  const opening    = hasOpenOvr ? swapOpeningOverrides.get(k) : r.opening_qty;
+  const traded     = hasTrdOvr  ? swapTradedOverrides.get(k)  : r.traded_qty;
+  const final      = hasDv01Ovr ? swapDv01Overrides.get(k)                  // marreta de DV01 domina
+                   : (qtyOvr || isSwap) ? (opening ?? 0) + (traded ?? 0)
+                   : r.final_qty;
+
+  let dv01, pl, plType;
+  if (isSwap) {                        // SWAP: a "qtd" É o DV01 — marreta direta OU abertura+operada
+    dv01   = final || null;
+    pl     = (dv01 != null && nav) ? dv01 * 10_000 / nav : r.pl;
+    plType = dv01 != null ? 'nominal' : r.pl_type;
+  } else if (qtyOvr && r.final_qty) {  // linha normal marretada: escala linear pela nova qtd
+    const ratio = final / r.final_qty;
+    dv01   = r.usd_dv01 != null ? r.usd_dv01 * ratio : null;
+    pl     = r.pl       != null ? r.pl       * ratio : r.pl;
+    plType = r.pl_type;
+  } else {                             // sem override (ou final_qty=0): valores do backend
+    dv01   = r.usd_dv01;
+    pl     = r.pl;
+    plType = r.pl_type;
+  }
+  return { isSwap, qtyOvr, opening, traded, final, dv01, pl, plType };
+}
+
+/* #PL EFETIVO — exatamente o número que a coluna #PL imprime: a marreta direta
+   (`plOverrides`, sempre fração do NAV) domina; senão o derivado das marretas de
+   quantidade. `eff` é opcional, só p/ não recalcular quem já tem. */
+function effectiveRowPl(r, eff) {
+  const ov = plOverrides.get(rowKey(r));
+  if (ov !== undefined) return { pl: ov, type: 'pct' };
+  const e = eff || effectiveRowValues(r);
+  return { pl: e.pl, type: e.plType };
+}
+
 /* ── Fonte única de preço/delta efetivos (por instrumento) ───────────────── */
 // Identidade do instrumento p/ marreta — independe de trader/aba (mesmo ticker → mesma marreta).
 // Referências "família" (FX forwards p/ value date; SWAPs por tenor) repetem a MESMA ref em

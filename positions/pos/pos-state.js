@@ -9,6 +9,16 @@ const TRADER_TABS = [
   { id: 'other',       trader: 'PAlves',     filters: ['no_hedge_cambial'],               useGroups: false },
 ];
 
+/* Abas que ganham a tira "NET por grupo de ativo" abaixo da tabela de Posição (pedido da
+   mesa, set/2026). A aba `other` fica de FORA: ali o trader troca no dropdown e a tira seria
+   um net de carteira que ninguém pediu — e é justamente a aba com o book mais heterogêneo
+   (ação, ETF, opção de ação, perna de swap de ações), onde os rótulos por ativo objeto teriam
+   de ser calibrados um a um antes de valer a pena.
+   ⚠️ O corte é feito NO CONTAINER (`renderSectionsForTab`, pos-tabs.js): sem `#netsum_*` no
+   DOM, o `renderTable` não pinta nada. Não filtrar dentro do `renderNetSummary` é de propósito
+   — a aba de fora não paga o cálculo, e a regra fica num lugar só. */
+const POS_NET_TABS = new Set(['emota', 'ecotrim', 'portfoliorf']);
+
 /* ── State ───────────────────────────────────────────────────────────────── */
 let positionsData = null;       // active tab data (kept for pnl.js compat)
 let detailVisible = false;

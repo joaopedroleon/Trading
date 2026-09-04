@@ -23,6 +23,12 @@ function rerenderTables(onlyKey) {
       if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows, data.portfoliorf_offshore_fund);
     }
   }
+  /* Re-alinha as tabelas auxiliares (alocação MM×Prev, break por fundo), que casam pelo TOPO
+     da 1ª linha da tabela principal. Passou a ser necessário quando a tira "NET por grupo"
+     subiu para CIMA da tabela (set/2026): ligar/desligar um filtro pode fazer um grupo sumir
+     e a tira encolher de 2 linhas para 1 — o que desloca a tabela e desalinharia a auxiliar.
+     Enquanto a tira ficava abaixo da tabela, nada acima dela mudava de altura. */
+  requestAnimationFrame(() => _alignAuxTables(activeTraderTab));
 }
 
 /* ── Análise de Opções (na aba dedicada; blocos por objeto + vencimento) ── */
@@ -458,13 +464,289 @@ function optEditApply(input, td) {
   _markTabsDirtyAndRerender();
 }
 
-/* ── Render single tbody ─────────────────────────────────────────────────── */
+/* ── Resumo "net por grupo de ativo" (tira abaixo da tabela de Posição) ──────────────
+   Uma linha só, por SEÇÃO (group+trader), somando exatamente as linhas que a tabela acima
+   está mostrando — filtros de aba, blacklist, linhas ocultas no ✕, agregação WDO+UC,
+   linhas simuladas e marretas inclusive. O número somado é o `effectiveRowPl` (a MESMA
+   função da célula #PL), não uma reconta a partir da row crua.
+
+   ☠️ **`pct` e `nominal` NÃO se somam** — são unidades diferentes: `pct` é fração do NAV
+   (exposição) e `nominal` é `DV01 × 10.000 / NAV`, ou seja quanto do PL move a cada 100bp.
+   Por isso a soma é POR TIPO dentro do balde e o rótulo da unidade (`NAV` / `PL`) vai junto
+   do número. Balde que tenha os dois mostra os dois, separados por `·` — nunca um número
+   só. É por isso também que os baldes nascem homogêneos por natureza do risco.
+
+   ⚠️ **O `net USDBRL` daqui pode NÃO bater com o TOTAL DÓLAR da aba Análise de Opções.**
+   Lá o delta é o EFETIVO (`effectiveDelta`, aceita marreta na própria tabela); aqui é o
+   delta do backend, porque é o que a coluna #PL usa. A tira está colada à tabela de
+   Posição e tem de fechar com ELA — divergir da coluna que está 2px acima é pior.
+
+   ── Duas ordens, de propósito ────────────────────────────────────────────────────────
+   `match` é avaliado NA ORDEM DO ARRAY (1º que casa vence); a EXIBIÇÃO segue `sort`. As
+   duas deixaram de ser a mesma lista quando a mesa pediu a tira na ordem em que a TABELA
+   ordena — área Z→A no `sortRows`, ou seja **Rates → Equities → Currencies → Commodities**:
+   o WDO de `Hedge_Cambial` mora na área Rates/Equities e PRECISA ser testado como moeda
+   antes de cair em "Juros off", mas tem de APARECER no bloco de moedas, depois dos juros.
+
+   ── Um balde pode virar VÁRIOS chips (`sub`) ─────────────────────────────────────────
+   Moedas quebram por PAR (USDBRL, EURBRL, USDCLP…) e commodities pelo ATIVO (Gold…), a
+   pedido da mesa: "moedas" num número só não diz nada quando há USDBRL, EURUSD e USDZAR na
+   mesma linha, e "commodities" idem. Juros/bolsa continuam num chip cada.
+   ⚠️ `_dollarKind` (pos-dolar.js) é a fonte única do recorte de dólar e já recolhe futuro
+   cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF — o "tudo concentrado" pedido.
+   ☠️ EURBRL NÃO entra no USDBRL: é opção contra o BRL mas não é dólar (ver o gotcha do
+   `Digital_EURBRL` no `_dollarKind` e em classify.py). Vira o SEU chip, logo depois.
+
+   ── Balde vazio não aparece ──────────────────────────────────────────────────────────
+   Chip cujo net arredonda para zero em todas as unidades é OMITIDO (pedido da mesa: "só
+   não mostra nada"). Exceção: se o balde tem linha sem #PL calculável, o chip fica — com
+   o ⚠ — porque aí o zero não é "flat", é "não sei". */
+
+/* Roots de commodity → nome. É LOOKUP, não heurística: o mesmo ativo tem de cair no mesmo
+   chip vindo de futuro (`GCZ6`), de outro vencimento (`GCV6`) ou de opção (`GCWU26P1`), e
+   nenhum dos três traz o nome no `instrument_name`. Casa por PREFIXO do ticker, do mais
+   longo para o mais curto. Root desconhecido cai no próprio prefixo alfabético — rótulo
+   feio, mas verdadeiro; o tooltip do chip lista os instrumentos somados, então dá para ver
+   o que é e acrescentar aqui. Grãos usam root de 1 letra + espaço ("C 1 Comdty"). */
+const _NET_COMMOD_ROOTS = [
+  ['XGC', 'Gold'],  ['GC', 'Gold'],   ['SI', 'Silver'],      ['HG', 'Copper'],
+  ['PL', 'Platinum'], ['PA', 'Palladium'],
+  ['CL', 'WTI'],    ['CO', 'Brent'],  ['QS', 'Gasoil'],      ['HO', 'Heating Oil'],
+  ['XB', 'Gasolina'], ['NG', 'Nat Gas'],
+  ['KC', 'Coffee'], ['SB', 'Sugar'],  ['CT', 'Cotton'],      ['CC', 'Cocoa'],
+  ['LC', 'Live Cattle'], ['LH', 'Lean Hogs'],
+  ['SM', 'Soybean Meal'], ['BO', 'Soybean Oil'],
+  ['LA', 'Aluminium'], ['LN', 'Nickel'], ['LX', 'Zinc'], ['LL', 'Lead'], ['LP', 'Copper (LME)'],
+  ['S ', 'Soybeans'], ['C ', 'Corn'],  ['W ', 'Wheat'],
+].sort((a, b) => b[0].length - a[0].length);
+
+function _netCommodity(r) {
+  const ref = (r.instrument_reference || r.instrument_name || '').toUpperCase();
+  for (const [p, lbl] of _NET_COMMOD_ROOTS) if (ref.startsWith(p)) return lbl;
+  const root = (ref.match(/^[A-Z]+/) || [''])[0];
+  return root ? root.slice(0, 3) : 'Commodities';
+}
+
+/* Roots de FUTURO DE ÍNDICE → o índice. Só p/ ticker de yellow key `Index`/`Comdty`; ação e
+   ETF à vista NUNCA chegam aqui (saem antes, pelo próprio ticker), então não há risco de um
+   `ESS US Equity` virar "SPX". Como o de commodity, é lookup para estender — root fora dele
+   mostra o próprio prefixo do ticker, e o `title` do chip lista o que foi somado. */
+const _NET_EQ_ROOTS = [
+  ['ES', 'SPX'], ['NQ', 'NDX'], ['RTY', 'RTY'], ['DM', 'DJIA'], ['YM', 'DJIA'],
+  ['VG', 'SX5E'], ['GX', 'DAX'], ['Z ', 'UKX'], ['NK', 'NKY'], ['TP', 'TPX'], ['HI', 'HSI'],
+].sort((a, b) => b[0].length - a[0].length);
+
+/* Índice Bovespa na B3, pelo TICKER: `BZ…` é o futuro CHEIO ("BOVESPA INDEX FUT") e `XB…` o
+   MINI ("MINI BOVESPA FUT"), e as opções sobre esses futuros herdam o mesmo root. Casa root +
+   código de mês + ano (`BZV6`, `XBV6C 145000`) e SÓ na yellow key `Index`: `BZ US Equity` é a
+   Sezzle (Nasdaq) e `XB Comdty` é a gasolina RBOB — nenhuma das duas pode virar IBOV. Existe
+   porque o NOME sozinho não basta como única âncora: o mini chega como "MINI BOVESPA FUT", ou
+   seja o token nem começa a string. */
+const _NET_IBOV_REF_RE = /^(?:BZ|XB)[FGHJKMNQUVXZ]\d/;
+const _netIsIbovRef = ref => {
+  const up = (ref || '').trim().toUpperCase();
+  return /\sINDEX$/.test(up) && _NET_IBOV_REF_RE.test(up);
+};
+
+/* Ativo objeto da linha de BOLSA (IBOV · EWZ · SPX · AMZN…). A ORDEM dos testes é o que evita
+   rótulo inventado:
+     1. IBOV pelo NOME **ou pelo TICKER** — futuro cheio, mini e opção de IBOV chegam por
+        caminhos diferentes e os três têm de cair no mesmo chip. ☠️ O teste era
+        `startsWith('BOVESPA')` e o mini se chama "MINI BOVESPA FUT  Oct26": não começava com
+        nenhum dos dois tokens, caía até o passo 4, e como `XB` não está no `_NET_EQ_ROOTS`
+        virava o chip **"XBV"** — o próprio prefixo do ticker (era o sintoma reportado pela
+        mesa). Hoje `includes('BOVESPA')` + o root do ticker;
+     2. `option_undl` — o backend JÁ resolve o objeto da opção (router.py: `SPX US`, `U-U`,
+        `IBOV`, `EWZ US`); reimplementar aqui seria a 2ª cópia da regra. Fica o 1º token,
+        porque o sufixo de praça (`US`, `CN`, `BZ`) não muda o ativo;
+     3. ticker de AÇÃO/ETF à vista (`… Equity`) → o próprio root: `AGI US Equity` → AGI;
+     4. ticker de ÍNDICE/FUTURO (`… Index`/`… Comdty`) → o lookup acima;
+     5. o resto (perna de swap de ações, `032830KSSWAP_10_082726`) → a FAMÍLIA antes do 1º
+        `_`, para as 4 pernas do mesmo swap somarem num chip só em vez de virarem 4. */
+function _netEquityUndl(r) {
+  const nm = (r.instrument_name || '').toUpperCase();
+  if (nm.startsWith('IBOV') || nm.includes('BOVESPA')) return 'IBOV';
+  if (_netIsIbovRef(r.instrument_reference)) return 'IBOV';
+  const undl = (r.option_undl || '').trim();
+  if (undl) return undl.split(/\s+/)[0].toUpperCase();
+  const ref = (r.instrument_reference || '').trim();
+  if (/\sEQUITY$/i.test(ref)) return ref.split(/\s+/)[0].toUpperCase();
+  if (/\s(INDEX|COMDTY)$/i.test(ref)) {
+    const up = ref.toUpperCase();
+    for (const [p, lbl] of _NET_EQ_ROOTS) if (up.startsWith(p)) return lbl;
+    const root = (up.match(/^[A-Z]+/) || [''])[0];
+    if (root) return root.slice(0, 3);
+  }
+  const base = (ref || nm).split('_')[0].split(/\s+/)[0];
+  return base ? base.toUpperCase() : 'Bolsa';
+}
+
+/* Código de PRAÇA de um ticker BBG (`LIGT3 BZ Equity` → BZ; `EWZ US` → US). É o 2º token, e
+   ler a posição importa: um `\bBZ\b` solto casaria o `BZ US Equity` (Sezzle, Nasdaq) e o
+   mandaria para a bolsa brasileira. */
+const _netExch = t => ((t || '').trim().split(/\s+/)[1] || '').toUpperCase();
+
+/* Renda variável BRASILEIRA — risco Brasil, INDEPENDENTE da praça em que o papel é listado.
+   ⚠️ NÃO é o `isBrEquity` (pos-helpers.js) e os dois não se fundem: aquele responde "esta
+   linha é short de bolsa BR ONSHORE?" para o check de alocação MM×Prev, e por isso exige
+   instrumento em BRL e **exclui EWZ/ADR de propósito**. Aqui a pergunta é de EXPOSIÇÃO, e a
+   mesa foi explícita: EWZ é RV BR. Mudar um pelo outro quebraria o target do Prev. */
+const _NET_EQ_BR_UNDL = new Set(['IBOV', 'EWZ', 'EWZS', 'BOVA11']);
+function _netEquityIsBr(r) {
+  if (_NET_EQ_BR_UNDL.has(_netEquityUndl(r))) return true;
+  if (_netExch(r.instrument_reference) === 'BZ' || _netExch(r.option_undl) === 'BZ') return true;
+  return /bra[sz]il/i.test(r.subarea || '');
+}
+
+/* Chip da linha de bolsa. **RV BR quebra por ativo objeto** (EWZ, IBOV, o papel local);
+   **RV Off NÃO quebra** — vai tudo num chip só, a pedido da mesa: offshore ali é uma cesta de
+   nomes soltos (SPX, XOM, NVDA, AMZN, urânio…) que viraria uma tira de 10 chips sem que
+   nenhum deles fosse a leitura que se quer de relance. */
+function _netEquity(r) {
+  return _netEquityIsBr(r) ? _netEquityUndl(r) : 'RV Off';
+}
+// RV Off por último dentro do bloco de bolsa; os nomes de RV BR vêm antes, em ordem alfabética.
+const _netEquityRank = lbl => (lbl === 'RV Off' ? 1 : 0);
+
+/* Par de moedas da linha, para o chip. Dólar-BRL (em qualquer forma) → 'USDBRL'; opção de
+   FX → o `option_undl`, que o backend já resolve com o parser de par (classify.py,
+   `fx_pair_from_name`) — não reimplementar aqui; à vista/forward → o nome sem a barra. */
+function _netFxPair(r) {
+  if (_dollarKind(r) != null) return 'USDBRL';
+  const undl = (r.option_undl || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (undl.length === 6) return undl;
+  const nm = (r.instrument_name || '').toUpperCase().split(/\s+/)[0];
+  const m = nm.match(/^([A-Z]{3})\/([A-Z]{3})$/);
+  if (m) return m[1] + m[2];
+  return 'Moedas';
+}
+
+// USDBRL primeiro, EURBRL logo depois, o resto em ordem alfabética (pedido da mesa).
+const _NET_PAIR_HEAD = ['USDBRL', 'EURBRL'];
+function _netPairRank(p) {
+  const i = _NET_PAIR_HEAD.indexOf(p);
+  return i >= 0 ? i : _NET_PAIR_HEAD.length;
+}
+
+const POS_NET_GROUPS = [
+  { id: 'fx', sort: 30, sub: _netFxPair, subRank: _netPairRank,
+    tip: 'Moedas, por par. USDBRL concentra futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF (recorte do _dollarKind); EURBRL é BRL mas não é dólar, e tem chip próprio.',
+    match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || r.area === 'Currencies' },
+
+  { id: 'di', sort: 10, sub: () => 'DI',
+    tip: 'Sub-área Fixed Rates Brazil — o mesmo recorte que o regime de DV01 usa para o DI (positions/pricing/dv01.py).',
+    match: r => r.subarea === 'Fixed Rates Brazil' },
+  { id: 'jurosoff', sort: 11, sub: () => 'Juros off',
+    tip: 'Resto da área Rates: juros de fora do Brasil (Fixed Rates G7 e demais sub-áreas).',
+    match: r => r.area === 'Rates' && r.subarea !== 'Cash' },
+  { id: 'caixa', sort: 12, sub: () => 'Caixa',
+    tip: 'Sub-área Cash (LFT e afins). DV01 ~0 — fica fora do Juros off para não somar zero lá.',
+    match: r => r.subarea === 'Cash' },
+
+  { id: 'bolsa', sort: 20, sub: _netEquity, subRank: _netEquityRank,
+    tip: 'Bolsa (área Equities). RV BR quebra por ativo objeto (EWZ, IBOV, papel local); RV Off vai tudo num chip só.',
+    match: r => r.area === 'Equities' },
+
+  { id: 'commod', sort: 40, sub: _netCommodity,
+    tip: 'Commodities, por ativo (root do ticker BBG).',
+    match: r => r.area === 'Commodities' },
+
+  { id: 'outros', sort: 90, sub: () => 'Outros',
+    tip: 'Não casou com nenhum balde acima — vale olhar a área/sub-área da linha.',
+    match: () => true },
+];
+
+function posNetGroup(r) {
+  return POS_NET_GROUPS.find(g => g.match(r)) || POS_NET_GROUPS[POS_NET_GROUPS.length - 1];
+}
+
+/* Acumula por (balde, sub), SEPARANDO por unidade (ver o ☠️ acima). Linha sem #PL
+   calculável (sem NAV, sem preço, sem delta) não vira zero: vai para `missing` e o chip
+   ganha um ⚠ que nomeia os instrumentos — um net que ignora linha calado é um net errado.
+   `insts` guarda o que entrou em cada chip: é o tooltip que dispensa adivinhar de onde
+   saiu o número (e o que confere o rótulo de uma commodity fora do lookup). */
+function netByAssetGroup(rows) {
+  const acc = new Map();
+  for (const r of rows) {
+    const g   = posNetGroup(r);
+    const sub = g.sub(r);
+    const k   = `${g.id}||${sub}`;
+    if (!acc.has(k)) acc.set(k, { g, sub, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
+    const a = acc.get(k);
+    a.insts.push(r.instrument_name ?? '—');
+    const { pl, type } = effectiveRowPl(r);
+    if (pl == null || !isFinite(pl)) { a.missing.push(r.instrument_name ?? '—'); continue; }
+    if      (type === 'pct')     { a.pct += pl; a.nPct++; }
+    else if (type === 'nominal') { a.nom += pl; a.nNom++; }
+    else                         { a.missing.push(r.instrument_name ?? '—'); }
+  }
+  return [...acc.values()].sort((x, y) =>
+       (x.g.sort - y.g.sort)
+    || ((x.g.subRank ? x.g.subRank(x.sub) : 0) - (y.g.subRank ? y.g.subRank(y.sub) : 0))
+    || String(x.sub).localeCompare(String(y.sub)));
+}
+
+const _netEsc = t => String(t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+/* Igual ao `fmtPL`, com UMA diferença: zero imprime `0.00`, não `—`. No corpo da tabela o
+   traço quer dizer "não há número"; num NET diria a mesma coisa e estaria errado. Só chega
+   aqui o chip que sobreviveu ao corte de `_netFlat` — ou seja, um zero exibido é sempre um
+   zero AO LADO de outro número, ou um balde com linha sem preço (o ⚠). */
+function _netNum(v, type) {
+  const abs = Math.abs(v);
+  const s = type === 'pct'
+    ? (abs * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'
+    : abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (s.startsWith('0.00')) return `<span style="color:var(--text-muted)">${s}</span>`;
+  if (v > 0) return `<span style="color:var(--green)">+${s}</span>`;
+  return `<span style="color:var(--red)">(${s})</span>`;
+}
+
+// Chip "achatado": tudo que ele soma arredonda para 0.00 e não há linha sem #PL. Some da
+// tira. O par de FED FUND (Oct26 −x / Nov26 +x) e o ouro parado são os casos do dia a dia.
+const _netFlat = a =>
+  !a.missing.length &&
+  (!a.nPct || Math.abs(a.pct) < 0.00005) &&
+  (!a.nNom || Math.abs(a.nom) < 0.005);
+
+/* ⚠️ **O rótulo da unidade saiu da pílula** (set/2026, pedido da mesa) — hoje o chip mostra só
+   `DI (1.80)` e `EWZ (2.90%)`, sem o `PL`/`NAV` ao lado. Quem separa as duas réguas passou a ser
+   o **`%`**: `pct` sempre imprime com `%` (exposição, fração do NAV) e `nominal` nunca (DV01 ×
+   10.000 / NAV, o quanto do PL move a cada 100bp) — ver o ☠️ das unidades no topo do bloco. A
+   unidade continua ESCRITA no `title` do chip, que é onde ela pode ser lida por extenso sem
+   competir com o número. Não é o mesmo que somar as duas: a soma segue separada por unidade, e
+   um balde que tenha as duas mostra as duas, agora só com o `·` entre elas. */
+function renderNetSummary(rows) {
+  const chips = netByAssetGroup(rows).filter(a => !_netFlat(a)).map(a => {
+    const parts = [], unid = [];
+    if (a.nPct) { parts.push(_netNum(a.pct, 'pct'));     unid.push('% do NAV (exposição)'); }
+    if (a.nNom) { parts.push(_netNum(a.nom, 'nominal')); unid.push('PL por 100bp (DV01 × 10.000 / NAV)'); }
+    if (!parts.length) parts.push('<span style="color:var(--text-muted)">n/d</span>');
+    const warn = a.missing.length
+      ? ` <span class="net-warn" title="${_netEsc(
+          `${a.missing.length} linha(s) sem #PL calculável — FORA desta soma:\n· ` +
+          a.missing.join('\n· '))}">⚠</span>`
+      : '';
+    const tip = `${a.g.tip}\n\nUnidade: ${unid.join(' · ')}`
+              + `\n\nSoma ${a.insts.length} linha(s):\n· ${a.insts.join('\n· ')}`;
+    return `<span class="net-chip" title="${_netEsc(tip)}"><span class="net-chip-lbl">${a.sub}</span> ${parts.join(' <span class="net-sep">·</span> ')}${warn}</span>`;
+  });
+  if (!chips.length) return '';
+  return `<span class="net-lbl" title="Soma da coluna #PL das linhas EXIBIDAS acima, por grupo de ativo, na mesma ordem de área da tabela (juros → bolsa → moedas → commodities). Com % = exposição sobre o NAV; sem % = PL por 100bp. Balde zerado não aparece.">Net</span>${chips.join('')}`;
+}
+
+/* ── Render single tbody ─────────────────────────────────────────────────────── */
 function renderTable(rows, tbodyId) {
   const body = document.getElementById(tbodyId);
   if (!body) return;
+  // Tira "net por grupo de ativo" desta seção. O id é o PAR do tbody (`body_…` → `netsum_…`,
+  // mesmo sufixo — ver sectionBodyId/sectionNetId em pos-format.js). Ausente de propósito no
+  // card de MM Prev e nos snapshots antigos → o `if (netEl)` deixa tudo como estava.
+  const netEl = document.getElementById(tbodyId.replace(/^body_/, 'netsum_'));
 
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="${body.closest('table')?.querySelector('thead tr')?.childElementCount ?? 12}" class="no-data">Nenhuma posição encontrada.</td></tr>`;
+    if (netEl) netEl.innerHTML = '';   // senão a tira do render anterior fica mentindo
     return;
   }
 
@@ -499,35 +781,17 @@ function renderTable(rows, tbodyId) {
     // valores efetivos: SWAPs consolidados E linhas normais podem ter override manual
     // de abertura/operada (mapas swap*Overrides, keyed por rowKey). Quantidade marretada
     // → recalcula Qtd Final e escala #PL/DV01 (lineares na qtd). Aba PnL não é afetada.
-    const isSwap     = r.swap_detail != null;
+    // ⚠️ A conta mora em `effectiveRowValues` (pos-helpers.js) — e não mais aqui — porque o
+    // resumo "net por grupo de ativo" logo abaixo desta tabela soma o MESMO #PL que a coluna
+    // imprime (ver `renderNetSummary`). Cópia aqui e lá divergiria na 1ª marreta, calada.
     const rKeyFull   = rowKey(r);
-    const nav        = r.nav ?? (posDataByTab[activeTraderTab] ?? positionsData)?.traders?.[r.trader];
-    const hasOpenOvr = swapOpeningOverrides.has(rKeyFull);
-    const hasTrdOvr  = swapTradedOverrides.has(rKeyFull);
-    const hasDv01Ovr = isSwap && swapDv01Overrides.has(rKeyFull);
-    const qtyOvr     = hasOpenOvr || hasTrdOvr || hasDv01Ovr;
-    const effOpening = hasOpenOvr ? swapOpeningOverrides.get(rKeyFull) : r.opening_qty;
-    const effTraded  = hasTrdOvr  ? swapTradedOverrides.get(rKeyFull)  : r.traded_qty;
-    const effFinal   = hasDv01Ovr ? swapDv01Overrides.get(rKeyFull)                  // marreta de DV01 domina
-                     : (qtyOvr || isSwap) ? (effOpening ?? 0) + (effTraded ?? 0)
-                     : r.final_qty;
-
-    let effDv01, effPl, effPlType;
-    if (isSwap) {                        // SWAP: a "qtd" É o DV01 — marreta direta (swapDv01Overrides) OU
-      effDv01   = effFinal || null;      //   abertura+operada; effFinal já reflete a marreta de DV01
-      effPl     = (effDv01 != null && nav) ? effDv01 * 10_000 / nav : r.pl;
-      effPlType = effDv01 != null ? 'nominal' : r.pl_type;
-    } else if (qtyOvr && r.final_qty) {  // linha normal marretada: escala linear pela nova qtd
-      const ratio = effFinal / r.final_qty;
-      effDv01   = r.usd_dv01 != null ? r.usd_dv01 * ratio : null;
-      effPl     = r.pl       != null ? r.pl       * ratio : r.pl;
-      effPlType = r.pl_type;
-    } else {                             // sem override (ou final_qty=0): valores do backend
-      effDv01   = r.usd_dv01;
-      effPl     = r.pl;
-      effPlType = r.pl_type;
-    }
-    const isOvr      = qtyOvr;           // ★ no nome para qualquer override de quantidade
+    const eff        = effectiveRowValues(r);
+    const isSwap     = eff.isSwap;
+    const effOpening = eff.opening;
+    const effTraded  = eff.traded;
+    const effFinal   = eff.final;
+    const effDv01    = eff.dv01;
+    const isOvr      = eff.qtyOvr;       // ★ no nome para qualquer override de quantidade
 
     const safeKey    = rKeyFull.replace(/"/g, '&quot;');
     const safeIk     = instKey(r).replace(/"/g, '&quot;');   // chave por instrumento (preço compartilhado)
@@ -585,9 +849,9 @@ function renderTable(rows, tbodyId) {
              onclick="event.stopPropagation();swapStartEdit(this,'dv01',this.dataset.swapkey,parseFloat(this.dataset.dv01))">${fmtDv01(effDv01)}</td>`
         : `<td class="num"${tipAttr}>${fmtDv01(effDv01)}</td>`}
       ${(() => {
-        const ov       = plOverrides.get(rKeyFull);
-        const dispPl   = ov !== undefined ? ov    : effPl;
-        const dispType = ov !== undefined ? 'pct' : effPlType;
+        // `effectiveRowPl` (pos-helpers.js) é a fonte única do número desta célula — o mesmo
+        // que o resumo "net por grupo de ativo" soma abaixo da tabela.
+        const { pl: dispPl, type: dispType } = effectiveRowPl(r, eff);
         const delta    = r.option_delta;
         const plTip    = delta != null
           ? `Delta: ${delta} (clique para editar #PL)`
@@ -596,6 +860,8 @@ function renderTable(rows, tbodyId) {
       })()}
     </tr>`;
   }).join('');
+
+  if (netEl) netEl.innerHTML = renderNetSummary(visibleRows);
 }
 
 /* ── Copiar a referência do instrumento (clique na LINHA) ──────────────────── */

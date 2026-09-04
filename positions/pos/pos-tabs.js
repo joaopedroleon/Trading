@@ -326,6 +326,13 @@ function renderSectionsForTab(tabId, allRows) {
       return;
     }
 
+    /* Card da seção: título → tira "NET por grupo de ativo" (`renderNetSummary`, pos-render.js)
+       → tabela. A tira vive DENTRO do `.section-copy-target`, então **entra no print** do
+       "⎘ Copiar" junto com a tabela (pedido da mesa, set/2026 — antes ficava abaixo e fora).
+       ☠️ É por isso que ela leva `.net-summary { width: 0; min-width: 100% }` (positions-v2.css):
+       o alvo do print é `width: fit-content`, e uma tira mais larga que a tabela DITARIA o
+       `fit-content` do pai — a imagem sairia com faixa branca morta à direita e a tira nunca
+       quebraria de linha. É a mesma trava do `.jgp-tbl-note`, pelo mesmo motivo. */
     mainCards.push(`
     <div class="card">
       <div style="display:flex;gap:40px;align-items:flex-start">
@@ -335,6 +342,7 @@ function renderSectionsForTab(tabId, allRows) {
             ${navStr ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr}</span>` : ''}
             <button class="btn btn-secondary" data-html2canvas-ignore="true" style="margin-left:auto;padding:2px 10px;font-size:12px" onclick="copyCardImage(this)">⎘ Copiar</button>
           </div>
+          ${POS_NET_TABS.has(tabId) ? `<div class="net-summary" id="${sectionNetId(s)}"></div>` : ''}
           <table class="data-table" style="white-space:nowrap;width:auto">
             ${thead()}
             <tbody id="${sectionBodyId(s)}"></tbody>

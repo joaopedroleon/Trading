@@ -365,3 +365,54 @@ html.theme-v2 .pos-busy-skel .bar.head { height: 15px; background: var(--border)
   html.theme-v2 .sec-refresh.spinning::after,
   html.theme-v2 .pos-busy-skel .bar { animation: none; }
 }
+
+/* ── Tira "NET por grupo de ativo" (ACIMA da tabela de Posição) ──
+   Uma faixa de pílulas entre o título da seção e a tabela, com o líquido de cada grupo de
+   ativo. Conteúdo montado em `renderNetSummary` (pos-render.js); aqui só o traje.
+
+   ☠️ **`width: 0; min-width: 100%` não é firula — é o que faz as DUAS coisas funcionarem.**
+   A tira mora dentro do `.section-copy-target`, que é `width: fit-content` (o alvo do
+   "⎘ Copiar" tem de medir a tabela, senão a imagem sai com faixa branca morta). Sem o
+   `width:0`, uma tira mais larga que a tabela passa a DITAR esse `fit-content`: a imagem
+   engorda **e** a tira nunca quebra de linha, porque o pai cresceu para caber nela. Com ele,
+   quem manda na largura é a tabela e o `min-width:100%` devolve essa largura resolvida à
+   tira — que então quebra exatamente na borda da tabela. Mesma trava do `.jgp-tbl-note`.
+
+   ⚠️ **`white-space: nowrap` no `.net-chip` é o requisito de "não quebrar o grupo no meio"**:
+   o `flex-wrap` só pode quebrar ENTRE pílulas, nunca dentro de uma — rótulo, número e unidade
+   descem juntos para a 2ª linha. Por isso o rótulo e o valor moram na MESMA pílula, e não em
+   spans irmãos soltos na faixa.
+
+   A tira ENTRA no print (não leva `data-html2canvas-ignore`) — é conteúdo, não controle. */
+html.theme-v2 .net-summary {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 5px 6px;
+  width: 0; min-width: 100%;
+  margin: 0 0 10px;
+}
+html.theme-v2 .net-summary .net-lbl {
+  font-size: 9px; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-muted);
+  padding-right: 4px; cursor: help; align-self: center;
+}
+/* Pílula = um grupo. Fundo creme sobre o branco do card, para a faixa se ler como um bloco
+   só sem precisar de moldura em volta. */
+html.theme-v2 .net-summary .net-chip {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  white-space: nowrap;
+  padding: 3px 10px 4px; border-radius: 12px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-size: 12px; font-variant-numeric: tabular-nums; cursor: help;
+}
+html.theme-v2 .net-summary .net-chip-lbl {
+  font-size: 10px; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+/* Separador entre as DUAS unidades de um mesmo balde (raro — ver o ☠️ do renderNetSummary).
+   O rótulo `NAV`/`PL` saiu da pílula a pedido da mesa: quem separa as réguas é o `%` do
+   número, e a unidade por extenso mora no `title` do chip. */
+html.theme-v2 .net-summary .net-sep { color: var(--text-muted); font-size: 10px; }
+html.theme-v2 .net-summary .net-warn { color: var(--yellow); cursor: help; }
+/* Sem chip nenhum (seção vazia / todos os grupos achatados) a faixa some inteira — inclusive
+   a margem, que senão deixaria um vão entre o título e a tabela sem nada dentro. */
+html.theme-v2 .net-summary:empty { display: none; }

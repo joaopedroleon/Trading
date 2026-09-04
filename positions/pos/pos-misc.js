@@ -79,6 +79,46 @@ async function _deliverImageBlob(blob, btn, origText) {
   } catch { reset(); }
 }
 
+/* ── Margem em volta do print ─────────────────────────────────────────────────
+   O html2canvas desenha exatamente a CAIXA do elemento, e nenhum alvo de "⎘ Copiar" desta
+   tela tem padding: o conteúdo nascia colado no x=0 da imagem (medido — a 1ª coluna de pixels
+   do canvas já era texto), e o pedaço fracionário do 1º glifo ainda se perdia, porque o
+   `getBoundingClientRect().left` é fracionário (77,797) e o canvas começa em pixel inteiro.
+   Era o "MM — EMOTA" saindo "M — EMOTA".
+
+   ⚠️ A margem é dada DEPOIS, redesenhando o canvas sobre um maior — e **não** com `padding` no
+   elemento — por dois motivos: (1) os alvos são `box-sizing: border-box` + `width: fit-content`,
+   onde mexer no padding mexe na largura RESOLVIDA (e a tira `.net-summary` casa a largura da
+   tabela por `min-width:100%`, então ela iria junto); (2) o `copyCardImage` captura o elemento
+   AO VIVO na tela — qualquer mutação de layout pisca para o usuário durante a captura.
+
+   Vale para os 4 caminhos de cópia da tela (Posição, os 2 resumos de PnL e a Análise de
+   Opções): todos passam por `copyElementAsImage`. */
+const _IMG_PAD_CSS = 18;
+const _IMG_SCALE   = 2;
+
+// Cor de fundo do print: a do próprio alvo; se for transparente, sobe até achar uma opaca
+// (o card), e só então cai no token. Sem isso a margem sairia preta no tema escuro.
+function _imgBgColor(el) {
+  for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+    const c = getComputedStyle(n).backgroundColor;
+    if (c && c !== 'transparent' && !/^rgba\(0,\s*0,\s*0,\s*0\)$/.test(c)) return c;
+  }
+  const tok = getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim();
+  return tok || '#ffffff';
+}
+
+function _padCanvas(src, bg, padDev) {
+  const out = document.createElement('canvas');
+  out.width  = src.width  + padDev * 2;
+  out.height = src.height + padDev * 2;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(src, padDev, padDev);
+  return out;
+}
+
 async function copyElementAsImage(el, btn) {
   if (!el) return;
   const origText = btn?.textContent;
@@ -86,12 +126,13 @@ async function copyElementAsImage(el, btn) {
   try {
     await _ensureHtml2Canvas();
     const canvas = await html2canvas(el, {
-      scale: 2,
+      scale: _IMG_SCALE,
       useCORS: true,
       logging: false,
       backgroundColor: null,
     });
-    canvas.toBlob(blob => { _deliverImageBlob(blob, btn, origText); }, 'image/png');
+    const out = _padCanvas(canvas, _imgBgColor(el), _IMG_PAD_CSS * _IMG_SCALE);
+    out.toBlob(blob => { _deliverImageBlob(blob, btn, origText); }, 'image/png');
   } catch {
     if (btn) { btn.textContent = origText; btn.disabled = false; }
   }

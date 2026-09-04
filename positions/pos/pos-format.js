@@ -167,6 +167,13 @@ function sectionBodyId(s) {
   return `body_${s.group}_${s.trader}`.replace(/[^a-zA-Z0-9]/g, '_');
 }
 
+/* Id da tira "net por grupo de ativo" da seção — o PAR do `sectionBodyId`: mesmo sufixo,
+   outro prefixo. O `renderTable` (pos-render.js) chega nela por
+   `tbodyId.replace(/^body_/, 'netsum_')`, então as duas funções TÊM de sanitizar igual. */
+function sectionNetId(s) {
+  return `netsum_${s.group}_${s.trader}`.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
 function thead() {
   const d = detailVisible ? '' : 'style="display:none"';
   return `<thead><tr>
