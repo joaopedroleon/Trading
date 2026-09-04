@@ -3,9 +3,12 @@
 
    Faz três coisas que o `ta-sel.js` não faz:
      1. pede a SENHA e decifra (o repo é público — ver `publicar/pipeline.py`);
-     2. monta os seletores a partir do `manifest.json` (só o que está no ar);
-     3. acrescenta o seletor **"base até"** — o VINTAGE, a foto daquele ano num
-        dia passado.
+     2. monta os seletores a partir do `manifest.json` (só o que está no ar).
+
+   ⛔ **NÃO EXISTE MAIS O SELETOR "BASE ATÉ"** (03/09/2026, decisão do usuário:
+   *"podemos descartar essa funcionalidade de rodar para um dia anterior"*).
+   Cada análise publicada tem UM arquivo de dados — a foto corrente daquele
+   par. A data de base continua no cabeçalho da tela, como informação.
 
    ⛔ **A PÁGINA PUBLICADA NÃO SE ATUALIZA SOZINHA** (decisão do usuário,
    02/09/2026: *"eu não quero que a página do github atualize sozinha"*). Ela é
@@ -49,15 +52,12 @@
     });
     return o;
   }
-  function br(iso) {
-    if (!iso) return '—';
-    var p = String(iso).split('-');
-    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso;
-  }
   /* ⚠️ `?t=` no fetch do manifest: o GitHub Pages serve com cache, e um manifest
      velho ofereceria uma análise que já saiu (ou esconderia uma que entrou). O
-     payload cifrado é imutável por NOME (tem a data dentro), então esse pode
-     cachear à vontade. */
+     payload cifrado é servido com `?v=<sha>` (ver `arqComVersao`), então a URL
+     muda quando o conteúdo muda e o cache continua valendo enquanto não muda.
+     ☠️ Sem isso o cache do Pages (10 min) serviria a cifra ANTERIOR: o nome do
+     arquivo é `<slug>.js` e não muda mais quando o dado muda. */
   function pegaManifest() {
     return fetch('manifest.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
@@ -123,15 +123,19 @@
     if (!chaves.length) return null;
     /* padrão: o par com a base MAIS RECENTE — "a última data disponível" */
     var melhor = chaves.slice().sort(function (x, y) {
-      var dx = (A[x].vintages[0] || {}).d || '', dy = (A[y].vintages[0] || {}).d || '';
+      var dx = A[x].d || '', dy = A[y].d || '';
       if (dx !== dy) return dx < dy ? 1 : -1;
       return Number(A[y].ano) - Number(A[x].ano);
     })[0];
     var alvo = (q.a && A[q.a]) ? q.a : melhor;
-    var a = A[alvo];
-    /* `d` = vintage pedido na URL; sem ele, o mais novo (o "refresh automático") */
-    var v = a.vintages.filter(function (x) { return x.d === q.d; })[0] || a.vintages[0];
-    return { slug: alvo, a: a, v: v, ultimo: v === a.vintages[0] };
+    return { slug: alvo, a: A[alvo] };
+  }
+  /* ⭐ `?v=<sha8>` no arquivo de dados: a URL muda quando (e só quando) o
+     conteúdo muda. Sem carimbo o Pages serviria a cifra anterior por até 10 min
+     — e o nome do arquivo não muda mais entre rodadas (§5.-72 e §5.-64). */
+  function arqComVersao(a) {
+    var v = a.sha ? String(a.sha).slice(0, 8) : '';
+    return a.arq + (v ? '?v=' + v : '');
   }
   /* ⚠️ Trocar de seleção RECARREGA a página, como no `ta-sel.js` local — e pelo
      mesmo motivo: `app.js`/`trades.js` montam filtros, opções de <select> de
@@ -139,9 +143,8 @@
      quente teria mais estado escondido para errar do que valor. ⭐ Aqui o
      recarregar é de graça: a senha está no `sessionStorage`, então não pede de
      novo, e o payload cifrado vem do cache do browser. */
-  function vai(slug, d) {
-    var u = 'a=' + encodeURIComponent(slug) + (d ? '&d=' + encodeURIComponent(d) : '');
-    location.search = '?' + u;
+  function vai(slug) {
+    location.search = '?a=' + encodeURIComponent(slug);
   }
 
   /* ── os seletores, no lugar dos <select> vazios do HTML ────────────────── */
@@ -189,17 +192,7 @@
       '<label>Trader <select id="pubTrader">' + opts(traders, a.trader) + '</select></label>'
       + '<label>Ativo <select id="pubGrupo">'
       + opts(grupos, a.grupo, function (g) { return GR[g] || g; }) + '</select></label>'
-      + '<label>Ano <select id="pubAno">' + opts(anos, a.ano) + '</select></label>'
-      /* ⭐ O SELETOR DE VINTAGE — "uma data antiga específica que eu queira ver".
-         ☠️ Não é o mesmo que o ano: `2024` é um ano fechado; `2026 base até
-         15/08` é o ano corrente como ele era naquele dia. O rótulo diz "base
-         até" justamente para não ser lido como ano. */
-      + '<label class="pubvint">Base até <select id="pubVint">'
-      + a.vintages.map(function (v, i) {
-          return '<option value="' + v.d + '"' + (v.d === SEL.v.d ? ' selected' : '') + '>'
-            + br(v.d) + (i === 0 ? ' (última)' : '') + '</option>';
-        }).join('')
-      + '</select></label>';
+      + '<label>Ano <select id="pubAno">' + opts(anos, a.ano) + '</select></label>';
 
     /* ⚠️ SELETOR COM UMA OPÇÃO SÓ FICA DESABILITADO E DIZ POR QUÊ (02/09/2026).
        Publicar passou a subir só o ano selecionado na tela local, então o normal
@@ -207,7 +200,7 @@
        leem-se como tela quebrada. É a lição do §5.-57 ao contrário: lá o
        problema era esconder o seletor (o recurso parecia inexistir); aqui é
        deixá-lo clicável sem ter para onde ir. */
-    ['pubTrader', 'pubGrupo', 'pubAno', 'pubVint'].forEach(function (id) {
+    ['pubTrader', 'pubGrupo', 'pubAno'].forEach(function (id) {
       var e = document.getElementById(id);
       if (!e || e.options.length > 1) return;
       e.disabled = true;
@@ -219,9 +212,6 @@
       var e = document.getElementById(id);
       if (e) e.onchange = function () { fn(e.value); };
     }
-    /* ⚠️ ao trocar trader/ativo/ano o VINTAGE não é carregado junto: aquele par
-       pode não ter a mesma data de base. Vai sem `d`, e o boot escolhe o mais
-       novo daquele par — que é o padrão certo. */
     /* ⚠️ o fallback existe porque o par pode não ter o MESMO ano: trocar para um
        trader que não operou em 2026 tem de cair em algum ano dele, não em nada.
        (Havia aqui um `acha(v, a.grupo, null)` no meio que nunca casava — o
@@ -231,22 +221,17 @@
       var alvo = acha(v, a.grupo, a.ano)
         || { slug: Object.keys(analises()).filter(function (k) {
                return analises()[k].trader === v; })[0] };
-      if (alvo && alvo.slug) vai(alvo.slug, null);
+      if (alvo && alvo.slug) vai(alvo.slug);
     });
     troca('pubGrupo', function (v) {
       var alvo = acha(a.trader, v, a.ano)
         || { slug: Object.keys(analises()).filter(function (k) {
                var x = analises()[k]; return x.trader === a.trader && x.grupo === v; })[0] };
-      if (alvo && alvo.slug) vai(alvo.slug, null);
+      if (alvo && alvo.slug) vai(alvo.slug);
     });
     troca('pubAno', function (v) {
       var alvo = acha(a.trader, a.grupo, v);
-      if (alvo) vai(alvo.slug, null);
-    });
-    troca('pubVint', function (v) {
-      /* ⚠️ escolher a MAIS NOVA volta a URL para sem `d`, senão a página ficaria
-         presa naquela data e o refresh automático nunca a tiraria de lá. */
-      vai(SEL.slug, v === a.vintages[0].d ? null : v);
+      if (alvo) vai(alvo.slug);
     });
   }
 
@@ -259,24 +244,12 @@
      ⭐ Aqui os href da casca recebem o `?a=`/`&d=` da seleção corrente. */
   function propagaSelecao() {
     if (!SEL) return;
-    var q = 'a=' + encodeURIComponent(SEL.slug)
-          + (SEL.ultimo ? '' : '&d=' + encodeURIComponent(SEL.v.d));
+    var q = 'a=' + encodeURIComponent(SEL.slug);
     document.querySelectorAll('a.xlink[href]').forEach(function (a) {
       var h = a.getAttribute('href');
       if (!h || h.indexOf('http') === 0 || h.indexOf('?') >= 0) return;
       a.setAttribute('href', h + '?' + q);
     });
-  }
-
-  /* ── o aviso de "olhando o passado" ────────────────────────────────────── */
-  function avisaVintage() {
-    if (!SEL || SEL.ultimo) return;
-    var d = document.createElement('div');
-    d.className = 'ta-vint-aviso';
-    d.innerHTML = '⏱ Você está vendo a foto de <b>' + br(SEL.v.d) + '</b>, não a mais '
-      + 'recente. <a href="?a=' + encodeURIComponent(SEL.slug) + '">ver a última</a>';
-    var m = document.querySelector('.main-content');
-    if (m) m.insertBefore(d, m.firstChild);
   }
 
   /* ── carga do payload ──────────────────────────────────────────────────── */
@@ -309,9 +282,9 @@
     montaSeletores();
     propagaSelecao();
 
-    try { await injeta(SEL.v.arq); }
+    try { await injeta(arqComVersao(SEL.a)); }
     catch (e) {
-      return erroFatal('Os dados desta análise não carregaram (<code>' + SEL.v.arq
+      return erroFatal('Os dados desta análise não carregaram (<code>' + SEL.a.arq
         + '</code>).<br><br>Se o link é antigo, tente <a href="./">a última versão</a>.');
     }
     var blob = window.__TA_BLOB__;
@@ -328,7 +301,6 @@
         try { sessionStorage.setItem(CHAVE_PW, SENHA); } catch (e) { /* modo restrito */ }
         window.TA = dados;
         if (window.__taData) window.__taData(dados);
-        avisaVintage();
         return;
       } catch (e) {
         try { sessionStorage.removeItem(CHAVE_PW); } catch (e2) { /* modo restrito */ }

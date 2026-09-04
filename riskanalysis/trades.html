@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PAlves 2026 — trade a trade · JGP Macro</title>
+<title>Trade Analytics — trade a trade · JGP Macro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -197,6 +197,100 @@
   h2{scroll-margin-top:calc(var(--jgp-nav-h,46px) + 52px)}
 
 
+  /* ══════════════ TABELAS: de PLANILHA para tabela financeira ══════════════
+     Pedido do usuario (04/09/2026): *"da uma melhorada no layout das tabelas de
+     todas as paginas que tem o modelo da secao 2 e 3 do retrato do ano, que tem
+     esse cabecalho verde. Esta muito antigo, quero algo mais bonito"*.
+
+     ⛔ **O QUE FAZIA PARECER PLANILHA, e nao era o verde:** o skeleton da skill
+     poe `border:1px solid` em TODA celula (grade fechada, 4 lados) e uma banda
+     de verde SATURADO com texto branco em negrito no cabecalho. Grade fechada
+     obriga o olho a atravessar uma linha vertical entre cada par de numeros —
+     e numa tabela de 8 colunas em `tabular-nums` as colunas ja se alinham
+     sozinhas. A linha vertical nao separa nada; ela so pesa.
+
+     ⭐ **A regra vem da propria casa**, e ela ja existia — para os GRAFICOS: o
+     `plotly-jgp.js` do `shared-web/` define o look JGP como *"grid so
+     horizontal"* (CLAUDE.md da raiz, §1). As tabelas estavam fora desse padrao,
+     nao dentro de outro. Aqui: regua horizontal fina, zero linha vertical, e o
+     verde vira um FIO sob o cabecalho em vez de um bloco.
+
+     ⚠️ **Sobrescreve o skeleton de proposito, e nao se mexe nele:** aquele
+     arquivo (`.claude/skills/jgp-html-report/skeleton-dashboard.html`) serve
+     outros relatorios do monorepo, e mudar o visual de tabela de todos eles nao
+     foi pedido. O lugar do que e deste estudo e aqui.
+     ⚠️ Tudo em `var(--…)`, entao o tema escuro acompanha sem um 2o bloco. */
+
+  /* o container ganha moldura e cantos — a tabela perde a dela */
+  .wrap{border:1px solid var(--rule-soft);border-radius:10px;
+    background:var(--surface);margin-bottom:12px}
+  table{border-collapse:separate;border-spacing:0}
+  /* ⚠️ `border:0` ANTES do `border-bottom`: o skeleton poe os 4 lados, e sem
+     zerar primeiro sobram as verticais. */
+  table th,table td{border:0;border-bottom:1px solid var(--rule-soft);
+    padding:7px 12px}
+
+  /* ── o cabecalho: FAIXA TINGIDA, nao banda saturada ──
+     ⚠️ **A 1a versao ficou clarinha** (usuario, 04/09/2026: *"ficou muito
+     clarinho o cabecalho, pode dar mais cor para ele"*). Fundo transparente +
+     texto em `--ink-tertiary` tirou o peso da banda velha, mas tirou tambem a
+     ANCORA: a faixa deixou de se ler como cabecalho e virou uma linha de texto
+     cinza acima dos numeros.
+     ⭐ O meio certo e **tingir, nao pintar**: fundo em verde translucido, texto
+     no verde ESCURO da casa (`--jgp-green-deep`) e o fio embaixo mais grosso.
+     A faixa volta a ser um bloco identificavel, e ainda assim o dado continua
+     sendo o que tem mais contraste na tabela — que e o oposto do que a banda
+     saturada de branco-sobre-verde fazia. */
+  thead th{background:var(--th-bg);color:var(--th-fg);
+    font-weight:700;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    border-bottom:2px solid var(--jgp-green);border-color:var(--jgp-green);
+    vertical-align:bottom;padding-top:10px;padding-bottom:7px}
+  /* ⚠️ Tinta PROPRIA, nao o `--jgp-green-tint`: aquele e o hover de linha, e os
+     dois no mesmo tom fariam a linha sob o mouse parecer um 2o cabecalho.
+     ⚠️ E ela e mais forte no tema ESCURO: sobre `#1a1a19` um verde a 8% nao
+     aparece. Aferido nos dois temas. */
+  /* ⚠️ E o TEXTO tambem troca de tom por tema: no claro o verde ESCURO e o que
+     tem contraste sobre a tinta; no escuro ele fica apagado e o certo e o verde
+     vivo da casa. Aferido nos dois. */
+  :root{--th-bg:rgba(0,176,80,.13);--th-fg:var(--jgp-green-deep)}
+  @media (prefers-color-scheme:dark){
+    :root{--th-bg:rgba(0,184,86,.20);--th-fg:var(--jgp-green)}}
+  /* ⚠️ o subtitulo do `<th>` (`média / mediana`) NAO vai em caixa alta: ele e
+     uma frase, e versalete em frase le-se como grito. */
+  thead th i{text-transform:none;letter-spacing:0;font-size:10px;
+    color:var(--th-fg);opacity:.72;font-weight:400;margin-top:2px}
+  /* ⚠️ o pontilhado do tooltip era BRANCO (fazia sentido sobre o verde cheio);
+     num cabecalho claro ele desaparecia. */
+  th .ordth:hover{color:var(--jgp-green)}
+  th .ordseta{color:var(--jgp-green);font-size:9px}
+  /* ⭐ **CABECALHO NUMERICO ALINHA COM O NUMERO.** O skeleton centraliza todo
+     `<th>`, e um rotulo centrado sobre uma coluna de `tabular-nums` alinhada a
+     direita fica fora de eixo — foi o que mais denunciou o "antigo" depois de a
+     grade sair. Aferido: 11 das 13 colunas destas tabelas sao numericas. */
+  thead th.num{text-align:right}
+  thead th:not(.num){text-align:left}
+
+  /* ── o corpo: zebra leve e HOVER de linha ── */
+  tbody td{color:var(--ink);line-height:1.45}
+  tbody tr:nth-child(even) td{background:rgba(128,128,128,.035)}
+  /* ⭐ o hover e o que substitui a grade: ele diz "esta linha" melhor que 8
+     linhas verticais, e some quando o mouse sai.
+     ⚠️ **NEUTRO, e nao verde**: com o cabecalho tingido de verde, um hover
+     verde faria a linha sob o mouse ler-se como um 2o cabecalho. Verde = a
+     faixa; cinza = "esta e a linha que voce esta olhando". */
+  tbody tr:hover td{background:rgba(128,128,128,.11)}
+  /* ⚠️ a ULTIMA linha nao leva regua: a moldura do `.wrap` ja fecha a tabela, e
+     as duas juntas viram uma borda dupla. */
+  tbody tr:last-child td{border-bottom:0}
+  /* a 1a coluna e o RÓTULO da linha — ela ancora a leitura */
+  tbody td:first-child{font-weight:600;color:var(--ink)}
+  /* o par media/mediana: a irma fica secundaria de verdade (§5.3) */
+  td .mdn,.mdn{color:var(--ink-tertiary);font-weight:400}
+
+  /* ⚠️ As linhas de destaque do skeleton (`headline`/`core`/`section`) NAO sao
+     usadas pelas tabelas deste estudo (o `table()` do `app.js` emite so
+     `num`/`lbl` + a classe de sinal), mas ficam coerentes se alguem usar. */
+  tr.headline td,tr.core td,tr.section td{background:var(--sec);font-weight:700}
   /* ==== extensões do estudo ==== */
   /* ⭐ cabeçalho ORDENÁVEL: o clique inteiro do <th> é o alvo, e a seta só
      ocupa espaço quando a coluna está ativa (`ordseta` vazia não desloca).
@@ -292,7 +386,19 @@
   /* campo com explicacao no hover: o pontilhado e o unico aviso de que ha
      algo a ler. `help` no cursor reforca. Vale em <th> e no rotulo do KPI. */
   .hastip{border-bottom:1px dotted currentColor;cursor:help}
-  th .hastip{border-bottom-color:rgba(255,255,255,.55)}
+  /* ☠️ **ERA `rgba(255,255,255,.55)`** — branco, porque o cabecalho era uma
+     BANDA de verde saturado. Com o cabecalho claro (04/09/2026) aquele branco
+     virou um sublinhado CHEIO e claro: aferido no tema escuro, **9 dos 13**
+     cabecalhos saiam grifados e a faixa virava ruido.
+     ⚠️ E havia DUAS regras para este seletor por um momento (a minha, no bloco
+     de tabelas, e esta) — com a mesma especificidade, ganhava a de baixo. Uma
+     regra so, no lugar onde ela sempre morou: e o §5.-37 em miniatura.
+     ⭐ Na cor da regua ele diz "tem mais aqui" sem competir com o dado; no
+     hover vira verde, que e onde a descoberta importa. */
+  /* ⚠️ Sobre a faixa TINGIDA o pontilhado tem de sair do verde, senao ele
+     desaparece: `--rule-soft` casa com o fundo branco, nao com o tingido. */
+  th .hastip{border-bottom-color:rgba(0,138,63,.45)}
+  th .ordth:hover .hastip,th .hastip:hover{border-bottom-color:var(--jgp-green)}
   /* o interruptor da quebra bruto x custo — mora na TABBAR (não no header) para
      ficar visível em todas as abas: ele muda a página inteira, não uma seção */
   /* ⭐ **A BARRA DE PARÂMETROS** (02/09/2026) — "qual estudo" e o que fazer com
@@ -438,7 +544,7 @@
     background:var(--surface);color:var(--ink);cursor:pointer}
   button.act:hover{border-color:var(--green);color:var(--green)}
 </style>
-<link rel="stylesheet" href="lock.css?v=4bc1b3a7">
+<link rel="stylesheet" href="lock.css?v=2033b059">
 </head>
 <body>
 <!-- barra de progresso de scroll -->
@@ -469,8 +575,6 @@
     <label>Trader <select id="selTrader"></select></label>
     <label>Ativo <select id="selGrupo"></select></label>
     <label>Ano <select id="selAno"></select></label>
-    <!-- ⭐ a mesma foto no tempo da tela anual (ver `_content.html`) -->
-    <label>Base at&eacute; <select id="selBase"></select></label>
   </span>
   <span class="parbar-acoes" id="parAcoes"></span>
 </nav>
@@ -577,7 +681,7 @@
 
 <script src="lib/plotly.min.js?v=6d21266c"></script>
 <script src="lib/plotly-jgp.js?v=ed7aae05"></script>
-<script src="boot.js?v=318240b5"></script>
+<script src="boot.js?v=c820ac19"></script>
 <script src="trades.js?v=5a13845e"></script>
 <script>
 /* =====================================================================

@@ -51,18 +51,3 @@
   .ta-pub-sel { background: #1e1d16; border-color: #34322a; color: #d8d3c6; }
 }
 
-/* ── seletor de vintage e avisos de versão (ver publicar/boot.js) ───────────
-   ⚠️ Só a versão PUBLICADA tem isto: a tela local não cria estes elementos. */
-.selwrap .pubvint select { max-width: 150px; }
-
-/* "você está vendo o passado" — dentro do fluxo, no topo do conteúdo */
-.ta-vint-aviso {
-  margin: 0 0 18px; padding: 9px 13px; border-radius: 7px;
-  background: #fff6e0; border: 1px solid #f0d9a8; color: #5a4a20;
-  font-size: 12.5px; line-height: 1.5;
-}
-.ta-vint-aviso a { color: #128a4a; font-weight: 600; }
-
-@media (prefers-color-scheme: dark) {
-  .ta-vint-aviso { background: #2a2519; border-color: #4a3f22; color: #e8dcbf; }
-}

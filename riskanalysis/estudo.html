@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Trades do gestor — análise anual · JGP Macro</title>
+<title>Trade Analytics — análise anual · JGP Macro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -197,6 +197,100 @@
   h2{scroll-margin-top:calc(var(--jgp-nav-h,46px) + 52px)}
 
 
+  /* ══════════════ TABELAS: de PLANILHA para tabela financeira ══════════════
+     Pedido do usuario (04/09/2026): *"da uma melhorada no layout das tabelas de
+     todas as paginas que tem o modelo da secao 2 e 3 do retrato do ano, que tem
+     esse cabecalho verde. Esta muito antigo, quero algo mais bonito"*.
+
+     ⛔ **O QUE FAZIA PARECER PLANILHA, e nao era o verde:** o skeleton da skill
+     poe `border:1px solid` em TODA celula (grade fechada, 4 lados) e uma banda
+     de verde SATURADO com texto branco em negrito no cabecalho. Grade fechada
+     obriga o olho a atravessar uma linha vertical entre cada par de numeros —
+     e numa tabela de 8 colunas em `tabular-nums` as colunas ja se alinham
+     sozinhas. A linha vertical nao separa nada; ela so pesa.
+
+     ⭐ **A regra vem da propria casa**, e ela ja existia — para os GRAFICOS: o
+     `plotly-jgp.js` do `shared-web/` define o look JGP como *"grid so
+     horizontal"* (CLAUDE.md da raiz, §1). As tabelas estavam fora desse padrao,
+     nao dentro de outro. Aqui: regua horizontal fina, zero linha vertical, e o
+     verde vira um FIO sob o cabecalho em vez de um bloco.
+
+     ⚠️ **Sobrescreve o skeleton de proposito, e nao se mexe nele:** aquele
+     arquivo (`.claude/skills/jgp-html-report/skeleton-dashboard.html`) serve
+     outros relatorios do monorepo, e mudar o visual de tabela de todos eles nao
+     foi pedido. O lugar do que e deste estudo e aqui.
+     ⚠️ Tudo em `var(--…)`, entao o tema escuro acompanha sem um 2o bloco. */
+
+  /* o container ganha moldura e cantos — a tabela perde a dela */
+  .wrap{border:1px solid var(--rule-soft);border-radius:10px;
+    background:var(--surface);margin-bottom:12px}
+  table{border-collapse:separate;border-spacing:0}
+  /* ⚠️ `border:0` ANTES do `border-bottom`: o skeleton poe os 4 lados, e sem
+     zerar primeiro sobram as verticais. */
+  table th,table td{border:0;border-bottom:1px solid var(--rule-soft);
+    padding:7px 12px}
+
+  /* ── o cabecalho: FAIXA TINGIDA, nao banda saturada ──
+     ⚠️ **A 1a versao ficou clarinha** (usuario, 04/09/2026: *"ficou muito
+     clarinho o cabecalho, pode dar mais cor para ele"*). Fundo transparente +
+     texto em `--ink-tertiary` tirou o peso da banda velha, mas tirou tambem a
+     ANCORA: a faixa deixou de se ler como cabecalho e virou uma linha de texto
+     cinza acima dos numeros.
+     ⭐ O meio certo e **tingir, nao pintar**: fundo em verde translucido, texto
+     no verde ESCURO da casa (`--jgp-green-deep`) e o fio embaixo mais grosso.
+     A faixa volta a ser um bloco identificavel, e ainda assim o dado continua
+     sendo o que tem mais contraste na tabela — que e o oposto do que a banda
+     saturada de branco-sobre-verde fazia. */
+  thead th{background:var(--th-bg);color:var(--th-fg);
+    font-weight:700;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    border-bottom:2px solid var(--jgp-green);border-color:var(--jgp-green);
+    vertical-align:bottom;padding-top:10px;padding-bottom:7px}
+  /* ⚠️ Tinta PROPRIA, nao o `--jgp-green-tint`: aquele e o hover de linha, e os
+     dois no mesmo tom fariam a linha sob o mouse parecer um 2o cabecalho.
+     ⚠️ E ela e mais forte no tema ESCURO: sobre `#1a1a19` um verde a 8% nao
+     aparece. Aferido nos dois temas. */
+  /* ⚠️ E o TEXTO tambem troca de tom por tema: no claro o verde ESCURO e o que
+     tem contraste sobre a tinta; no escuro ele fica apagado e o certo e o verde
+     vivo da casa. Aferido nos dois. */
+  :root{--th-bg:rgba(0,176,80,.13);--th-fg:var(--jgp-green-deep)}
+  @media (prefers-color-scheme:dark){
+    :root{--th-bg:rgba(0,184,86,.20);--th-fg:var(--jgp-green)}}
+  /* ⚠️ o subtitulo do `<th>` (`média / mediana`) NAO vai em caixa alta: ele e
+     uma frase, e versalete em frase le-se como grito. */
+  thead th i{text-transform:none;letter-spacing:0;font-size:10px;
+    color:var(--th-fg);opacity:.72;font-weight:400;margin-top:2px}
+  /* ⚠️ o pontilhado do tooltip era BRANCO (fazia sentido sobre o verde cheio);
+     num cabecalho claro ele desaparecia. */
+  th .ordth:hover{color:var(--jgp-green)}
+  th .ordseta{color:var(--jgp-green);font-size:9px}
+  /* ⭐ **CABECALHO NUMERICO ALINHA COM O NUMERO.** O skeleton centraliza todo
+     `<th>`, e um rotulo centrado sobre uma coluna de `tabular-nums` alinhada a
+     direita fica fora de eixo — foi o que mais denunciou o "antigo" depois de a
+     grade sair. Aferido: 11 das 13 colunas destas tabelas sao numericas. */
+  thead th.num{text-align:right}
+  thead th:not(.num){text-align:left}
+
+  /* ── o corpo: zebra leve e HOVER de linha ── */
+  tbody td{color:var(--ink);line-height:1.45}
+  tbody tr:nth-child(even) td{background:rgba(128,128,128,.035)}
+  /* ⭐ o hover e o que substitui a grade: ele diz "esta linha" melhor que 8
+     linhas verticais, e some quando o mouse sai.
+     ⚠️ **NEUTRO, e nao verde**: com o cabecalho tingido de verde, um hover
+     verde faria a linha sob o mouse ler-se como um 2o cabecalho. Verde = a
+     faixa; cinza = "esta e a linha que voce esta olhando". */
+  tbody tr:hover td{background:rgba(128,128,128,.11)}
+  /* ⚠️ a ULTIMA linha nao leva regua: a moldura do `.wrap` ja fecha a tabela, e
+     as duas juntas viram uma borda dupla. */
+  tbody tr:last-child td{border-bottom:0}
+  /* a 1a coluna e o RÓTULO da linha — ela ancora a leitura */
+  tbody td:first-child{font-weight:600;color:var(--ink)}
+  /* o par media/mediana: a irma fica secundaria de verdade (§5.3) */
+  td .mdn,.mdn{color:var(--ink-tertiary);font-weight:400}
+
+  /* ⚠️ As linhas de destaque do skeleton (`headline`/`core`/`section`) NAO sao
+     usadas pelas tabelas deste estudo (o `table()` do `app.js` emite so
+     `num`/`lbl` + a classe de sinal), mas ficam coerentes se alguem usar. */
+  tr.headline td,tr.core td,tr.section td{background:var(--sec);font-weight:700}
   /* ==== extensões do estudo ==== */
   /* ⭐ cabeçalho ORDENÁVEL: o clique inteiro do <th> é o alvo, e a seta só
      ocupa espaço quando a coluna está ativa (`ordseta` vazia não desloca).
@@ -292,7 +386,19 @@
   /* campo com explicacao no hover: o pontilhado e o unico aviso de que ha
      algo a ler. `help` no cursor reforca. Vale em <th> e no rotulo do KPI. */
   .hastip{border-bottom:1px dotted currentColor;cursor:help}
-  th .hastip{border-bottom-color:rgba(255,255,255,.55)}
+  /* ☠️ **ERA `rgba(255,255,255,.55)`** — branco, porque o cabecalho era uma
+     BANDA de verde saturado. Com o cabecalho claro (04/09/2026) aquele branco
+     virou um sublinhado CHEIO e claro: aferido no tema escuro, **9 dos 13**
+     cabecalhos saiam grifados e a faixa virava ruido.
+     ⚠️ E havia DUAS regras para este seletor por um momento (a minha, no bloco
+     de tabelas, e esta) — com a mesma especificidade, ganhava a de baixo. Uma
+     regra so, no lugar onde ela sempre morou: e o §5.-37 em miniatura.
+     ⭐ Na cor da regua ele diz "tem mais aqui" sem competir com o dado; no
+     hover vira verde, que e onde a descoberta importa. */
+  /* ⚠️ Sobre a faixa TINGIDA o pontilhado tem de sair do verde, senao ele
+     desaparece: `--rule-soft` casa com o fundo branco, nao com o tingido. */
+  th .hastip{border-bottom-color:rgba(0,138,63,.45)}
+  th .ordth:hover .hastip,th .hastip:hover{border-bottom-color:var(--jgp-green)}
   /* o interruptor da quebra bruto x custo — mora na TABBAR (não no header) para
      ficar visível em todas as abas: ele muda a página inteira, não uma seção */
   /* ⭐ **A BARRA DE PARÂMETROS** (02/09/2026) — "qual estudo" e o que fazer com
@@ -438,7 +544,7 @@
     background:var(--surface);color:var(--ink);cursor:pointer}
   button.act:hover{border-color:var(--green);color:var(--green)}
 </style>
-<link rel="stylesheet" href="lock.css?v=4bc1b3a7">
+<link rel="stylesheet" href="lock.css?v=2033b059">
 </head>
 <body>
 <!-- barra de progresso de scroll -->
@@ -484,12 +590,6 @@
     <label>Trader <select id="selTrader"></select></label>
     <label>Ativo <select id="selGrupo"></select></label>
     <label>Ano <select id="selAno"></select></label>
-    <!-- ⭐ AS FOTOS NO TEMPO (02/09/2026). ☠️ N&Atilde;O &eacute; o mesmo que o ANO:
-         `2024` &eacute; um ano fechado; `2026 &middot; base at&eacute; 15/08` &eacute; o ano CORRENTE
-         como ele era naquele dia. Nasce ESCONDIDO e o `ta-sel.js` mostra s&oacute; quando
-         o hist&oacute;rico daquele par tem mais de uma foto — um controle que n&atilde;o
-         controla nada sugere hist&oacute;rico vazio, que &eacute; pior que a aus&ecirc;ncia dele. -->
-    <label>Base at&eacute; <select id="selBase"></select></label>
   </span>
   <span class="parbar-acoes" id="parAcoes"></span>
 </nav>
@@ -549,7 +649,7 @@
 
     <!-- ══════════ RETRATO DO ANO ══════════ -->
     <section id="tab-visao" class="tab on">
-      <h2>Retrato do ano <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <h2>Retrato do ano <span class="esc" data-esc="tudo">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
       <div class="kpis" id="kpisGeral"></div>
 
       <div class="grid2">
@@ -565,7 +665,11 @@
                (02/09/2026): sem dizer que `+` &eacute; tomado e `−` aplicado, um m&ecirc;s
                negativo se leria como erro. Mesma leitura do gr&aacute;fico de tamanho
                da posi&ccedil;&atilde;o ao longo do ano. -->
-          <div class="csub">barras = resultado do m&ecirc;s &middot; linha = <b>#PL m&eacute;dio
+          <!-- ⚠️ **O TEXTO SAI DA R&Eacute;GUA, e por isso tem `id`** (03/09/2026): em
+               c&acirc;mbio a linha &eacute; "% do NAV l&iacute;quido (+ comprado, &minus; vendido)". Um
+               subt&iacute;tulo est&aacute;tico com vocabul&aacute;rio de juros na tela de d&oacute;lar &eacute;
+               exatamente o que a varredura sem&acirc;ntica passou a proibir. -->
+          <div class="csub" id="subMes">barras = resultado do m&ecirc;s &middot; linha = <b>#PL m&eacute;dio
             l&iacute;quido</b> (<b>+</b> tomado, <b>&minus;</b> aplicado). O m&oacute;dulo &mdash; quanto
             risco havia, sem a dire&ccedil;&atilde;o &mdash; vai no hover</div>
           <div class="plot" id="figMes"></div>
@@ -576,13 +680,13 @@
       <!-- ☠️ Era "Os dois jogos dentro do mesmo livro" — literario, e o leitor
            tinha de abrir a tabela para descobrir QUAIS jogos. O titulo agora
            nomeia as duas linhas que estao ali. -->
-      <h2>Daytrade &times; posi&ccedil;&atilde;o carregada <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <h2>Daytrade &times; posi&ccedil;&atilde;o carregada <span class="esc" data-esc="tudo">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
       <div class="wrap"><table id="tblHorizonte"></table></div>
 
       <!-- ⚠️ NAO e "por instrumento": a tabela lista `di`, `titulo` e `opcao` —
            CLASSE de ativo. "Instrumento" faz esperar ODF28/ODF31, que e a aba
            Contratos; o rotulo antigo mandava o leitor para a tabela errada. -->
-      <h2>Por classe de ativo <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <h2>Por classe de ativo <span class="esc" data-esc="tudo">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
       <div class="wrap"><table id="tblBook"></table></div>
     </section>
 
@@ -600,22 +704,22 @@
       <div class="kpis" id="kpisRisco"></div>
       <div class="kpis" id="kpisSizing"></div>
 
-      <h2>Quanto ele tinha na m&atilde;o <span class="esc">pap&eacute;is e DI</span></h2>
+      <h2>Quanto ele tinha na m&atilde;o <span class="esc" data-esc="tamanho">pap&eacute;is e DI</span></h2>
 
       <div class="card">
-        <h3 class="chart-title">Tamanho da posi&ccedil;&atilde;o ao longo do ano</h3>
+        <h3 class="chart-title" id="tRisco">Tamanho da posi&ccedil;&atilde;o ao longo do ano</h3>
         <!-- ⛔ SEM eixo duplo desde 01/09/2026 (pedido do usuario: "o 0 do PL e
              do DV01 deve ser alinhado, 0 e 0"). #PL e DV01 sao a MESMA serie
              sobre o NAV: dois eixos so acrescentavam um segundo zero. Hoje a
              REGUA escolhe a unidade e o zero e um so. Ver o bloco no app.js. -->
-        <div class="csub">as duas <b>&aacute;reas</b> s&atilde;o as pontas vivas &mdash;
+        <div class="csub" id="sRisco">as duas <b>&aacute;reas</b> s&atilde;o as pontas vivas &mdash;
           <b>tomado</b> acima do zero, <b>aplicado</b> abaixo &mdash; e a linha preta &eacute; o
           <b>l&iacute;quido</b> (a soma delas). ⭐ Quando as duas existem no mesmo dia ele
           carrega <b>incli&shy;na&ccedil;&atilde;o</b>, e a dist&acirc;ncia da linha at&eacute; a borda &eacute; a ponta
           que est&aacute; sendo compensada. A unidade segue a <b>r&eacute;gua da tela</b>
           (#PL ou R$/bp) &mdash; &eacute; a mesma posi&ccedil;&atilde;o nas duas</div>
         <div class="plot" id="figRisco"></div>
-        <div class="cfonte">posi&ccedil;&atilde;o das boletas &times; DV01 do dia (ajuste da B3 no DI,
+        <div class="cfonte" id="fRisco">posi&ccedil;&atilde;o das boletas &times; DV01 do dia (ajuste da B3 no DI,
           duration da NTN-B na <code>ODS.RISK_GOVBONDS</code>)</div>
       </div>
 
@@ -631,7 +735,7 @@
 
       <div class="card">
         <h3 class="chart-title">Tamanho da aposta &times; retorno da aposta</h3>
-        <div class="csub">cada ciclo contra a m&eacute;dia da r&eacute;gua DELE &mdash;
+        <div class="csub" id="sSizing">cada ciclo contra a m&eacute;dia da r&eacute;gua DELE &mdash;
           <b>1,00&times;</b> &eacute; o tamanho t&iacute;pico do tipo do instrumento
           (#PL no DI e no papel, pr&ecirc;mio em bps do NAV na op&ccedil;&atilde;o, que sai como
           losango). ⚠️ o eixo do resultado &eacute; <b>normalizado pelo tamanho</b>: contra o
@@ -656,27 +760,27 @@
       </div>
       <div class="wrap"><table id="tblQuartis"></table></div>
       <!-- ③  COMO ELE DISTRIBUI — o habito de tamanho e onde ele o poe -->
-      <h2>Como ele distribui o risco <span class="esc">pap&eacute;is e DI</span></h2>
+      <h2>Como ele distribui o risco <span class="esc" data-esc="tamanho">pap&eacute;is e DI</span></h2>
       <div class="grid2">
         <div class="card">
-          <h3 class="chart-title">Distribui&ccedil;&atilde;o do tamanho &mdash; t&iacute;tulos e DI</h3>
-          <div class="csub">#PL nos pregões com posi&ccedil;&atilde;o &mdash; onde ele costuma operar</div>
+          <h3 class="chart-title" id="tPlDist">Distribui&ccedil;&atilde;o do tamanho &mdash; t&iacute;tulos e DI</h3>
+          <div class="csub" id="sPlDist">#PL nos pregões com posi&ccedil;&atilde;o &mdash; onde ele costuma operar</div>
           <div class="plot" id="figPlDist"></div>
           <div class="cfonte">JRS.VW_SOPHIS_TICKETS + UP2DATA</div>
         </div>
         <div class="card">
-          <h3 class="chart-title">Onde na curva ele opera &mdash; t&iacute;tulos e DI</h3>
-          <div class="csub">giro em R$/bp por v&eacute;rtice. ⚠️ o papel entra com prefixo
+          <h3 class="chart-title" id="tCurva">Onde na curva ele opera &mdash; t&iacute;tulos e DI</h3>
+          <div class="csub" id="sCurva">giro em R$/bp por v&eacute;rtice. ⚠️ o papel entra com prefixo
             <b>B</b> e cor pr&oacute;pria: NTN-B &eacute; taxa <b>real</b> e DI &eacute; <b>nominal</b> &mdash;
             s&atilde;o curvas diferentes no mesmo eixo. ⛔ <b>sem op&ccedil;&atilde;o</b>: ela n&atilde;o ocupa
             v&eacute;rtice de curva e n&atilde;o tem DV01 &mdash; a r&eacute;gua dela &eacute; o pr&ecirc;mio, no bloco
             <i>O tamanho das op&ccedil;&otilde;es</i></div>
           <div class="plot" id="figCurva"></div>
-          <div class="cfonte">JRS.VW_SOPHIS_TICKETS &times; DV01 do contrato (taxa de entrada, <code>du</code> congelado)</div>
+          <div class="cfonte" id="fCurva">JRS.VW_SOPHIS_TICKETS &times; DV01 do contrato (taxa de entrada, <code>du</code> congelado)</div>
         </div>
       </div>
 
-      <h3 class="chart-title">Tomado &times; aplicado</h3>
+      <h3 class="chart-title" id="tDirecao">Tomado &times; aplicado</h3>
       <div class="wrap"><table id="tblDirecao"></table></div>
 
       <!-- ④  O TAMANHO DAS OP&Ccedil;&Otilde;ES — r&eacute;gua pr&oacute;pria, e por isso bloco pr&oacute;prio.
@@ -684,7 +788,7 @@
            R$/bp sobre o NAV. Somar as duas ou p&ocirc;-las na mesma coluna &eacute; a
            confus&atilde;o que a §5.-27 corrigiu. Aparece s&oacute; quando h&aacute; op&ccedil;&atilde;o — o
            `blocoPremio()` do app.js esconde o bloco inteiro quando n&atilde;o h&aacute;. -->
-      <h2 id="secOpcoes">O tamanho das op&ccedil;&otilde;es &mdash; pr&ecirc;mio <span class="esc">s&oacute; op&ccedil;&otilde;es</span></h2>
+      <h2 id="secOpcoes">O tamanho das op&ccedil;&otilde;es &mdash; pr&ecirc;mio <span class="esc" data-esc="opcoes">s&oacute; op&ccedil;&otilde;es</span></h2>
       <div class="kpis" id="kpisPremio"></div>
       <div class="grid2" id="cardsPremio">
         <div class="card">
@@ -712,7 +816,7 @@
 
     <!-- ══════════ ACERTO &amp; PAYOFF ══════════ -->
     <section id="tab-habilidade" class="tab">
-      <h2>A pergunta central <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <h2>A pergunta central <span class="esc" data-esc="tudo">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
       <div class="kpis" id="kpisHab"></div>
 
       <div class="grid2">
@@ -721,7 +825,7 @@
           <!-- ⚠️ O subt&iacute;tulo dizia s&oacute; "cada ponto &eacute; um corte do livro", o que n&atilde;o
                diz QUAIS cortes nem o que o tamanho e a cor significam. O usu&aacute;rio
                perguntou "o que &eacute; cada bola?" — a legenda tem de responder sozinha. -->
-          <div class="csub">cada bola &eacute; um <b>recorte dos trades</b> &mdash; por horizonte
+          <div class="csub" id="sHitPayoff">cada bola &eacute; um <b>recorte dos trades</b> &mdash; por horizonte
             (daytrade &times; carregou), por dire&ccedil;&atilde;o (tomado &times; aplicado) e por
             vencimento de DI (com 3+ ciclos). <b>Tamanho</b> = n&ordm; de ciclos &middot;
             <b>cor</b> = o recorte deu ou perdeu dinheiro. O <b>losango</b> &eacute; o livro
@@ -739,7 +843,7 @@
 
       <div class="grid2">
         <div class="card">
-          <h3 class="chart-title">Movimento de taxa capturado por trade</h3>
+          <h3 class="chart-title" id="tMov">Movimento de taxa capturado por trade</h3>
           <div class="csub"><code>bps_taxa</code> &mdash; quanto a taxa andou a favor dele, sem depender do tamanho</div>
           <div class="plot" id="figBpsTaxa"></div>
           <div class="cfonte">VWAP de entrada e de sa&iacute;da das boletas</div>
@@ -764,7 +868,7 @@
     <!-- ══════════ SIZING ══════════ -->
     <!-- ══════════ CUSTO ══════════ -->
     <section id="tab-custo" class="tab">
-      <h2>Para onde vai o custo <span class="esc">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
+      <h2>Para onde vai o custo <span class="esc" data-esc="tudo">pap&eacute;is &middot; DI &middot; op&ccedil;&otilde;es</span></h2>
       <div class="kpis" id="kpisCusto"></div>
 
       <div class="card">
@@ -776,7 +880,7 @@
 
     <!-- ══════════ CONTRATOS ══════════ -->
     <section id="tab-contratos" class="tab">
-      <h2>Onde ele ganha e onde perde <span class="esc">pap&eacute;is e DI</span></h2>
+      <h2>Onde ele ganha e onde perde <span class="esc" data-esc="tamanho">pap&eacute;is e DI</span></h2>
       <div class="card">
         <h3 class="chart-title">Resultado por contrato</h3>
         <!-- ⚠️ O subt&iacute;tulo dizia "em R$" e cravava a unidade: com o seletor de
@@ -785,7 +889,7 @@
         <div class="plot" id="figContratos"></div>
         <div class="cfonte">ciclos fechados e materiais</div>
       </div>
-      <h2>Detalhe por contrato <span class="esc">pap&eacute;is e DI</span></h2>
+      <h2>Detalhe por contrato <span class="esc" data-esc="tamanho">pap&eacute;is e DI</span></h2>
       <div class="wrap"><table id="tblContratos"></table></div>
     </section>
 
@@ -798,7 +902,7 @@
       <p class="lede">Um trade &eacute; um <b>ciclo de posi&ccedil;&atilde;o de um ativo, de zero a zero</b>.
         Comprou 5, mais 5, vendeu 5, mais 5, zerou 15 = <b>um</b> trade; o que houve de
         boleta no meio foi negociado em volta da posi&ccedil;&atilde;o. Zerou e reabriu = trade novo.</p>
-      <ul class="lista">
+      <ul class="lista" id="lTrade">
         <li><b>Virada de m&atilde;o</b> &mdash; tomado que vira aplicado sem passar por zero
           <b>fecha um ciclo e abre outro</b>, ambos no pre&ccedil;o m&eacute;dio do dia. O dia &eacute;
           fatiado pro-rata, ent&atilde;o o caixa fecha exato nos dois.</li>
@@ -817,6 +921,7 @@
       </ul>
 
       <h2>Como o resultado de um ciclo &eacute; calculado</h2>
+      <div id="bResultado">
       <p class="lede">No <b>futuro de DI</b> o resultado &eacute; a soma dos <b>ajustes di&aacute;rios da
         B3</b> &mdash; o dinheiro que de fato entrou e saiu da conta do fundo, dia a dia:</p>
       <pre class="formula">AD(t) = (PA(t) &minus; PA(t&minus;1) &times; FC(t)) &times; posi&ccedil;&atilde;o carregada
@@ -834,8 +939,10 @@ PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
         <li>⚠️ <b>Ciclo fechado telescopa</b>: a soma dos resultados di&aacute;rios bate com o do
           ciclo, e isso &eacute; conferido a cada rodada.</li>
       </ul>
+      </div>
 
       <h2>A unidade de cada instrumento</h2>
+      <div id="bUnidade">
       <p class="lede">Os tr&ecirc;s books n&atilde;o se medem na mesma escala, e for&ccedil;ar uma
         r&eacute;gua &uacute;nica &eacute; o erro mais caro deste estudo:</p>
       <ul class="lista">
@@ -857,9 +964,10 @@ PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
         um ponto valia <b>R$ 100,00</b> por contrato; desde ent&atilde;o vale <b>R$ 1,00</b>. A
         escala sai do <code>amount</code> da pr&oacute;pria boleta, <b>por instrumento</b> &mdash;
         as duas s&eacute;ries coexistem no mesmo dia.</p>
+      </div>
 
       <h2>A r&eacute;gua de leitura da tela</h2>
-      <p class="lede">O seletor na barra de abas troca <b>toda</b> a p&aacute;gina entre
+      <p class="lede" id="bLeitura">O seletor na barra de abas troca <b>toda</b> a p&aacute;gina entre
         <b>bps do NAV</b> e <b>reais</b>. Em bps nenhum n&uacute;mero aparece em R$, com tr&ecirc;s
         exce&ccedil;&otilde;es que s&atilde;o unidade e n&atilde;o resultado: a linha
         <i>&ldquo;Em reais&rdquo;</i>, o <b>NAV</b> (&eacute; o denominador) e o <b>custo por
@@ -877,7 +985,7 @@ PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
            conclusao sobre o gestor, e o denominador. Informacao de contexto, e o
            lugar da informacao de contexto e a aba de metodo. -->
       <div class="card">
-        <div class="csub">&eacute; o denominador de todo bps e de todo #PL &mdash; e ele muda por
+        <div class="csub" id="sNav">&eacute; o denominador de todo bps e de todo #PL &mdash; e ele muda por
           decis&atilde;o da casa, n&atilde;o por decis&atilde;o do gestor</div>
         <div class="plot" id="figNav"></div>
         <div class="cfonte">JRS <code>fund=&#39;Trader NAV&#39;</code> (USD) &times; USDBRL da ODS.MACRO_BBG
@@ -898,8 +1006,8 @@ PA(t) = 100.000 / (1 + i(t)) ^ (du(t)/252)</pre>
 
 <script src="lib/plotly.min.js?v=6d21266c"></script>
 <script src="lib/plotly-jgp.js?v=ed7aae05"></script>
-<script src="boot.js?v=318240b5"></script>
-<script src="app.js?v=8078b450"></script>
+<script src="boot.js?v=c820ac19"></script>
+<script src="app.js?v=26d515de"></script>
 <script>
 /* =====================================================================
    chrome.js — casca editorial JGP (variante dashboard / abas)

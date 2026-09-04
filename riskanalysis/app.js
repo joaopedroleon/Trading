@@ -33,6 +33,330 @@
     v == null || !isFinite(v) ? '—'
       : Math.abs(v) >= 1000 ? (v < 0 ? '−' : '') + 'R$ ' + nf(Math.abs(v) / 1000, 1) + ' mil'
       : brl(v);
+  /* ═══ A RÉGUA DE TAMANHO — sai do PAYLOAD, nunca de um `if grupo` ═══
+     ⭐ O estudo tem hoje DUAS réguas de tamanho e elas não se somam nem se
+     comparam (§5.-27):
+        juros BR → **#PL**     = DV01 × 1e4 ÷ NAV   ("% do PL por 100 bp")
+        câmbio   → **% do NAV** = nocional USD ÷ NAV em USD (opção via DELTA)
+     ⚠️ Quem decide é a presença dos campos no payload, não o nome do grupo: o
+     `report` publica `pct_nav_*` só onde a régua existe (spread condicional), e
+     é isso que impede a tela de mostrar "#PL 0,00" para um livro de dólar.
+     ⛔ E NUNCA as duas ao mesmo tempo na mesma ficha — foi ler 1,33 contra 0,75
+     como erro de conta que originou a regra. */
+  function TAM() {
+    var R = (TA && TA.resumo) || {};
+    var fx = R.pct_nav_mediano_dia != null || R.pct_nav_max_dia != null;
+    return fx
+      ? { fx: true, nome: '% do NAV', tip: 'pct_nav',
+          dia_med: R.pct_nav_medio_dia, dia_mediana: R.pct_nav_mediano_dia,
+          dia_max: R.pct_nav_max_dia, casas: 1, suf: '%',
+          /* ⭐ AS DUAS PONTAS: no câmbio é comprado × vendido em dólar, e
+             "tomado × aplicado" simplesmente não existe. O eixo e a legenda
+             saem daqui, então nenhum gráfico precisa saber o grupo. */
+          pos: 'comprado', neg: 'vendido', liq: 'líquido (+ = comprado)',
+          eixo: '% do NAV', fmt: '%{y:.1f}%',
+          serieLiq: function (r) { return r.pct_nav_dia; },
+          seriePos: function (r) { return r.pct_nav_comp; },
+          serieNeg: function (r) { return r.pct_nav_vend; },
+          serieMod: function (r) { return Math.abs(r.pct_nav_dia || 0); },
+          /* na distribuição o que interessa é o MÓDULO do dia */
+          serieDist: function (r) { return Math.abs(r.pct_nav_dia || 0); } }
+      : { fx: false, nome: '#PL', tip: 'pl_dia',
+          dia_med: R.pl_medio_dia, dia_mediana: R.pl_mediano_dia,
+          dia_max: R.pl_max_dia, casas: 2, suf: '',
+          pos: 'tomado', neg: 'aplicado', liq: 'líquido (+ = tomado)',
+          eixo: emBps() ? '#PL' : 'DV01 R$/bp',
+          fmt: emBps() ? '%{y:.2f}' : 'R$ %{y:,.0f}/bp',
+          serieLiq: function (r) { return emBps() ? r.pl_liq : r.dv01_liq; },
+          seriePos: function (r) { return emBps() ? r.pl_tom : r.dv01_tom; },
+          serieNeg: function (r) { return emBps() ? r.pl_apl : r.dv01_apl; },
+          serieMod: function (r) { return emBps() ? r.pl : r.dv01_brl; },
+          serieDist: function (r) { return r.pl; } };
+  }
+  /* ⭐ **OS TEXTOS DOS CARDS SEGUEM A RÉGUA.** Título, subtítulo e fonte
+     estavam cravados no `_content.html` com vocabulário de juros — e apareciam
+     iguais na tela de dólar ("Onde na curva", "giro em R$/bp por vértice",
+     "Tomado × aplicado"). ⛔ Não dá para deixar estático: o MESMO HTML serve os
+     dois grupos (é uma tela só, o payload é que troca).
+     ⚠️ Mapa único, aplicado no render. Grupo novo entra acrescentando a 3ª
+     coluna aqui, não caçando texto no HTML. */
+  /* ⭐ **AS PILULAS DE ESCOPO DAS SECOES** (`<span class="esc">`). Eram texto
+     fixo no `_content.html` — "papéis · DI · opções" em 12 seções —, então a
+     tela de dólar anunciava o escopo de OUTRO grupo no cabeçalho de cada seção.
+     ⛔ Não vão pelo payload: são apresentação, e pôr uma chave nova lá mudaria
+     o sha dos 49 payloads de juros BR sem mudar um número (§5.-78). */
+  const ESC_JUROS = { tudo: 'papéis · DI · opções', tamanho: 'papéis e DI',
+                      opcoes: 'só opções' };
+  const ESC_FX = { tudo: 'dólar · mini · NDF · opções', tamanho: 'dólar e opções',
+                   opcoes: 'só opções' };
+  function ESC() { return TAM().fx ? ESC_FX : ESC_JUROS; }
+
+  /* ⭐ **AS REGUAS DO CAMBIO.** A tabela de juros descreve ajuste da B3, PU de
+     NTN-B, DV01 e #PL — nada disso entra na conta do dolar. As 4 reguas comuns
+     (`result_brl`, `bps_nav`, `tam_norm`, `bps_eq`) aparecem nas duas, com o
+     texto adaptado: o que muda e o que ENTRA nelas.
+     ⛔ Nao e a mesma tabela com palavras trocadas — `#PL`, `bps_taxa`,
+     `premio_bps`, `result_pts`, `giro_pl`, `tam_relativo` e `bps_por_dv01`
+     SAEM (nao existem aqui) e `pct_nav`, `var_moeda_pct` e `delta` ENTRAM. */
+  const REGUAS_FX = [
+    ['<strong><code>result_brl</code></strong>',
+     'fluxo de caixa <code>−Σ qtd × preço</code> do ciclo, com a boleta '
+     + 'normalizada para <b>nocional em USD</b> × <b>BRL por USD</b>',
+     '<strong>o DINHEIRO</strong> — é ele que vira o resultado da tela. ⭐ é a '
+     + 'MESMA fórmula do DI e do título: a conversão é na borda, não no motor',
+     '—'],
+    ['<strong><code>var_moeda_pct</code></strong>',
+     'variação <b>%</b> da moeda entre a VWAP de entrada e a de saída, com o '
+     + 'sinal da direção',
+     'o retorno da APOSTA — não depende de quanto ele apostou. ☠️ é % e não '
+     + '&ldquo;bps&rdquo;: um dólar de 5,00 para 5,05 andou <b>1%</b>, e a régua '
+     + 'da moeda é a variação RELATIVA',
+     '—'],
+    ['<code>bps_nav</code>', '<strong>Σ (resultado do dia ÷ NAV DAQUELE dia)</strong>',
+     'a contribuição para o fundo — a mesma conta da curva composta', 'real do dia'],
+    ['<strong><code>% do NAV</code> do dia</strong>',
+     '<code>nocional do LIVRO em USD ÷ NAV em USD</code>, num pregão',
+     'quanto do patrimônio estava exposto naquele dia — soma as posições vivas. '
+     + '⭐ é a régua do <b>positions-pnl</b> da mesa',
+     '—'],
+    ['<strong><code>% do NAV</code> por trade</strong>',
+     'o mesmo, para UMA posição, no dia de pico dela',
+     'o tamanho de uma aposta. ⚠️ menor que o do dia, na proporção de posições '
+     + 'simultâneas',
+     '—'],
+    ['<strong><code>% do NAV</code> líquido</strong>',
+     '<code>(nocional comprado + nocional vendido) ÷ NAV</code> — '
+     + '<strong>com sinal</strong>: + é comprado, − é vendido',
+     'para que LADO ele estava. ☠️ não confundir com o do dia, que é MÓDULO: '
+     + 'num livro travado o módulo é cheio com o líquido em zero',
+     '—'],
+    ['<strong><code>delta</code></strong>',
+     'o delta da opção, de <code>JRSRISK.VW_EXP_DELTA_FX_OPTIONS</code>',
+     '<strong>o que põe a OPÇÃO na régua do futuro</strong>: a exposição dela é '
+     + '<code>nocional × delta</code>. ⭐ é a diferença estrutural em relação ao '
+     + 'juros, onde a opção precisa de uma régua só dela',
+     '—'],
+    ['<strong><code>tam_norm</code></strong>',
+     'tamanho do ciclo ÷ tamanho <strong>MÉDIO</strong> da <strong>régua dele'
+     + '</strong> (% do NAV, no futuro como na opção)',
+     '<strong>a régua COMUM de tamanho</strong> — <code>1,00×</code> = típico do '
+     + 'tipo dele. ⚠️ no câmbio ela é menos crítica que no juros, porque ali as '
+     + 'duas réguas de exposição já são a mesma',
+     '—'],
+    ['<strong><code>bps_eq</code></strong>', '<code>bps_nav_liq ÷ tam_norm</code>',
+     'o resultado que o ciclo teria <strong>no tamanho típico</strong>. '
+     + '<code>Σ bps_eq</code> É o contrafactual de sizing, e é o eixo y do '
+     + 'gráfico — os dois somam o mesmo número. ⚠️ normalizado de propósito: '
+     + 'contra o resultado cru a correlação com tamanho seria mecânica',
+     '—'],
+    ['<code>giro (US$ MM)</code>', 'Σ dos módulos do nocional negociado',
+     'por onde ele executa. ☠️ NUNCA em contratos: um DOL é <b>5×</b> um mini '
+     + 'WDO, e contar contratos subestima o mini na mesma proporção',
+     '—'],
+  ];
+
+  function textosDaRegua() {
+    /* ⭐ as pilulas de escopo, em TODA secao (nao só nas da régua) */
+    const _e = ESC();
+    document.querySelectorAll('span.esc[data-esc]').forEach(function (n) {
+      const v = _e[n.getAttribute('data-esc')];
+      if (v) n.textContent = v;
+    });
+    var fx = TAM().fx;
+    /* ⚠️ o `return` vem DEPOIS das pílulas: no juros o texto do HTML já está
+       certo, mas as pílulas precisam ser reescritas de todo modo — senão uma
+       troca de grupo BRL→juros na mesma sessão deixaria a pílula do câmbio
+       (a página recarrega, mas o `return` cedo antes disso já tinha custado
+       uma versão em que só metade da tela voltava). */
+    if (!fx) return;               // juros BR fica com o resto do texto do HTML
+    var T = {
+      tRisco: 'Tamanho da posição ao longo do ano',
+      sRisco: 'as duas pontas: <b>comprado</b> acima do zero, <b>vendido</b> abaixo '
+            + '— e a linha preta é o <b>líquido</b>. A distância da linha até a '
+            + 'borda da área é a ponta que está sendo compensada',
+      fRisco: 'posição das boletas × nocional do contrato (DOL US$ 50.000 · WDO '
+            + 'US$ 10.000 · NDF pelo <code>amount</code>) e delta da opção '
+            + '(<code>JRSRISK.VW_EXP_DELTA_FX_OPTIONS</code>)',
+      tPlDist: 'Distribuição do tamanho',
+      sPlDist: '% do NAV nos pregões com posição — onde ele costuma operar',
+      tCurva: 'Onde ele opera — por instrumento',
+      sCurva: 'giro em <b>US$ MM de nocional</b> por porta de execução. ⚠️ em '
+            + 'nocional, não em contratos: um DOL vale <b>5×</b> um mini WDO, e '
+            + 'contar contratos subestimaria o mini na mesma proporção',
+      fCurva: 'JRS.VW_SOPHIS_TICKETS × nocional do contrato (ta/contrato_fx.py)',
+      tDirecao: 'Comprado × vendido',
+      /* ⚠️ o NAV e o denominador nos DOIS grupos, mas o que ele denomina tem
+         nome diferente em cada um */
+      sNav: 'é o denominador de todo bps e de todo <b>% do NAV</b> — e ele muda '
+            + 'por decisão da casa, não por decisão do gestor. ⭐ No câmbio ele '
+            + 'entra em <b>dólares</b> (o nocional está em USD), então o câmbio '
+            + 'não contamina a régua de exposição',
+      sSizing: 'cada ciclo contra a média da régua DELE — <b>1,00×</b> é o '
+            + 'tamanho típico do tipo do instrumento (% do NAV no futuro e no '
+            + 'NDF, nocional × delta na opção). ⚠️ o eixo do resultado é '
+            + '<b>normalizado pelo tamanho</b>: contra o resultado cru a '
+            + 'inclinação seria mecânica',
+      /* ⛔ **A ABA "COMO E MEDIDO" DESCREVIA O MOTOR DE OUTRO ATIVO.** Ela e a
+         unica parte da tela sem teste (§5.-44) e o leitor acredita nela — na
+         tela de dolar ela explicava ajuste da B3, PU de NTN-B, #PL e bps de
+         taxa, e nenhum deles entra na conta que esta sendo mostrada. */
+      lTrade: ''
+            + '<li><b>Virada de mão</b> — comprado que vira vendido sem passar '
+            + 'por zero <b>fecha um ciclo e abre outro</b>, ambos no preço '
+            + 'médio do dia. O dia é fatiado pro-rata, então o caixa fecha '
+            + 'exato nos dois.</li>'
+            + '<li><b>O ativo econômico é UM</b> — DOL, mini WDO e NDF são o '
+            + 'mesmo risco (dólar contra real), então as posições são '
+            + '<b>colapsadas</b> em &ldquo;USDBRL&rdquo;: sem isso cada rolagem '
+            + 'de vencimento criaria um trade que ninguém decidiu. ⚠️ É o '
+            + '<b>contrário do juros</b>, onde cada vencimento é um risco de '
+            + 'tamanho diferente e juntá-los misturaria coisas que não se '
+            + 'somam.</li>'
+            + '<li><b>A opção NÃO é colapsada</b> — cada strike/vencimento é um '
+            + 'ciclo próprio: o delta depende do strike, então juntá-las somaria '
+            + 'exposições que andam diferente.</li>'
+            + '<li><b>Posição herdada</b> — a boleta <code>pnl_eoy_open</code> '
+            + 'de 31/12 traz a quantidade e o preço de fechamento do ano '
+            + 'anterior, e entra como boleta comum no 1º pregão.</li>'
+            + '<li><b>Posição ainda aberta</b> — fechada no <b>preço de '
+            + 'fechamento</b>, a título de análise. ⚠️ No câmbio a marcação é '
+            + '<b>por referência</b> (cada UC/WDO/NDF/opção no próprio preço) e '
+            + 'o colapso vem <b>depois</b>: escolher uma taxa única para um '
+            + 'agregado de vencimentos seria palpite.</li>'
+            + '<li><b>Daytrade dentro de um ciclo aberto</b> não vira trade '
+            + 'próprio — entra no ciclo. O total está certo; a contagem é '
+            + 'conservadora.</li>',
+      bResultado: ''
+            + '<p class="lede">No câmbio o resultado do ciclo é o <b>fluxo de '
+            + 'caixa</b> da posição, e ele sai da mesma fórmula dos outros books '
+            + 'porque a boleta é <b>normalizada na borda</b>:</p>'
+            + '<pre class="formula">quantity → <b>nocional assinado em USD</b>'
+            + '   (DOL US$ 50.000 · WDO US$ 10.000 · NDF pelo '
+            + '<code>amount</code>)\n'
+            + 'price    → <b>BRL por 1 USD</b> de nocional\n'
+            + '   ⇒  resultado = −Σ qtd × preço     ← a MESMA conta do DI e do '
+            + 'título</pre>'
+            + '<p class="lede">⭐ Daqui para dentro <b>o motor não sabe que '
+            + 'existe câmbio</b> — não há ramo de cotação nenhum. A conversão é '
+            + 'uma função só (<code>ta/contrato_fx.py</code>) e foi aferida '
+            + 'contra o <code>amount</code> do Sophis: razão <b>1,00000000</b> no '
+            + 'NDF e nas opções de balcão, <b>0,9998</b> na opção listada. '
+            + '⚠️ No <b>futuro</b> o <code>amount</code> não serve de testemunha '
+            + '(não há caixa na abertura) — ali o nocional foi aferido contra a '
+            + 'B3.</p>'
+            + '<p class="lede">E o <b>líquido</b> tem as mesmas três parcelas de '
+            + 'sempre:</p>'
+            + '<pre class="formula">líquido = bruto − custo de transação + '
+            + 'carrego do caixa</pre>'
+            + '<ul class="lista">'
+            + '<li><b>Custo</b> — corretagem, emolumento e contraparte, das '
+            + '<b>3 colunas da própria boleta</b>. Sem rateio e sem '
+            + 'estimativa.</li>'
+            + '<li><b>Carrego</b> — CDI sobre a marcação do dia do capital '
+            + 'preso. Futuro e NDF não pagam (é margem / balcão sem desembolso '
+            + 'do principal); <b>prêmio de opção paga</b>.</li>'
+            + '<li>⚠️ <b>Ciclo fechado telescopa</b>: a soma dos resultados '
+            + 'diários bate com o do ciclo — aferido em 105/105 ciclos, com '
+            + 'diferença de R$ 0,00.</li>'
+            + '<li>⛔ <b>Escopo: 2026 em diante</b> (decisão do usuário), a '
+            + 'partir das boletas de virada <code>pnl_eoy_open</code> do último '
+            + 'dia de dezembro — antes disso não há preço de marcação de câmbio '
+            + 'na base. E <b>tudo que está em <code>hedge_cambial</code> fica '
+            + 'fora</b>: é trava patrimonial, não decisão de trader.</li>'
+            + '</ul>',
+      bUnidade: ''
+            + '<p class="lede">As portas de execução não se medem na mesma '
+            + 'escala, e forçar uma régua única é o erro mais caro deste '
+            + 'estudo:</p>'
+            + '<ul class="lista">'
+            + '<li><b>Futuro cheio (DOL)</b> — <b>US$ 50.000</b> por contrato. '
+            + 'Tamanho em <b>% do NAV</b> (<code>nocional USD ÷ NAV USD</code>), '
+            + 'movimento na <b>variação % da moeda</b>.</li>'
+            + '<li><b>Mini (WDO)</b> — <b>US$ 10.000</b>, ou seja <b>1/5</b> do '
+            + 'cheio. ☠️ Por isso giro e custo saem em <b>nocional</b>, nunca em '
+            + 'contratos: contar contratos subestima o mini na mesma proporção '
+            + 'de 5×, e um custo &ldquo;por contrato&rdquo; <i>cai</i> quando o '
+            + 'trader migra para o mini sem nada ter ficado mais barato.</li>'
+            + '<li><b>NDF (balcão)</b> — o nocional vem do <code>amount</code> '
+            + 'da boleta. ⚠️ Ele tem <b>duas pernas</b>, e a regra da casa '
+            + '(<code>caixa = −amount</code>) devolve a perna em <b>dólar</b> — '
+            + 'aplicá-la aqui daria moeda e sinal trocados. O motor reproduz a '
+            + 'perna em <b>reais</b>.</li>'
+            + '<li><b>Opção</b> — entra pelo <b>nocional × delta</b> '
+            + '(<code>JRSRISK.VW_EXP_DELTA_FX_OPTIONS</code>), que é a régua do '
+            + '<b>positions-pnl</b> da mesa. ⭐ Assim ela soma na MESMA escala do '
+            + 'futuro — ao contrário do juros, onde a opção não tem régua de '
+            + 'sensibilidade a taxa e precisa de uma própria (o prêmio).</li>'
+            + '</ul>'
+            /* ⚠️ O AVISO CONTINUA, SEM OS TOKENS DO OUTRO GRUPO. Ele existe
+               porque o número desta tela e o da tela de juros têm nome parecido
+               e medem coisas diferentes (a família da §5.-27) — mas nomear a
+               régua do juros AQUI dá ao leitor um token que ele não tem como
+               conferir nesta tela. O argumento sobrevive sem o jargão. */
+            + '<p class="lede">⚠️ <b>Isto é patrimônio EXPOSTO, não '
+            + 'sensibilidade a preço.</b> <code>nocional ÷ NAV</code> responde '
+            + '&ldquo;quanto do patrimônio está na mão&rdquo;; a régua de '
+            + 'tamanho do grupo de <b>juros</b> responde outra coisa '
+            + '(&ldquo;quanto se perde se a taxa andar 100 bp&rdquo;). '
+            + '⛔ Os dois números não somam nem se comparam entre as duas '
+            + 'telas.</p>'
+            + '<p class="lede">⚠️ <b>E &ldquo;pregões com posição&rdquo; usa um '
+            + 'limiar.</b> No câmbio a posição não zera exato como no DI (sobra '
+            + 'resíduo de nocional), e o corte é <b>proporcional ao tamanho do '
+            + 'livro de cada trader</b>. Sem ele a mediana mediria o resíduo em '
+            + 'vez da posição, e o &ldquo;tempo em risco&rdquo; iria a ~100% em '
+            + 'todo livro.</p>',
+      bLeitura: 'O seletor na barra de abas troca <b>toda</b> a página entre '
+            + '<b>bps do NAV</b> e <b>reais</b> — vale para o câmbio como para o '
+            + 'juros: o <b>resultado</b> se lê nas duas réguas. ⚠️ O que '
+            + '<b>não</b> troca é a <b>exposição</b>: ela fica em % do NAV, '
+            + 'porque é régua do ativo e não do resultado. Em bps nenhum número '
+            + 'aparece em R$, com três exceções que são unidade e não resultado: '
+            + 'a linha <i>&ldquo;Em reais&rdquo;</i>, o <b>NAV</b> (é o '
+            + 'denominador) e o <b>custo por US$ MM de nocional</b> (preço '
+            + 'unitário). O interruptor <i>detalhar bruto × custo</i> abre a '
+            + 'quebra; sem ele a tela é líquida por definição.',
+      /* ⛔ no câmbio não há "vencimento de DI" para cortar (§5.-52) e a direção
+         é comprado × vendido — o subtítulo é a LEGENDA do gráfico, então ele
+         estava dizendo ao leitor para procurar bolas que não existem */
+      sHitPayoff: 'cada bola é um <b>recorte dos trades</b> — por horizonte '
+            + '(daytrade × carregou), por direção (<b>comprado × vendido</b>) e '
+            + 'por porta de execução (futuro cheio, mini, NDF, opção — com 3+ '
+            + 'ciclos). <b>Tamanho</b> = nº de ciclos · <b>cor</b> = o recorte '
+            + 'deu ou perdeu dinheiro. O <b>losango</b> é o livro inteiro; a '
+            + '<b>linha tracejada</b> é o payoff mínimo para empatar em cada '
+            + 'nível de acerto — acima dela o recorte paga, abaixo não.',
+      tMov: 'Variação da moeda capturada por trade',
+    };
+    Object.keys(T).forEach(function (k) {
+      var e = el(k);
+      if (e) e.innerHTML = T[k];
+    });
+  }
+
+  /* ⭐ A RÉGUA DE MOVIMENTO DE PREÇO — o `bps_taxa` do juros vira variação % da
+     MOEDA no câmbio. ⛔ Não é o mesmo número com outro nome: bps de taxa é
+     diferença ABSOLUTA; câmbio se lê em variação RELATIVA (5,00 → 5,05 é 1%,
+     não "5 bps"). O `pts %` (prêmio de opção de juros em pontos) não tem
+     análogo aqui e sai da tela. */
+  function MOV() {
+    var R = (TA && TA.resumo) || {};
+    return R.var_moeda_mediano != null
+      ? { fx: true, nome: 'Variação da moeda capturada', unid: '%',
+          campo: 'var_moeda_pct', med: 'var_moeda_medio',
+          mediana: 'var_moeda_mediano', pond: 'var_moeda_ponderado',
+          col: 'var % moeda', casas: 3 }
+      : { fx: false, nome: 'Movimento de taxa capturado', unid: 'bps',
+          campo: 'bps_taxa', med: 'bps_taxa_medio',
+          mediana: 'bps_taxa_mediano', pond: 'bps_taxa_ponderado',
+          col: 'bps taxa', casas: 1 };
+  }
+  /* o valor já formatado na régua vigente (com o sufixo, quando há) */
+  function ntam(v) {
+    var t = TAM();
+    return v == null ? '—' : nf(v, t.casas) + t.suf;
+  }
+
   const pct = (v, d = 1) => (v == null || !isFinite(v) ? '—' : nf(v * 100, d) + '%');
   const bps = (v, d = 1) => (v == null || !isFinite(v) ? '—' : nf(v, d) + ' bps');
   /* ☠️ "% do resultado bruto" MENTE quando o bruto e negativo ou ~zero.
@@ -405,12 +729,27 @@
       + 'acertos grandes, nao por consistencia. '
       + '⚠️ Na regua de bps, o maior ganho pode ser de um trade DIFERENTE do '
       + 'maior ganho em R$ — o NAV do dia entra no denominador.',
+    giro_musd: 'O NOCIONAL girado no periodo, em milhoes de dolares — a soma '
+      + 'dos MODULOS, entao compra e venda sao as duas giro. ⭐ E o denominador '
+      + 'certo do custo no cambio: contar CONTRATOS misturaria o DOL '
+      + '(US$ 50.000) com o mini WDO (US$ 10.000), que sao o mesmo risco em '
+      + 'tamanhos 5x diferentes. E o mesmo motivo de o juros medir giro em '
+      + 'R$/bp e nao em contratos.',
     pernas: 'Quantas PERNAS de DI foram negociadas no periodo. Um contrato '
       + 'comprado e depois vendido conta 2x, porque a corretora cobra nas duas. '
       + 'E o denominador do custo por perna.',
     pregoes: 'Em quantos pregoes do ano ele tinha alguma posicao aberta no '
       + 'fechamento — CONTAGEM de dias, nao fracao. No resto do tempo estava '
       + 'zerado.',
+    pct_nav: 'A regua de tamanho do CAMBIO: a exposicao em dolar sobre o NAV '
+      + 'em dolar, em %. ⭐ E a MESMA conta do positions-pnl da mesa: no futuro '
+      + 'e no NDF e o nocional (contrato de DOL = US$ 50.000; o mini WDO e 1/5 '
+      + 'disso, US$ 10.000) e na OPCAO e o nocional x DELTA. Numerador e '
+      + 'denominador em USD, entao o cambio nao entra na conta. '
+      + '⛔ NAO SOMA nem se compara com #PL: um e R$/bp / NAV, o outro e '
+      + 'nocional / NAV. ⚠️ "Pregoes com posicao" usa um limiar PROPORCIONAL ao '
+      + 'tamanho do livro de cada trader — no cambio a posicao nao zera exato, '
+      + 'e sem o corte a mediana mede o residuo em vez da posicao.',
     pl: 'Unidade de tamanho da mesa. #PL = DV01 x 1e4 / NAV, que se le "% do '
       + 'patrimonio do trader por 100 bp de movimento da taxa". #PL 0,50 = a '
       + 'posicao ganha ou perde 0,5% do PL se a curva andar 100 bp. E a unica '
@@ -1240,19 +1579,38 @@
            — reguas diferentes lado a lado, que e exatamente a confusao da
            §5.-27 que os rotulos vieram resolver. As duas continuam na tela;
            mudou qual e o numero grande. */
-        linha('#PL do dia — livro inteiro', nf(R.pl_medio_dia, 2),
-            'média · mediana ' + nf(R.pl_mediano_dia, 2)
-            + ' · máximo ' + nf(R.pl_max_dia, 2), '', 'pl_dia', true),
-        linha('#PL por trade — quando acerta', nf(S.pl_medio_vencedor, 2),
-            'média · mediana ' + nf(S.pl_mediano_vencedor, 2), '', 'pl_trade'),
-        linha('#PL por trade — quando erra', nf(S.pl_medio_perdedor, 2),
-            'média · mediana ' + nf(S.pl_mediano_perdedor, 2), '', 'pl_trade'),
+        /* ⭐ o rótulo e a unidade saem da RÉGUA do payload (ver `TAM`) —
+           em câmbio esta linha diz "% do NAV do dia", não "#PL". */
+        linha(TAM().nome + ' do dia — livro inteiro', ntam(TAM().dia_med),
+            'média · mediana ' + ntam(TAM().dia_mediana)
+            + ' · máximo ' + ntam(TAM().dia_max), '', TAM().tip, true),
+        /* ⭐ as duas na régua do grupo (ver `TAM`) — em câmbio "% do NAV por
+           trade". ⚠️ O `sizing` publica os campos na régua vigente, então a
+           ficha lê os mesmos nomes; o que muda é o RÓTULO e as casas. */
+        linha(TAM().nome + ' por trade — quando acerta',
+            ntam(S.pl_medio_vencedor != null ? S.pl_medio_vencedor
+                 : S.tam_medio_vencedor),
+            'média · mediana ' + ntam(S.pl_mediano_vencedor != null
+                 ? S.pl_mediano_vencedor : S.tam_mediano_vencedor),
+            '', TAM().fx ? 'pct_nav' : 'pl_trade'),
+        linha(TAM().nome + ' por trade — quando erra',
+            ntam(S.pl_medio_perdedor != null ? S.pl_medio_perdedor
+                 : S.tam_medio_perdedor),
+            'média · mediana ' + ntam(S.pl_mediano_perdedor != null
+                 ? S.pl_mediano_perdedor : S.tam_mediano_perdedor),
+            '', TAM().fx ? 'pct_nav' : 'pl_trade'),
         linha('Tempo em risco', pct(R.tempo_em_risco, 0),
             R.pregoes_com_posicao + ' de ' + R.pregoes_total + ' pregões',
             '', 'tempo_risco'),
-      ], 'O #PL do dia é maior porque soma as posições vivas: são '
+      /* ⭐ a nota fecha a conta entre as duas réguas de tamanho, e o texto
+         segue o grupo: "opção não tem DV01" é ressalva de JUROS — no câmbio a
+         opção TEM exposição (nocional × delta) e a ressalva seria falsa. */
+      ], TAM().nome + ' do dia é maior porque soma as posições vivas: são '
        + nf(R.ativos_por_pregao_medio, 1) + ' ativos por pregão em média (máx '
-       + nf(R.ativos_por_pregao_max, 0) + '). Títulos e DI — opção não tem DV01.')
+       + nf(R.ativos_por_pregao_max, 0) + ').'
+       + (TAM().fx
+          ? ' Futuro, NDF e opção — a opção entra pelo nocional × delta.'
+          : ' Títulos e DI — opção não tem DV01.'))
     );
 
     /* curva composta + drawdown, 2 painéis com x compartilhado */
@@ -1323,13 +1681,24 @@
     const mcu = (r) => (DETALHE ? -(emBps() ? r.custo_bps : r.custo) : 0);
     /* ⭐ **#PL DO MÊS COM SINAL** (+ tomado / − aplicado), a mesma leitura do
        gráfico de tamanho ao longo do ano (§5.-46/§5.-47) — pedido do usuário.
-       ⚠️ **O fallback para o módulo é obrigatório, não defensivo**: o seletor
-       "Base até" carrega FOTOS antigas (`data/hist/*.js`) e os payloads
-       publicados, que não têm os campos novos. Sem ele, escolher uma foto de
-       ontem desenharia uma linha vazia. */
-    const mpl = (r) => (r.pl_liq_med != null ? r.pl_liq_med : r.pl_med);
-    const mplMed = (r) => (r.pl_liq_mediana != null ? r.pl_liq_mediana : r.pl_mediana);
-    const temNet = M.some((r) => r.pl_liq_med != null);
+       ⚠️ **O fallback para o módulo é obrigatório, não defensivo**: a página
+       PUBLICADA é uma foto com payload congelado, que pode não ter os campos
+       novos. Sem ele, um link publicado antes desta versão desenharia uma linha
+       vazia. (O seletor "Base até" — que carregava fotos de `data/hist/` — saiu
+       em 03/09/2026; o payload publicado continua sendo motivo suficiente.) */
+    /* ⭐ **A LINHA DO GRÁFICO MENSAL SEGUE A RÉGUA DO GRUPO.** No câmbio ela é
+       o % do NAV líquido (+ comprado / − vendido); em juros é o #PL líquido
+       (+ tomado / − aplicado). ⛔ Com o campo de juros cravado aqui, o gráfico
+       do BRL desenhava uma linha VAZIA — o payload de câmbio não tem `pl_*`. */
+    const _mT = TAM();
+    const mpl = _mT.fx
+      ? (r) => r.pct_nav_liq_med
+      : (r) => (r.pl_liq_med != null ? r.pl_liq_med : r.pl_med);
+    const mplMed = _mT.fx
+      ? (r) => r.pct_nav_liq_mediana
+      : (r) => (r.pl_liq_mediana != null ? r.pl_liq_mediana : r.pl_mediana);
+    const temNet = _mT.fx ? M.some((r) => r.pct_nav_liq_med != null)
+                          : M.some((r) => r.pl_liq_med != null);
     const [rgMes, rgPlMes] = zeroAlinhado(
       M.map((r) => Math.max(mv(r), 0) + Math.max(mcu(r), 0))
        .concat(M.map((r) => Math.min(mv(r), 0) + Math.min(mcu(r), 0))),
@@ -1354,39 +1723,62 @@
          o tamanho limpo de frequência. A queda ao longo do ano aparece nas
          quatro leituras, então o achado não depende de qual se escolhe. */
       { x: M.map((r) => r.data), y: M.map(mpl),
-        name: temNet ? '#PL médio (mês) — líquido' : '#PL médio (mês)',
+        name: _mT.nome + ' médio (mês)' + (temNet ? ' — líquido' : ''),
         type: 'scatter', mode: 'lines+markers', yaxis: 'y2',
         line: { color: P()[2], width: 2 },
         /* ⚠️ O MÓDULO vai no hover, e não é redundância: num mês de inclinação
            (tomado e aplicado no mesmo dia) o líquido sai perto de zero e o
            módulo mostra que o risco estava lá — as duas divergem em 32% dos
            dias-livro (§5.-47). O par "só nos dias com posição" continua. */
-        customdata: M.map((r) => [r.pl_med_pos, r.pl_mediana_pos, r.dias_com_pos,
-                                  r.pl_med, r.pl_tom_med, r.pl_apl_med]),
-        hovertemplate: '%{x}<br><b>#PL LÍQUIDO médio no mês %{y:.2f}</b>'
-                     + (temNet ? '<br>tomado %{customdata[4]:.2f} · aplicado '
-                                 + '%{customdata[5]:.2f} · módulo %{customdata[3]:.2f}' : '')
-                     + '<br>só nos %{customdata[2]} dias com posição (módulo):'
-                     + '<br>  média %{customdata[0]:.2f} · mediana %{customdata[1]:.2f}<extra></extra>' },
+        /* ⭐ o hover, a legenda e o eixo saem da RÉGUA (`TAM`): em câmbio a
+           linha é % do NAV e as duas pontas são comprado × vendido. */
+        customdata: M.map((r) => (_mT.fx
+          ? [null, null, r.dias_com_pos, null,
+             r.pct_nav_comp_med, r.pct_nav_vend_med]
+          : [r.pl_med_pos, r.pl_mediana_pos, r.dias_com_pos,
+             r.pl_med, r.pl_tom_med, r.pl_apl_med])),
+        hovertemplate: (_mT.fx
+          ? '%{x}<br><b>% do NAV LÍQUIDO médio no mês %{y:.1f}%</b>'
+            + (temNet ? '<br>comprado %{customdata[4]:.1f}% · vendido '
+                        + '%{customdata[5]:.1f}%' : '')
+            + '<br>%{customdata[2]} dias com posição<extra></extra>'
+          : '%{x}<br><b>#PL LÍQUIDO médio no mês %{y:.2f}</b>'
+            + (temNet ? '<br>tomado %{customdata[4]:.2f} · aplicado '
+                        + '%{customdata[5]:.2f} · módulo %{customdata[3]:.2f}' : '')
+            + '<br>só nos %{customdata[2]} dias com posição (módulo):'
+            + '<br>  média %{customdata[0]:.2f} · mediana %{customdata[1]:.2f}<extra></extra>') },
       /* ⚠️ Nasce DESMARCADA (`visible:'legendonly'`): a mediana e a média do #PL
          andam quase juntas na maioria dos meses, e as duas linhas juntas sobre as
          barras poluem o gráfico. Fica um clique na legenda — não some do estudo.
          O par completo (inclusive só nos dias COM posição) segue no hover da
          linha de média, então nada de informação se perde por padrão. */
       { x: M.map((r) => r.data), y: M.map(mplMed),
-        name: temNet ? '#PL mediano (mês) — líquido' : '#PL mediano (mês)',
+        name: _mT.nome + ' mediano (mês)' + (temNet ? ' — líquido' : ''),
         type: 'scatter', mode: 'lines+markers', yaxis: 'y2', visible: 'legendonly',
         line: { color: P()[2], width: 2, dash: 'dot' }, marker: { size: 5 },
-        hovertemplate: '%{x}<br><b>#PL MEDIANO no mês %{y:.2f}</b><extra></extra>' },
+        hovertemplate: '%{x}<br><b>' + _mT.nome + ' MEDIANO no mês '
+                     + (_mT.fx ? '%{y:.1f}%' : '%{y:.2f}') + '</b><extra></extra>' },
     ], baseLayout(t, {
       height: H_HALF(), barmode: 'relative',
       yaxis: { title: { text: uni() }, zeroline: true, range: rgMes },
       /* ⚠️ o rótulo do eixo diz o SINAL: sem isso um #PL negativo se lê como
          erro de conta, e não como "estava aplicado". */
-      yaxis2: { title: { text: temNet ? '#PL líquido (+ tomado / − aplicado)' : '#PL' },
+      yaxis2: { title: { text: temNet
+                  ? _mT.nome + ' líquido (+ ' + _mT.pos + ' / − ' + _mT.neg + ')'
+                  : _mT.nome },
                 overlaying: 'y', side: 'right', showgrid: false, range: rgPlMes },
       legend: { orientation: 'h' },
-    }), CFG);
+    }), CFG);    /* ⭐ os textos dos cards seguem a régua (ver `textosDaRegua`) */
+    textosDaRegua();
+    /* ⭐ o subtítulo do card segue a régua (ver o `id` no `_content.html`) */
+    const _sm = el('subMes');
+    if (_sm) {
+      _sm.innerHTML = 'barras = resultado do mês · linha = <b>' + _mT.nome
+        + ' médio líquido</b> (<b>+</b> ' + _mT.pos + ', <b>−</b> ' + _mT.neg
+        + ').' + (_mT.fx ? ' As duas pontas vão no hover'
+                         : ' O módulo — quanto risco havia, sem a direção — vai no hover');
+    }
+
 
     /* ── AS DUAS TABELAS DE CORTE ────────────────────────────────────────
        ⚠️ `colsStat` e montada A CADA render porque depende de DETALHE — nao
@@ -1416,9 +1808,14 @@
       { t: 'expectativa<br><i>média / mediana</i>', num: 1, tip: 'exp',
         cls: (r) => sgn(r.exp_brl).trim(),
         f: (r) => KP(r.exp_bps, r.exp_mediana_bps, r.exp_brl, r.exp_mediana_brl) },
-      { t: 'bps taxa<br><i>média / mediana / <b>ponderada</b></i>', num: 1,
-        tip: 'bps_taxa_terno',
-        f: (r) => terno(r.bps_taxa_medio, r.bps_taxa_mediano, r.bps_taxa_ponderado) },
+      /* ⭐ a coluna de MOVIMENTO segue a régua: `bps taxa` no juros, `var %
+         moeda` no câmbio (ver `MOV`). O terno média/mediana/ponderada é o
+         mesmo — o problema é idêntico (movimento de preço com tamanhos
+         diferentes atrás). */
+      { t: MOV().col + '<br><i>média / mediana / <b>ponderada</b></i>', num: 1,
+        tip: MOV().fx ? 'var_moeda_terno' : 'bps_taxa_terno',
+        f: (r) => terno(r[MOV().med], r[MOV().mediana], r[MOV().pond],
+                        MOV().fx ? (v) => nf(v, 3) : undefined) },
       /* ⭐ O EQUIVALENTE DA OPCAO (01/09/2026, pedido do usuario). A opcao nao
          entra em `bps taxa` — e nao deve: o preco dela nao e taxa. ✅ Aferido
          que ela ja sai NULA (nao zero) ali, entao nunca puxou a media.
@@ -1434,15 +1831,34 @@
          ponderada —, porque o problema e identico: movimento de preco com
          tamanhos diferentes atras. A ponderada usa R$/ponto x giro/2 e
          RECONCILIA com o dinheiro (identidade exata nos 118 ciclos da base). */
+      /* ⛔ `pts %` é a régua da OPÇÃO DE JUROS (prêmio em pontos percentuais) e
+         NÃO tem análogo no câmbio — ali a opção entra pelo nocional × delta, que
+         já é a coluna de tamanho. No FX a célula sai com traço em vez de
+         inventar uma unidade. */
       { t: 'pts %<br><i>média / mediana / <b>ponderada</b></i>', num: 1, tip: 'pts_col',
+        /* ⛔ `_so` = a coluna só existe nesta régua. `pts %` é a régua da OPÇÃO
+           DE JUROS (prêmio em pontos percentuais) e não tem análogo no câmbio —
+           ali a opção entra pelo nocional × delta, que já é a coluna de tamanho.
+           ⚠️ A 1ª tentativa deixou a coluna e pôs '—' na célula: o CABEÇALHO
+           continuava dizendo "pts %" na tela de dólar, e a varredura semântica
+           acusou. Vocabulário que não pertence ao grupo tem de SAIR, não ficar
+           vazio. */
+        _so: 'juros',
         f: (r) => (r.result_pts_mediano == null ? '—'
                    : terno(r.result_pts_medio, r.result_pts_mediano,
                            r.result_pts_ponderado)) },
-      { t: '#PL<br><i>média / mediana</i>', num: 1, tip: 'pl_trade',
-        f: (r) => par(r.pl_medio, r.pl_mediano) },
+      /* ⭐ a coluna de TAMANHO segue a régua: #PL no juros, % do NAV no câmbio */
+      { t: TAM().nome + '<br><i>média / mediana</i>', num: 1, tip: TAM().tip,
+        f: (r) => (TAM().fx
+                   ? par(r.pct_nav_medio, r.pct_nav_mediano, (v) => nf(v, 1) + '%')
+                   : par(r.pl_medio, r.pl_mediano)) },
       { t: 'dias<br><i>média / mediana</i>', num: 1, tip: 'duracao',
         f: (r) => par(r.dur_media, r.dur_mediana, (v) => nf(v, 1)) },
-    ].concat(colsResultado());
+    ].concat(colsResultado())
+      /* ⭐ **FILTRO DE RÉGUA**: coluna marcada com `_so` só sobrevive no grupo
+         dela. É isso que faz o cabeçalho `pts %` DESAPARECER na tela de câmbio
+         em vez de aparecer com um traço em toda linha. */
+      .filter((c) => !c._so || (c._so === 'juros') !== MOV().fx);
     table(el('tblHorizonte'),
       [{ t: 'horizonte', f: (r) => r.horizonte, tip: 'horizonte' }].concat(colsStat),
       TA.por_horizonte);
@@ -1472,11 +1888,12 @@
            ⚠️ o glossario "% do PL por 100 bp, nos dias com posicao" saiu daqui
            (pedido do usuario): a definicao ja mora no tooltip `pl` e na aba
            "Como e medido", e repeti-la empurrava a mediana para o fim da linha. */
-        linha('#PL do dia', nf(R.pl_medio_dia, 2),
-            'média · mediana ' + nf(R.pl_mediano_dia, 2),
-            '', 'pl', true),
-        linha('#PL máximo', nf(R.pl_max_dia, 2),
-            'maior exposição do ano — não é média nem mediana', '', 'pl'),
+        linha(TAM().nome + ' do dia', ntam(TAM().dia_med),
+            'média · mediana ' + ntam(TAM().dia_mediana),
+            '', TAM().fx ? 'pct_nav' : 'pl', true),
+        linha(TAM().nome + ' máximo', ntam(TAM().dia_max),
+            'maior exposição do ano — não é média nem mediana', '',
+            TAM().fx ? 'pct_nav' : 'pl'),
         /* ⚠️ O DV01 em REAIS so aparece na regua FINANCEIRA (pedido do usuario,
            01/09/2026). Na regua de bps a ficha inteira ja fala em #PL — que e o
            proprio DV01 normalizado pelo NAV —, entao a linha em R$ repete a
@@ -1490,7 +1907,15 @@
             'média · mediana ' + kbrl(R.dv01_mediano_dia) + '/bp · máximo '
             + kbrl(R.dv01_max_brl) + '/bp',
             '', 'dv01'),
-      ], 'Títulos e DI. Opção não tem DV01, então fica fora desta régua.'),
+      ], TAM().fx
+         /* ⭐ **NO CAMBIO A NOTA SE INVERTE, e por isso ela nao podia ser
+            estatica.** A regua de la e nocional/NAV, e a OPCAO ENTRA — pelo
+            nocional x delta, como manda o positions-pnl. Dizer "opcao fica
+            fora" na tela de dolar mandaria o leitor descontar do total uma
+            exposicao que esta la dentro (o erro do §5.-70, ao contrario). */
+         ? 'Inclui a opção, pelo nocional × <b>delta</b> — é a régua do '
+           + 'positions-pnl. Numerador e denominador em USD.'
+         : 'Títulos e DI. Opção não tem DV01, então fica fora desta régua.'),
 
       ficha('Presença no mercado', [
         linha('Pregões com posição', nf(R.pregoes_com_posicao, 0),
@@ -1533,8 +1958,14 @@
             sgn(S.top10pct_bps), 'top10', true),
         linha('Fatia do movimento', pct(S.top10pct_share_mov, 0),
             'Σ |bps| do decil ÷ Σ |bps| de todos', '', 'top10'),
+        /* ☠️ O subtitulo dizia `Σ #PL do decil` e o campo e
+           `top10pct_share_risco`, que soma o **`tam_norm`** — o tamanho de cada
+           ciclo contra a media da REGUA DELE (§5.-54). Era rotulo mentindo nos
+           DOIS grupos: no juros porque a opcao entra pelo premio e nao pelo #PL,
+           e no cambio porque #PL nem existe. */
         linha('Fatia do risco', pct(S.top10pct_share_risco, 0),
-            'Σ #PL do decil ÷ Σ #PL de todos', '', 'top10'),
+            'Σ tamanho do decil ÷ Σ de todos — cada ciclo na régua do tipo dele',
+            '', 'top10'),
       ], 'O número grande é o resultado ABSOLUTO do decil, não uma fração do '
        + 'líquido — dividir por um líquido quase zero explode.'))
     );
@@ -1560,27 +1991,30 @@
        o risco carregado, entao o grafico responde tamanho E direcao de uma vez.
        Antes, com uma area de MODULO, um spread perfeito (ECotrim 2024, razao
        124.744×) aparecia como um livro cheio e direcional. */
-    const ex = (r) => (emBps() ? r.pl_liq : r.dv01_liq);
-    const eT = (r) => (emBps() ? r.pl_tom : r.dv01_tom);
-    const eA = (r) => (emBps() ? r.pl_apl : r.dv01_apl);
-    const uex = emBps() ? '#PL' : 'DV01 R$/bp';
-    const fex = emBps() ? '%{y:.2f}' : 'R$ %{y:,.0f}/bp';
-    const fcd = emBps() ? '%{customdata[0]:.2f}' : 'R$ %{customdata[0]:,.0f}';
+    /* ⭐ TUDO daqui sai da RÉGUA do grupo (ver `TAM`): no câmbio as áreas são
+       comprado × vendido em % do NAV, e o eixo diz "% do NAV". */
+    const _T = TAM();
+    const ex = _T.serieLiq, eT = _T.seriePos, eA = _T.serieNeg;
+    const uex = _T.eixo;
+    const fex = _T.fmt;
+    const fcd = _T.fx ? '%{customdata[0]:.1f}%'
+                      : (emBps() ? '%{customdata[0]:.2f}'
+                                 : 'R$ %{customdata[0]:,.0f}');
     Plotly.newPlot(el('figRisco'), [
-      { x, y: D.map(eT), name: 'tomado', type: 'scatter', mode: 'lines',
+      { x, y: D.map(eT), name: _T.pos, type: 'scatter', mode: 'lines',
         fill: 'tozeroy', line: { color: NEG(), width: 0.8 },
         fillcolor: 'rgba(200,60,60,.20)',
-        hovertemplate: 'tomado ' + fex + '<extra></extra>' },
-      { x, y: D.map(eA), name: 'aplicado', type: 'scatter', mode: 'lines',
+        hovertemplate: _T.pos + ' ' + fex + '<extra></extra>' },
+      { x, y: D.map(eA), name: _T.neg, type: 'scatter', mode: 'lines',
         fill: 'tozeroy', line: { color: P()[0], width: 0.8 },
         fillcolor: 'rgba(0,110,80,.20)',
-        hovertemplate: 'aplicado ' + fex + '<extra></extra>' },
+        hovertemplate: _T.neg + ' ' + fex + '<extra></extra>' },
       /* ⚠️ o liquido e a SOMA das duas areas, entao ele anda por dentro delas —
          e onde as duas existem no mesmo dia, a distancia ate a borda e a ponta
          que esta sendo compensada (a inclinacao carregada). */
-      { x, y: D.map(ex), name: 'líquido (+ = tomado)', type: 'scatter',
+      { x, y: D.map(ex), name: _T.liq, type: 'scatter',
         mode: 'lines', line: { color: cssv('--ink'), width: 1.6 },
-        customdata: D.map((r) => [(emBps() ? r.pl : r.dv01_brl)]),
+        customdata: D.map((r) => [_T.serieMod(r)]),
         hovertemplate: '<b>líquido ' + fex + '</b>'
                      + '<br>risco carregado (módulo) ' + fcd + '<extra></extra>' },
     ], baseLayout(t, {
@@ -1599,12 +2033,13 @@
        seletor de regua, que re-renderiza so a aba ativa, faria o card parecer
        quebrado a cada troca. Hoje ele e desenhado pelo `tabCusto`. */
 
-    const vivos = D.filter((r) => r.pl > 0).map((r) => r.pl);
+    /* ⭐ a distribuição segue a régua: no câmbio é o MÓDULO do % do NAV do dia */
+    const vivos = D.map(_T.serieDist).filter((v) => v != null && v > 0);
     Plotly.newPlot(el('figPlDist'), [
       { x: vivos, type: 'histogram', nbinsx: 24, marker: { color: P()[0] },
-        hovertemplate: '#PL %{x}<br>%{y} pregões<extra></extra>' },
+        hovertemplate: _T.nome + ' %{x}<br>%{y} pregões<extra></extra>' },
     ], baseLayout(t, {
-      height: H_HALF(), xaxis: { title: { text: '#PL' } },
+      height: H_HALF(), xaxis: { title: { text: _T.eixo } },
       yaxis: { title: { text: 'pregões' } }, showlegend: false,
     }), CFG);
 
@@ -1631,8 +2066,29 @@
        quartis e do contrafactual. Quando chegar um book de cambio, ele sai
        daqui sozinho. A regua propria da opcao continua no bloco de premio. */
     const _semDv01 = new Set((TA.excluidos && TA.excluidos.books) || []);
-    const C = TA.por_contrato.filter((r) => !_semDv01.has(r.book))
-      .sort((a, b) => String(a.maturity || '').localeCompare(String(b.maturity || '')));
+    /* ⭐ **"ONDE ELE OPERA" — E NO CÂMBIO NÃO É A CURVA.**
+       ⛔ No juros o corte é por VÉRTICE (Jan28, Jan31…) porque cada prazo é um
+       risco diferente. No dólar o ativo econômico é UM: cortar por vencimento
+       inventaria eixo. O que de fato distingue é **por onde ele executa** —
+       futuro cheio (US$ 50.000), mini (1/5 disso), balcão (NDF) ou opção —, e
+       isso responde se ele usa mini para calibrar tamanho e quanto do giro passa
+       por cada porta.
+       ⚠️ O giro sai em **nocional USD**, não em contratos: DOL e WDO diferem 5×
+       e somá-los subestimaria o mini na mesma proporção (§5.2, o mesmo motivo de
+       o juros medir giro em R$/bp). */
+    const _fxNat = TAM().fx && Array.isArray(TA.por_natureza) && TA.por_natureza.length;
+    const C = _fxNat
+      ? TA.por_natureza.map((r) => ({
+          ativo: r.rotulo, vencimento: r.rotulo, ativo_nome: r.rotulo,
+          maturity: '', book: 'dolar', n: r.n_boletas,
+          /* o eixo do giro: nocional em US$ MM (o número em unidades seria
+             ilegível — são bilhões) */
+          giro_pl: (r.giro_usd || 0) / 1e6,
+          giro_dv01_brl: (r.giro_usd || 0) / 1e6,
+          total_bps: null, total_brl: null,
+        }))
+      : TA.por_contrato.filter((r) => !_semDv01.has(r.book))
+          .sort((a, b) => String(a.maturity || '').localeCompare(String(b.maturity || '')));
     /* ☠️ O EIXO CORTAVA AS PALAVRAS (01/09/2026, reportado pelo usuario: "esta
        comendo a legenda do eixo x, cortando palavras"). Desde que a aba passou
        a trazer TODOS os books, este eixo recebia o `ativo` cru da opcao — ate
@@ -1654,7 +2110,8 @@
          NOMINAL. Um `B Ago28` ao lado de um `Jan28` sem marca convidaria a
          le-los como o mesmo vertice — daí o prefixo `B` no rotulo E a cor. */
       { x: cx, y: C.map((r) => (emBps() ? r.giro_pl : r.giro_dv01_brl)),
-        name: emBps() ? 'giro (#PL)' : 'giro (R$/bp de DV01)', type: 'bar',
+        name: _fxNat ? 'giro (US$ MM de nocional)'
+                     : (emBps() ? 'giro (#PL)' : 'giro (R$/bp de DV01)'), type: 'bar',
         marker: { color: C.map((r) => (r.book === 'titulo' ? P()[4] || P()[1] : P()[2])) },
         customdata: C.map((r, i) => [r.giro_contratos, r.dv01_mediano, r.dv01_medio,
                                      r.n, chover[i]]),
@@ -1685,7 +2142,9 @@
          continua nascendo no zero e a altura dela segue proporcional ao valor.
          O que aquela nota proibia era o eixo automatico CORTAR a base num
          positivo — o `zeroAlinhado` so acrescenta folga VAZIA abaixo do zero. */
-      yaxis: { title: { text: emBps() ? 'giro (#PL)' : 'giro R$/bp' }, range: rgGiro },
+      yaxis: { title: { text: _fxNat ? 'giro (US$ MM de nocional)'
+                          : (emBps() ? 'giro (#PL)' : 'giro R$/bp') },
+               range: rgGiro },
       yaxis2: { title: { text: uni() }, overlaying: 'y', side: 'right', showgrid: false,
                 zeroline: true, range: rgRes },
       /* ⚠️ `automargin` sozinho cresce a margem mas NAO afasta os rotulos entre
@@ -1723,9 +2182,14 @@
       { t: 'n', num: 1, f: (r) => nf(r.n, 0), tip: 'n' },
       { t: 'acerto', num: 1, f: (r) => pct(r.hit) },
       { t: 'payoff<br><i>média / mediana</i>', num: 1, f: (r) => par(r.payoff, r.payoff_mediana) },
-      { t: 'bps taxa<br><i>média / mediana / <b>ponderada</b></i>', num: 1,
-        tip: 'bps_taxa_terno',
-        f: (r) => terno(r.bps_taxa_medio, r.bps_taxa_mediano, r.bps_taxa_ponderado) },
+      /* ⭐ a coluna de MOVIMENTO segue a régua: `bps taxa` no juros, `var %
+         moeda` no câmbio (ver `MOV`). O terno média/mediana/ponderada é o
+         mesmo — o problema é idêntico (movimento de preço com tamanhos
+         diferentes atrás). */
+      { t: MOV().col + '<br><i>média / mediana / <b>ponderada</b></i>', num: 1,
+        tip: MOV().fx ? 'var_moeda_terno' : 'bps_taxa_terno',
+        f: (r) => terno(r[MOV().med], r[MOV().mediana], r[MOV().pond],
+                        MOV().fx ? (v) => nf(v, 3) : undefined) },
       /* ⭐ O EQUIVALENTE DA OPCAO (01/09/2026, pedido do usuario). A opcao nao
          entra em `bps taxa` — e nao deve: o preco dela nao e taxa. ✅ Aferido
          que ela ja sai NULA (nao zero) ali, entao nunca puxou a media.
@@ -1744,15 +2208,40 @@
          ponderada —, porque o problema e identico: movimento de preco com
          tamanhos diferentes atras. A ponderada usa R$/ponto x giro/2 e
          RECONCILIA com o dinheiro (identidade exata nos 118 ciclos da base). */
+      /* ⛔ `pts %` é a régua da OPÇÃO DE JUROS (prêmio em pontos percentuais) e
+         NÃO tem análogo no câmbio — ali a opção entra pelo nocional × delta, que
+         já é a coluna de tamanho. No FX a célula sai com traço em vez de
+         inventar uma unidade. */
       { t: 'pts %<br><i>média / mediana / <b>ponderada</b></i>', num: 1, tip: 'pts_col',
+        /* ⛔ `_so` = a coluna só existe nesta régua. `pts %` é a régua da OPÇÃO
+           DE JUROS (prêmio em pontos percentuais) e não tem análogo no câmbio —
+           ali a opção entra pelo nocional × delta, que já é a coluna de tamanho.
+           ⚠️ A 1ª tentativa deixou a coluna e pôs '—' na célula: o CABEÇALHO
+           continuava dizendo "pts %" na tela de dólar, e a varredura semântica
+           acusou. Vocabulário que não pertence ao grupo tem de SAIR, não ficar
+           vazio. */
+        _so: 'juros',
         f: (r) => (r.result_pts_mediano == null ? '—'
                    : terno(r.result_pts_medio, r.result_pts_mediano,
                            r.result_pts_ponderado)) },
-      { t: '#PL<br><i>média / mediana</i>', num: 1, tip: 'pl',
-        f: (r) => par(r.pl_medio, r.pl_mediano) },
-      { t: 'DV01<br><i>média / mediana</i>', num: 1, f: (r) => par(r.dv01_medio, r.dv01_mediano, (v) => nf(v, 0)) },
-      { t: 'giro R$/bp', num: 1, f: (r) => nf(r.giro_dv01_brl, 0), tip: 'giro_dv01' },
-    ].concat(colsResultado()), TA.por_direcao);
+      /* ⭐ a coluna de TAMANHO segue a régua: #PL no juros, % do NAV no câmbio */
+      { t: TAM().nome + '<br><i>média / mediana</i>', num: 1, tip: TAM().tip,
+        f: (r) => (TAM().fx
+                   ? par(r.pct_nav_medio, r.pct_nav_mediano, (v) => nf(v, 1) + '%')
+                   : par(r.pl_medio, r.pl_mediano)) },
+      { t: 'DV01<br><i>média / mediana</i>', num: 1, _so: 'juros',
+        f: (r) => par(r.dv01_medio, r.dv01_mediano, (v) => nf(v, 0)) },
+      /* ⭐ o GIRO segue a regua, e a unidade nao e cosmetica: no juros ele e em
+         R$/bp porque contrato nao compara vencimentos (§5.2); no cambio e em
+         nocional porque um DOL e 5x um mini WDO. `giro_contratos` no cambio JA
+         vem em nocional USD (ver `stats_fx`). */
+      { t: MOV().fx ? 'giro US$ MM' : 'giro R$/bp', num: 1, tip: 'giro_dv01',
+        f: (r) => (MOV().fx ? nf((r.giro_contratos || 0) / 1e6, 0)
+                            : nf(r.giro_dv01_brl, 0)) },
+    ].concat(colsResultado())
+      /* ⭐ mesmo filtro de régua da `colsStat` — ver a nota lá */
+      .filter((c) => !c._so || (c._so === 'juros') !== MOV().fx),
+      TA.por_direcao);
     blocoSizing();
     blocoPremio();
   }
@@ -1994,15 +2483,24 @@
          ficha. `1,20×` = "20% maior que o tipico do tipo dele", e isso vale
          para o condor e para o ODF31 na mesma coluna. */
       ficha('Tamanho por trade — acerta × erra', [
+        /* ⚠️ A 2ª informação do subtítulo é a régua ABSOLUTA do grupo — `#PL`
+           no juros, `% do NAV` no câmbio. Com o texto cravado, a tela de dólar
+           dizia "em #PL (títulos e DI)", que ali é vocabulário de outro ativo. */
         linha('Tamanho médio quando acerta', nf(S.tam_norm_medio_vencedor, 2) + '×',
-            'mediana ' + nf(S.tam_norm_mediano_vencedor, 2) + '× · em #PL (títulos e DI) '
-            + nf(S.pl_medio_vencedor, 2), '', 'tam_norm', true),
+            'mediana ' + nf(S.tam_norm_mediano_vencedor, 2) + '× · em '
+            + TAM().nome + (TAM().fx ? ' ' : ' (títulos e DI) ')
+            + ntam(TAM().fx ? S.tam_medio_vencedor : S.pl_medio_vencedor),
+            '', 'tam_norm', true),
         linha('Tamanho médio quando erra', nf(S.tam_norm_medio_perdedor, 2) + '×',
-            'mediana ' + nf(S.tam_norm_mediano_perdedor, 2) + '× · em #PL (títulos e DI) '
-            + nf(S.pl_medio_perdedor, 2), '', 'tam_norm'),
-      ], '1,00× é o tamanho típico do tipo do instrumento — #PL no DI e no papel, '
-       + 'prêmio em bps do NAV na opção. ⚠️ É UMA posição por vez: não confundir '
-       + 'com o #PL do dia, que soma as posições vivas (a linha "Posições vivas '
+            'mediana ' + nf(S.tam_norm_mediano_perdedor, 2) + '× · em '
+            + TAM().nome + (TAM().fx ? ' ' : ' (títulos e DI) ')
+            + ntam(TAM().fx ? S.tam_medio_perdedor : S.pl_medio_perdedor),
+            '', 'tam_norm'),
+      ], '1,00× é o tamanho típico do tipo do instrumento — ' + (TAM().fx
+           ? '% do NAV no futuro e no NDF, nocional × delta na opção'
+           : '#PL no DI e no papel, prêmio em bps do NAV na opção')
+       + '. ⚠️ É UMA posição por vez: não confundir '
+       + 'com o ' + TAM().nome + ' do dia, que soma as posições vivas (a linha "Posições vivas '
        + 'por pregão", acima, é a que fecha essa conta).'),
 
       ficha('Quanto o sizing valeu', [
@@ -2123,12 +2621,25 @@
          e o correto, e nao um buraco. */
       { t: 'tamanho<br><i>média / mediana</i>', num: 1, tip: 'tam_norm',
         f: (r) => par(r.tam_norm_medio, r.tam_norm, (v) => nf(v, 2) + '×') },
+      /* ⛔ a coluna em #PL nao existe no cambio (a de tamanho normalizado,
+         acima, ja e a regua comum) */
       { t: '#PL<br><i>média / mediana · títulos e DI</i>', num: 1, tip: 'pl',
+        _so: 'juros',
         f: (r) => (r.pl == null && r.pl_medio == null ? '—' : par(r.pl_medio, r.pl)) },
       { t: 'acerto', num: 1, f: (r) => pct(r.hit), tip: 'acerto' },
-      { t: 'bps taxa<br><i>média / mediana / <b>ponderada</b></i>', num: 1,
-        tip: 'bps_taxa_terno',
-        f: (r) => terno(r.bps_taxa_medio, r.bps_taxa, r.bps_taxa_ponderado) },
+      /* ☠️ **ESTA TABELA NAO TEM PONDERADA, e o cabecalho prometia uma.** O
+         `quartis` do payload traz media e mediana (`bps_taxa_medio`/`bps_taxa`,
+         e no cambio `var_moeda_medio`/`var_moeda_mediano`) — o
+         `bps_taxa_ponderado` que o codigo lia **nao existe aqui**, entao a 3a
+         posicao do terno vinha `undefined` e o `<th>` anunciava um numero que
+         nunca aparecia. E um par, e o cabecalho diz que e um par.
+         ⚠️ Os nomes de campo do quartil sao LOCAIS (a mediana mora em
+         `bps_taxa`, sem sufixo), por isso nao saem do `MOV()`. */
+      { t: MOV().col + '<br><i>média / mediana</i>', num: 1,
+        tip: MOV().fx ? 'var_moeda_terno' : 'bps_taxa_terno',
+        f: (r) => (MOV().fx
+                   ? par(r.var_moeda_medio, r.var_moeda_mediano, (v) => nf(v, 3))
+                   : par(r.bps_taxa_medio, r.bps_taxa)) },
       /* ⚠️ SEGUE A REGUA: em bps a coluna sai em bps. Estas quatro colunas de
            `resultado` estavam cravadas em R$ e apareciam em reais numa pagina
            inteira em bps do NAV — o mesmo modo de falhar do bloco de helpers
@@ -2137,7 +2648,7 @@
         tip: 'resultado_bcl' },
       { t: 'bps NAV', num: 1, f: (r) => bps(r.bps), cls: (r) => sgn(r.bps).trim(),
         tip: 'bps_nav' },
-    ], Q);
+    ].filter((c) => !c._so || (c._so === 'juros') !== MOV().fx), Q);
   }
 
   /* ══════════════════ ACERTO & PAYOFF ══════════════════ */
@@ -2209,12 +2720,24 @@
            ⚠️ Continuam aqui porque respondem uma pergunta legitima — "ele leu a
            curva?" — mas o rotulo agora NOMEIA a regua, em vez de deixar o leitor
            supor que e resultado. */
-        linha('Movimento de taxa — ponderado', nf(R.bps_taxa_ponderado, 2) + ' bp',
-            'quanto a TAXA andou a favor, por DV01 × giro. ⚠️ bruto, sem custo — '
-            + 'mede a leitura da curva, não o dinheiro', '', 'bps_taxa_terno'),
-        linha('Movimento de taxa — simples', nf(R.bps_taxa_medio, 2) + ' bp',
-            'mediana ' + nf(R.bps_taxa_mediano, 2) + ' bp · a aposta típica, sem peso',
-            '', 'bps_taxa_terno'),
+        /* ⭐ **A FICHA SEGUE A RÉGUA DE MOVIMENTO** (ver `MOV`). ☠️ Com
+           `bps_taxa` cravado, ela saía **"— bp"** nas duas linhas na tela de
+           câmbio: uma ficha inteira vazia, com vocabulário de juros. E o `bp`
+           está errado ali por definição — a moeda se lê em variação %.
+           ⚠️ A MÉDIA lidera e a mediana é a 2ª informação (§5.3/§5.-56), que é
+           a norma da casa e vale para todo grupo. */
+        linha(MOV().nome + ' — ponderado',
+            nf(R[MOV().pond], MOV().casas) + ' ' + MOV().unid,
+            (MOV().fx
+             ? 'quanto a MOEDA andou a favor, ponderado pelo nocional girado. '
+             : 'quanto a TAXA andou a favor, por DV01 × giro. ')
+            + '⚠️ bruto, sem custo — mede a leitura do preço, não o dinheiro',
+            '', MOV().fx ? 'var_moeda_terno' : 'bps_taxa_terno'),
+        linha(MOV().nome + ' — simples',
+            nf(R[MOV().med], MOV().casas) + ' ' + MOV().unid,
+            'mediana ' + nf(R[MOV().mediana], MOV().casas) + ' ' + MOV().unid
+            + ' · a aposta típica, sem peso',
+            '', MOV().fx ? 'var_moeda_terno' : 'bps_taxa_terno'),
       ], 'A expectativa pode trocar de sinal entre média e mediana: o trade típico '
        + 'perde e o livro ganha pela cauda.')
     );
@@ -2311,15 +2834,24 @@
       showlegend: false,
     }), CFG);
 
-    const di = TR.filter((r) => r.book === 'di' && r.bps_taxa != null && !r.aberto);
+    /* ⭐ **O MOVIMENTO DE PREÇO CAPTURADO, na régua do grupo** (ver `MOV`).
+       ⛔ No câmbio NÃO é "bps de taxa": um dólar de 5,00 para 5,05 andou **1%**,
+       não "5 bps" — a régua da moeda é a variação RELATIVA. E o filtro por
+       `book === 'di'` deixava o gráfico VAZIO no BRL. */
+    const _M = MOV();
+    const di = TR.filter((r) => r[_M.campo] != null && !r.aberto);
+    const _mx = (r) => r[_M.campo];
     Plotly.newPlot(el('figBpsTaxa'), [
-      { x: di.filter((r) => r.ganhou).map((r) => r.bps_taxa), name: 'ganhou',
+      { x: di.filter((r) => r.ganhou).map(_mx), name: 'ganhou',
         type: 'histogram', marker: { color: P()[0] }, opacity: 0.78, nbinsx: 30 },
-      { x: di.filter((r) => !r.ganhou).map((r) => r.bps_taxa), name: 'perdeu',
+      { x: di.filter((r) => !r.ganhou).map(_mx), name: 'perdeu',
         type: 'histogram', marker: { color: NEG() }, opacity: 0.78, nbinsx: 30 },
     ], baseLayout(t, {
       height: H_HALF(), barmode: 'overlay',
-      xaxis: { title: { text: 'bps de taxa a favor (movimento capturado)' }, zeroline: true },
+      xaxis: { title: { text: _M.fx
+                 ? 'variação % da moeda a favor (movimento capturado)'
+                 : 'bps de taxa a favor (movimento capturado)' },
+               zeroline: true },
       yaxis: { title: { text: 'trades' } }, legend: { orientation: 'h' },
     }), CFG);
 
@@ -2393,12 +2925,24 @@
            e um real e doze centavos. E o rotulo e "contrato", nao "perna"
            (decisao do usuario) — que cada compra e cada venda contam fica no
            detalhe, que e onde a ressalva pertence. */
-        linha('Por contrato de DI', 'R$ ' + nf(R.custo_por_contrato_di, 2),
+        /* ⭐ **O CUSTO UNITARIO E O DENOMINADOR DELE SEGUEM O GRUPO.**
+           ☠️ "R$ por contrato" nao serve no cambio: ali o tipo `F` e DOL **e**
+           WDO, e um DOL vale 5x um mini — somar as contagens da um custo por
+           um contrato que nao existe, e ele CAI quando o trader migra para o
+           mini sem nada ter ficado mais barato. No cambio o denominador e o
+           nocional girado (ver `_custo_unitario` no report.py). */
+        linha(MOV().fx ? 'Por US$ MM de nocional' : 'Por contrato de DI',
+            'R$ ' + nf(MOV().fx ? R.custo_por_musd : R.custo_por_contrato_di, 2),
             'cada compra e cada venda contam', '', 'custo_ct', true),
-        linha('Contratos girados', nf(R.contratos_di_pernas, 0),
-            'o denominador da linha acima', '', 'pernas'),
-      ], 'Varia por vencimento: o emolumento da B3 é proporcional ao valor do '
-       + 'contrato, então um ODF31 custa mais que um ODJ26.')
+        linha(MOV().fx ? 'Nocional girado (US$ MM)' : 'Contratos girados',
+            nf(MOV().fx ? R.giro_musd : R.contratos_di_pernas, 0),
+            'o denominador da linha acima', '', MOV().fx ? 'giro_musd' : 'pernas'),
+      ], MOV().fx
+         ? 'Varia por porta de execução: a B3 cobra por contrato, então o '
+           + '<b>mini</b> (US$ 10.000) custa mais por dólar de nocional que o '
+           + 'futuro cheio (US$ 50.000); o balcão cobra de outra forma.'
+         : 'Varia por vencimento: o emolumento da B3 é proporcional ao valor do '
+           + 'contrato, então um ODF31 custa mais que um ODJ26.')
     );
 
     /* custo acumulado × resultado bruto: a distância entre as duas linhas é o
@@ -2492,23 +3036,39 @@
            · #PL (DV01 x 1e4 / NAV)   ->  PREMIO em bps do NAV posto em risco
          ⛔ Cada uma numa unidade diferente na MESMA coluna exige o sufixo: sem
          o `pt`/`bps` o leitor somaria as duas verticalmente. */
-      { t: 'movimento<br><i>bps de taxa · pt na opção</i>', num: 1,
+      /* ⭐ **A 3ª LISTA DE COLUNAS, e ela também segue a régua.** Este é o corte
+         por ATIVO, e no câmbio o movimento é variação % da moeda e o tamanho é
+         % do NAV — os rótulos de juros aqui foram acusados pela varredura
+         semântica na aba "contratos". */
+      { t: MOV().fx ? 'movimento<br><i>variação % da moeda</i>'
+                    : 'movimento<br><i>bps de taxa · pt na opção</i>', num: 1,
         tip: 'mov_contrato',
-        f: (r) => (r.book === 'opcao'
-                   ? (r.result_pts_mediano == null ? '—'
-                      : terno(r.result_pts_medio, r.result_pts_mediano,
-                              r.result_pts_ponderado, (v) => nf(v, 1) + ' pt'))
-                   : terno(r.bps_taxa_medio, r.bps_taxa_mediano, r.bps_taxa_ponderado)) },
-      { t: 'DV01<br><i>média / mediana</i>', num: 1,
+        f: (r) => (MOV().fx
+                   ? terno(r.var_moeda_medio, r.var_moeda_mediano,
+                           r.var_moeda_ponderado, (v) => nf(v, 3) + '%')
+                   : (r.book === 'opcao'
+                      ? (r.result_pts_mediano == null ? '—'
+                         : terno(r.result_pts_medio, r.result_pts_mediano,
+                                 r.result_pts_ponderado, (v) => nf(v, 1) + ' pt'))
+                      : terno(r.bps_taxa_medio, r.bps_taxa_mediano,
+                              r.bps_taxa_ponderado))) },
+      /* ⛔ a coluna de DV01 não existe no câmbio (`_so`) */
+      { t: 'DV01<br><i>média / mediana</i>', num: 1, _so: 'juros',
         f: (r) => (r.book === 'opcao' ? '—'
                    : par(r.dv01_medio, r.dv01_mediano, (v) => nf(v, 0))) },
-      { t: 'tamanho<br><i>#PL · prêmio bps na opção</i>', num: 1, tip: 'tam_contrato',
-        f: (r) => (r.book === 'opcao'
-                   ? (r.premio_bps_mediano == null ? '—'
-                      : nf(r.premio_bps_mediano, 1) + ' bps')
-                   : par(r.pl_medio, r.pl_mediano)) },
+      { t: MOV().fx ? 'tamanho<br><i>% do NAV</i>'
+                    : 'tamanho<br><i>#PL · prêmio bps na opção</i>', num: 1,
+        tip: 'tam_contrato',
+        f: (r) => (MOV().fx
+                   ? par(r.pct_nav_medio, r.pct_nav_mediano, (v) => nf(v, 1) + '%')
+                   : (r.book === 'opcao'
+                      ? (r.premio_bps_mediano == null ? '—'
+                         : nf(r.premio_bps_mediano, 1) + ' bps')
+                      : par(r.pl_medio, r.pl_mediano))) },
       { t: 'giro', num: 1, f: (r) => nf(r.giro_contratos, 0), tip: 'giro_ct' },
-    ].concat(colsResultado()), C);
+    ].concat(colsResultado())
+      /* ⭐ mesmo filtro de régua das outras listas */
+      .filter((c) => !c._so || (c._so === 'juros') !== MOV().fx), C);
   }
 
   /* ══════════════════ COMO É MEDIDO ══════════════════ */
@@ -2546,7 +3106,7 @@
 
     table(el('tblReguas'), [
       { t: 'régua' }, { t: 'o que é' }, { t: 'para que serve' }, { t: 'du' },
-    ].map((c, i) => ({ t: c.t, f: (r) => r[i] })), [
+    ].map((c, i) => ({ t: c.t, f: (r) => r[i] })), MOV().fx ? REGUAS_FX : [
       /* ⚠️ TABELA CORRIGIDA (31/08/2026). O que estava errado:
          · `bps_nav` dizia "NAV do trader NO PERÍODO do trade" — é o NAV DO DIA,
            somado dia a dia, desde que o denominador virou o do momento;
@@ -2622,18 +3182,37 @@
          preço de marcação e o DV01 da NTN-B. E a linha da posição de abertura
          trazia o ano CRAVADO em 2026, quando o ano é parâmetro da tela. */
       ['Posição, exposição, fronteira do ciclo e resultado', '<code>' + F.posicao_resultado + '</code>'],
-      ['Taxa e PU de ajuste diários (risco e marcação do DI)', '<code>' + F.ajuste_diario + '</code>'],
+      /* ⚠️ o VALOR ja vem do payload por grupo (`_fontes_do_grupo`); o que
+         faltava era o RÓTULO — ele nomeava "DI" e "NTN-B" na tela de dólar. */
+      [MOV().fx ? 'Preço de marcação da posição (o dólar de fechamento)'
+                : 'Taxa e PU de ajuste diários (risco e marcação do DI)',
+       '<code>' + F.ajuste_diario + '</code>'],
       ['Preço de fechamento dos demais ativos',
        '<code>' + (F.preco_marcacao || 'SOPHIS.HISTORIQUE ⋈ SOPHIS.TITRES') + '</code>'],
-      ['DV01 da NTN-B (duração calculada por nós)',
+      [MOV().fx ? 'Delta da opção (a régua de exposição dela)'
+                : 'DV01 da NTN-B (duração calculada por nós)',
        '<code>' + (F.dv01_titulo || 'ODS.RISK_GOVBONDS') + '</code>'],
-      ['R$ por ponto da opção',
-       'derivado do <code>amount</code> da própria boleta — a digital de COPOM valia '
-       + '<b>R$ 100,00/ponto até 26/05/2025</b> e R$ 1,00 depois'],
+      /* ⭐ o análogo no câmbio é o NOCIONAL do contrato, que é o que faz o mini
+         valer 1/5 do cheio — e é a conversão que o motor aplica na borda */
+      MOV().fx
+        ? ['Nocional de cada contrato',
+           'DOL <b>US$ 50.000</b> · WDO <b>US$ 10.000</b> (1/5) · NDF pelo '
+           + '<code>amount</code> da própria boleta — aferido contra a B3 '
+           + '(<code>ADJSTDVALCTRCT/VARTNPTS</code> = 50,0 e 10,0 exatos)']
+        : ['R$ por ponto da opção',
+           'derivado do <code>amount</code> da própria boleta — a digital de COPOM valia '
+           + '<b>R$ 100,00/ponto até 26/05/2025</b> e R$ 1,00 depois'],
       ['Custo de transação', '<code>' + (F.custos || '3 taxas da própria boleta') + '</code>'],
       ['Carrego do caixa', '<code>' + (F.carrego || 'CDI over') + '</code>'],
       ['Calendário de pregão', '<code>UP2DATA.SETTLEMENTPRICE.RPTDT</code> — dia em que a B3 publicou ajuste'],
-      ['Dias úteis (du/252)', '<code>fixed-income-br/shared/calendar_br.py</code> (ANBIMA)'],
+      /* ⛔ `du/252` e a exclusão de `hedge_cambial` são cada uma de UM grupo:
+         no câmbio não há régua de 252 (não há PU a descontar), e no juros não
+         há trava patrimonial a excluir. */
+      MOV().fx
+        ? ['Fora da análise',
+           'tudo que está em <code>hedge_cambial</code> — é trava patrimonial da '
+           + 'casa, não decisão de trader']
+        : ['Dias úteis (du/252)', '<code>fixed-income-br/shared/calendar_br.py</code> (ANBIMA)'],
       ['Posição de abertura do ano',
        'boletas <code>pnl_eoy_open_*' + (TA.ano || '') + '*</code> de 31/12, em <code>infosbackoffice</code>'],
       ['NAV do trader (denominador)', '<code>' + F.nav + '</code>'],
