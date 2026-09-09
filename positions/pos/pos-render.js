@@ -492,10 +492,12 @@ function optEditApply(input, td) {
    Moedas quebram por PAR (USDBRL, EURBRL, USDCLP…) e commodities pelo ATIVO (Gold…), a
    pedido da mesa: "moedas" num número só não diz nada quando há USDBRL, EURUSD e USDZAR na
    mesma linha, e "commodities" idem. Juros/bolsa continuam num chip cada.
-   ⚠️ `_dollarKind` (pos-dolar.js) é a fonte única do recorte de dólar e já recolhe futuro
-   cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF — o "tudo concentrado" pedido.
+   ⚠️ `isUsdBrlDollarRow` (pos-dolar.js) é a fonte única do recorte de dólar e já recolhe
+   futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF — o "tudo concentrado".
    ☠️ EURBRL NÃO entra no USDBRL: é opção contra o BRL mas não é dólar (ver o gotcha do
    `Digital_EURBRL` no `_dollarKind` e em classify.py). Vira o SEU chip, logo depois.
+   ⚠️ NÃO trocar por `_dollarKind(r) != null`: desde set/2026 a EURBRL TEM kind (ela entra
+   na tabela Consolidado Dólar pela perna de BRL) e cairia aqui no chip do dólar.
 
    ── Balde vazio não aparece ──────────────────────────────────────────────────────────
    Chip cujo net arredonda para zero em todas as unidades é OMITIDO (pedido da mesa: "só
@@ -509,7 +511,15 @@ function optEditApply(input, td) {
    feio, mas verdadeiro; o tooltip do chip lista os instrumentos somados, então dá para ver
    o que é e acrescentar aqui. Grãos usam root de 1 letra + espaço ("C 1 Comdty"). */
 const _NET_COMMOD_ROOTS = [
-  ['XGC', 'Gold'],  ['GC', 'Gold'],   ['SI', 'Silver'],      ['HG', 'Copper'],
+  // Ouro: o futuro COMEX (`GC`, genérico `GCA Comdty`) e a opção mensal sobre ele (`GC…`)
+  // saem do mesmo root, mas as SEMANAIS têm um root PRÓPRIO POR DIA DA SEMANA — cinco
+  // tickers que não parecem ouro e que o fallback alfabético rotulava com o próprio prefixo
+  // (a `XATWU6P2 4340 Comdty` virava o chip **"XAT"**, era o sintoma reportado pela mesa):
+  //   XAWA seg · XGIA ter · XATA qua · XGRA qui · XGCA sex   (o `A` é o genérico da BBG;
+  //   o contrato vivo perde o `A` — `XATV6`, `XATWU6P2 4340`).
+  // Os 5 são de 3 letras e o `.sort` por comprimento já os testa antes de `GC`/`XB`.
+  ['XAT', 'Gold'],  ['XAW', 'Gold'],  ['XGC', 'Gold'],  ['XGI', 'Gold'],  ['XGR', 'Gold'],
+  ['GC', 'Gold'],   ['SI', 'Silver'],      ['HG', 'Copper'],
   ['PL', 'Platinum'], ['PA', 'Palladium'],
   ['CL', 'WTI'],    ['CO', 'Brent'],  ['QS', 'Gasoil'],      ['HO', 'Heating Oil'],
   ['XB', 'Gasolina'], ['NG', 'Nat Gas'],
@@ -612,7 +622,7 @@ const _netEquityRank = lbl => (lbl === 'RV Off' ? 1 : 0);
    FX → o `option_undl`, que o backend já resolve com o parser de par (classify.py,
    `fx_pair_from_name`) — não reimplementar aqui; à vista/forward → o nome sem a barra. */
 function _netFxPair(r) {
-  if (_dollarKind(r) != null) return 'USDBRL';
+  if (isUsdBrlDollarRow(r)) return 'USDBRL';
   const undl = (r.option_undl || '').toUpperCase().replace(/[^A-Z]/g, '');
   if (undl.length === 6) return undl;
   const nm = (r.instrument_name || '').toUpperCase().split(/\s+/)[0];
@@ -630,7 +640,7 @@ function _netPairRank(p) {
 
 const POS_NET_GROUPS = [
   { id: 'fx', sort: 30, sub: _netFxPair, subRank: _netPairRank,
-    tip: 'Moedas, por par. USDBRL concentra futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF (recorte do _dollarKind); EURBRL é BRL mas não é dólar, e tem chip próprio.',
+    tip: 'Moedas, por par. USDBRL concentra futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF (recorte do isUsdBrlDollarRow); EURBRL é BRL mas não é dólar, e tem chip próprio.',
     match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || r.area === 'Currencies' },
 
   { id: 'di', sort: 10, sub: () => 'DI',

@@ -36,9 +36,15 @@ function _dollarKind(r) {
   // DÓLAR. Não era visível enquanto o `option_undl` de um `Digital_EURBRL…` saía quebrado
   // ("IGITAL"); com o rótulo correto (set/2026) passaria a entrar nesta tabela. Mesmo
   // aperto no `_isDolUsdbrlOpt` (pos-render.js) e no `dollar_kind` (positions/classify.py).
+  // ⭐ A EURBRL PASSOU A ENTRAR (set/2026, pedido da mesa) — mas com kind PRÓPRIO, nunca
+  // como 'fxopt'. Ela é BRL contra EUR, e o que a traz para cá é só a PERNA DE BRL, que se
+  // converte em UC-equivalente (ver `metric`/`ucEq`). O kind separado é o que permite (a)
+  // dizer isso na tela, coluna Tipo + nota de rodapé, e (b) deixar o `dollar_kind` do
+  // Python intocado — é ele que monta o NAV por caixinha de dólar, onde EURBRL não entra.
   if (r.is_option && r.option_subtype === 'fx') {
     const _u = (r.option_undl || '').toUpperCase();
     if (_u.includes('USD') && _u.includes('BRL')) return 'fxopt';
+    if (_u.includes('EUR') && _u.includes('BRL')) return 'eurbrlopt';
   }
   if (r.is_fx) {
     const nm = (r.instrument_name || '').toUpperCase().replace(/\s/g, '');
@@ -50,7 +56,29 @@ function _dollarKind(r) {
 const _DOLLAR_KIND_LABEL = {
   uc: 'Futuro cheio (UC)', wdo: 'Futuro mini (WDO)',
   dolopt: 'Opção DOL', fxopt: 'Opção USDBRL', fxfwd: 'Spot/Fwd USD/BRL',
+  eurbrlopt: 'Opção EURBRL →USD',
 };
+// Tooltip da célula Tipo. Só a EURBRL tem: é a única linha da tabela cujo UC-equiv depende
+// de uma PREMISSA (EURUSD parado) em vez de só de uma razão de contrato ou de face.
+const _DOLLAR_KIND_TIP = {
+  eurbrlopt: 'Opção EURBRL. O nocional em EUR já vem convertido a USD pelo EURUSD spot; '
+           + 'o delta é contra o EURBRL. O UC-equiv é a PERNA DE BRL equivalente '
+           + '(EURBRL = EURUSD × USDBRL, com EURUSD constante) — não é posição em dólar.',
+};
+// Opções, para os dois lugares que precisam do MESMO recorte (bloco e formato de preço).
+const _DOLLAR_OPT_KINDS = new Set(['dolopt', 'fxopt', 'eurbrlopt']);
+
+/* ☠️ `_dollarKind(r) != null` DEIXOU DE SIGNIFICAR "é dólar" quando a EURBRL passou a ter
+   kind (set/2026) — e era exatamente esse teste que o chip de par das abas de trader
+   (`_netFxPair`, pos-render.js) usava para carimbar 'USDBRL'. Sem separar os dois recortes,
+   a EURBRL perderia o chip próprio que a mesa pediu e passaria a somar no chip do dólar,
+   em silêncio. Quem pergunta "é dólar?" usa `isUsdBrlDollarRow`; quem pergunta "entra na
+   tabela Consolidado Dólar?" continua usando `_dollarKind() != null`. */
+const _DOLLAR_USDBRL_KINDS = new Set(['uc', 'wdo', 'dolopt', 'fxopt', 'fxfwd']);
+function isUsdBrlDollarRow(r) {
+  const k = _dollarKind(r);
+  return k != null && _DOLLAR_USDBRL_KINDS.has(k);
+}
 
 function showDolarConsolTab() {
   activeTraderTab = DOLAR_CONSOL_TAB_ID;
@@ -136,7 +164,7 @@ function renderDolarConsol(trader) {
     .filter(x => x.kind);
 
   if (!rows.length) {
-    container.innerHTML = `<div class="card no-data">Nenhuma posição de dólar (UC/WDO, opção DOL/USDBRL, USD/BRL) para ${trader} no book MM.</div>`;
+    container.innerHTML = `<div class="card no-data">Nenhuma posição de dólar (UC/WDO, opção DOL/USDBRL/EURBRL, USD/BRL) para ${trader} no book MM.</div>`;
     return;
   }
 
@@ -157,12 +185,23 @@ function renderDolarConsol(trader) {
     // exposição NOMINAL em USD (delta-independente)
     let nominalUsd;
     if (kind === 'dolopt')     nominalUsd = (r.final_qty != null) ? r.final_qty * UC_FACE_USD : null;          // face US$50k/contrato
-    else if (kind === 'fxopt') nominalUsd = (r.option_nominal_exp != null && nav) ? r.option_nominal_exp * nav : null;
+    // fxopt e eurbrlopt: MESMO ramo de propósito. O `option_nominal_exp` do backend já sai
+    // em USD para as duas — para a EURBRL ele é `qty_EUR × (USD por EUR) / nav` (o
+    // `usd_factor` de `pricing/pnl.py`, que divide pelo spot USDEUR). Aferido em 09/09/2026:
+    // 500.000 EUR → US$ 581.314, EURUSD 1,1626. Não converter aqui de novo.
+    else if (kind === 'fxopt' || kind === 'eurbrlopt')
+                               nominalUsd = (r.option_nominal_exp != null && nav) ? r.option_nominal_exp * nav : null;
     else                       nominalUsd = (r.pl != null && nav) ? r.pl * nav : null;                          // futuros/FX (delta=1)
     const expUsd = isOpt ? (nominalUsd != null && delta != null ? nominalUsd * delta : null) : nominalUsd;
     const expPct = (expUsd != null && nav) ? expUsd / nav : null;
     // UC-equivalente: futuros por contagem de contrato (razão fixa); opção DOL = qtd×delta;
     // USDBRL/spot = nocional ÷ face.
+    // ⭐ **EURBRL cai no MESMO ÷ face, e a conta fecha sem ajuste extra.** A sensibilidade a
+    // BRL de uma EURBRL é `δ × nocional_EUR × ΔEURBRL`; com `EURBRL = EURUSD × USDBRL` e
+    // EURUSD parado, `ΔEURBRL = EURUSD × ΔUSDBRL`, logo ela iguala a de uma USDBRL de
+    // `δ × nocional_EUR × EURUSD` dólares — que é EXATAMENTE o `expUsd` desta linha (o
+    // nocional já vem convertido pelo EURUSD, ver acima). Daí `expUsd / face` ser o
+    // UC-equivalente correto. A premissa (EURUSD constante) vai no tooltip e no rodapé.
     let ucEq;
     if (kind === 'uc')          ucEq = r.final_qty != null ? r.final_qty : null;          // dólar cheio 1:1
     else if (kind === 'wdo')    ucEq = r.final_qty != null ? r.final_qty / 5 : null;      // mini ÷ 5
@@ -173,8 +212,13 @@ function renderDolarConsol(trader) {
     return { ref, ik, nav, isOpt, kind, delta, price, expUsd, expPct, ucEq, premium };
   };
 
-  const optRows = rows.filter(x => x.kind === 'dolopt' || x.kind === 'fxopt');
+  const optRows = rows.filter(x => _DOLLAR_OPT_KINDS.has(x.kind));
   const futRows = rows.filter(x => x.kind === 'uc' || x.kind === 'wdo' || x.kind === 'fxfwd');
+  /* Parcela da EURBRL no total, para o rodapé DIZER o tamanho da premissa em vez de só
+     declará-la. `metric` é pura (lê a row + as marretas), então recomputar aqui não muda
+     nada — os acumuladores `g*` seguem saindo do `renderRows`, fonte única da tabela. */
+  const eurbrlRows = rows.filter(x => x.kind === 'eurbrlopt');
+  const eurbrlUc   = eurbrlRows.reduce((a, x) => { const u = metric(x).ucEq; return a + (u ?? 0); }, 0);
 
   // Cabeçalho em DUAS linhas, padrão `.jgp-tbl` (mesmo da Análise de Opções logo abaixo):
   // a 1ª linha agrupa por natureza — o que o papel É, como ele está MARCADO, e o que isso
@@ -232,10 +276,12 @@ function renderDolarConsol(trader) {
       if (m.expPct != null) { sPct += m.expPct; gPct += m.expPct; }
       if (m.ucEq   != null) { sUc  += m.ucEq;   gUc  += m.ucEq; }
       if (m.premium!= null) { sPrem+= m.premium; gPrem+= m.premium; }
-      const priceFmt = (m.kind === 'fxopt') ? fmtPricePct(m.price) : fmtPrice(m.price);
+      // fxopt e eurbrlopt cotam em % do nocional (FXOPT_PRICE PERC, já em USD no backend).
+      const priceFmt = (m.kind === 'fxopt' || m.kind === 'eurbrlopt') ? fmtPricePct(m.price) : fmtPrice(m.price);
+      const kindTip  = _DOLLAR_KIND_TIP[x.kind] ? ` title="${_DOLLAR_KIND_TIP[x.kind]}"` : '';
       return `<tr>
         <td class="lbl">${r.instrument_name ?? '—'}</td>
-        <td class="left nd" style="font-size:11px">${_DOLLAR_KIND_LABEL[x.kind]}</td>
+        <td class="left nd" style="font-size:11px"${kindTip}>${_DOLLAR_KIND_LABEL[x.kind]}${kindTip ? ' <span style="cursor:help">ⓘ</span>' : ''}</td>
         <td class="left">${fmtOptMaturity(r)}</td>
         <td class="sep">${fmtFinalQty(r.final_qty)}</td>
         ${deltaCell(m)}
@@ -306,7 +352,7 @@ function renderDolarConsol(trader) {
   };
 
   const body = [
-    renderBlock('Opções (DOL / USDBRL)', optRows, true),
+    renderBlock('Opções (DOL / USDBRL / EURBRL)', optRows, true),
     renderBlock('Futuros e Spot (UC / WDO / USD/BRL)', futRows),
   ].filter(Boolean).join(spacer);
 
@@ -318,6 +364,17 @@ function renderDolarConsol(trader) {
     <td>${fmtPL(gPct, 'pct')}</td>
     <td class="dc-uc">${fmtUc(gUc)}</td>
   </tr>`;
+
+  /* Nota de premissa. Aparece SÓ quando há EURBRL na tabela — é a única linha cujo
+     UC-equiv não sai de uma razão de contrato/face, e sim de uma equivalência de perna de
+     BRL que supõe o EURUSD parado. Fica dentro do `.section-copy-target` de propósito: o
+     número copiado para o WhatsApp tem de levar a premissa com ele. */
+  const eurbrlNote = eurbrlRows.length ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5">
+      <b>EURBRL em UC-equiv:</b> o nocional em EUR vira USD pelo EURUSD spot e o delta é contra o EURBRL,
+      então o número é a <b>perna de BRL equivalente</b> — a posição em USDBRL de mesma sensibilidade ao real,
+      supondo <b>EURUSD constante</b> (EURBRL = EURUSD × USDBRL). Não é posição em dólar contra o euro.
+      Contribuição no total: <b>${fmtUc(eurbrlUc)}</b> UC de ${eurbrlRows.length} linha${eurbrlRows.length > 1 ? 's' : ''} de EURBRL.
+    </div>` : '';
 
   const navStr = navTrader ? `NAV: USD ${navTrader.toLocaleString('en-US',{maximumFractionDigits:0})}` : '';
   const netLabel = gUc >= 0 ? 'comprado' : 'vendido';
@@ -337,6 +394,7 @@ function renderDolarConsol(trader) {
         ${head}
         <tbody>${body}${grand}</tbody>
       </table>
+      ${eurbrlNote}
     </div>
   </div>`;
 
