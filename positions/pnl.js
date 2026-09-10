@@ -104,14 +104,27 @@ function _pxSettleCandidates() {
   });
 }
 
+/* Linhas de CÂMBIO do botão: forward/NDF com par e vencimento. Lista separada da de
+   `PX_SETTLE` porque a Bloomberg não fecha as duas do mesmo jeito — câmbio não tem settle, e
+   a marcação de D0 sai da curva de forward refeita com o BDH daquela data (ver a docstring
+   de `/api/positions/px-settle`). */
+function _fxSettleCandidates() {
+  const rows = (pnlData && pnlData.rows) || [];
+  return rows.filter(r => r.is_fx && r.maturity
+                       && /^[A-Za-z]{3}\/[A-Za-z]{3}$/.test(r.instrument_name || ''));
+}
+
 async function fetchPxSettleD0(btn) {
-  const cands = _pxSettleCandidates();
-  if (!cands.length) {
+  const cands   = _pxSettleCandidates();
+  const fxCands = _fxSettleCandidates();
+  if (!cands.length && !fxCands.length) {
     _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:var(--text-muted)">Nenhum ativo com preço BBG nesta aba.</span>`;
     rerenderPnlSummary();
     return;
   }
   const tickers = [...new Set(cands.map(r => r.instrument_reference))];
+  const fxKey   = r => `${r.instrument_name}|${String(r.maturity).slice(0, 10)}`;
+  const fxItems = [...new Set(fxCands.map(fxKey))];
   const refDate = document.getElementById('refDate').value;
   const oldTxt  = btn.textContent;
   btn.disabled = true;
@@ -124,7 +137,8 @@ async function fetchPxSettleD0(btn) {
   try {
     const params = new URLSearchParams();
     if (refDate) params.set('ref_date', refDate);
-    params.set('tickers', tickers.join(','));
+    if (tickers.length) params.set('tickers', tickers.join(','));
+    if (fxItems.length) params.set('fx', fxItems.join(','));
     const resp = await fetch(`${API_BASE}/api/positions/px-settle?${params}`);
     const data = await resp.json();
     if (!resp.ok || data.error) {
@@ -134,14 +148,27 @@ async function fetchPxSettleD0(btn) {
     }
     const settle  = data.settle  || {};
     const missing = data.missing || [];
+    const fxPx    = data.fx      || {};
+    const fxMiss  = data.fx_missing || [];
     for (const r of cands) {
       const px = settle[r.instrument_reference];
       if (px != null) priceOverrides.set(instKey(r), px);   // vira o preço efetivo (live) no PnL
     }
-    const appliedN = tickers.filter(t => settle[t] != null).length;
-    const parts = [`✓ settle D0 (${fmtDate(data.ref_date)}) aplicado: ${appliedN} ativo(s)`];
+    // Câmbio: a taxa do FECHAMENTO de D0 entra pela MESMA marreta (`priceOverrides`), então
+    // ela sobe no PnL, na tabela de Posição e na "Posição por moeda" de uma vez só.
+    for (const r of fxCands) {
+      const px = fxPx[fxKey(r)];
+      if (px != null) priceOverrides.set(instKey(r), px);
+    }
+    const appliedN   = tickers.filter(t => settle[t] != null).length;
+    const appliedFx  = fxItems.filter(k => fxPx[k] != null).length;
+    const parts = [];
+    if (tickers.length) parts.push(`✓ settle D0 (${fmtDate(data.ref_date)}) aplicado: ${appliedN} ativo(s)`);
+    if (fxItems.length) parts.push(`✓ fechamento D0 do câmbio (BDH): ${appliedFx} linha(s)`);
     if (missing.length) parts.push(`<span style="color:var(--yellow)">⚠ settle do dia ainda não saiu: ${missing.map(t => t.replace(/\s+(Comdty|Curncy|Index|Equity)$/i, '')).join(', ')}</span>`);
-    _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:${missing.length ? 'var(--text-muted)' : 'var(--green)'}">${parts.join(' · ')}</span>`;
+    if (fxMiss.length) parts.push(`<span style="color:var(--yellow)">⚠ sem fechamento D0: ${fxMiss.map(k => k.replace('|', ' ')).join(', ')}</span>`);
+    const _warn = missing.length || fxMiss.length;
+    _pxSettleMsg = `<span data-html2canvas-ignore="true" style="font-size:11px;color:${_warn ? 'var(--text-muted)' : 'var(--green)'}">${parts.join(' · ')}</span>`;
     if (typeof _markTabsDirtyAndRerender === 'function') _markTabsDirtyAndRerender();
     else rerenderPnlSummary();
   } catch (e) {
@@ -579,7 +606,7 @@ function _pnlSummaryTools() {
   const restoreBtn = _hpCount > 0
     ? `<button class="btn" data-html2canvas-ignore="true" style="background:var(--red);color:#fff;padding:2px 10px;font-size:12px" onclick="restorePnlRows()">↩ Restaurar (${_hpCount})</button>`
     : '';
-  const settleBtn = `<button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" title="Busca o PX_SETTLE do dia (D0) na BBG p/ os ativos com preço BBG e aplica como preço efetivo; avisa os que ainda não saíram." onclick="fetchPxSettleD0(this)">⤓ Buscar Settle D0</button>`;
+  const settleBtn = `<button class="btn btn-secondary" data-html2canvas-ignore="true" style="padding:2px 10px;font-size:12px" title="Busca a marcação de FECHAMENTO de D0 e aplica como preço efetivo: PX_SETTLE dos futuros/opções e, no CÂMBIO, a curva de forward refeita com o BDH daquela data.&#10;O câmbio precisa disso porque o mercado vira o dia às 17h de NY — depois disso o PX_LAST já é preço da sessão seguinte, com spread alargado.&#10;Avisa o que ainda não saiu." onclick="fetchPxSettleD0(this)">⤓ Buscar Settle D0</button>`;
   return { restoreBtn, settleBtn };
 }
 

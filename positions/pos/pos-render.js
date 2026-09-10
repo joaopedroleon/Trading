@@ -23,6 +23,10 @@ function rerenderTables(onlyKey) {
       if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows, data.portfoliorf_offshore_fund);
     }
   }
+  // Câmbio da aba do PAbinader: soma as MESMAS linhas exibidas, então tem de refazer junto
+  // (filtro, marreta, ✕ de linha). Ver pos-fxlegs.js.
+  if (typeof renderFxSectionsForTab === 'function') renderFxSectionsForTab(activeTraderTab);
+
   /* Re-alinha as tabelas auxiliares (alocação MM×Prev, break por fundo), que casam pelo TOPO
      da 1ª linha da tabela principal. Passou a ser necessário quando a tira "NET por grupo"
      subiu para CIMA da tabela (set/2026): ligar/desligar um filtro pode fazer um grupo sumir

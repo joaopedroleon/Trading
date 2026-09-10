@@ -16,6 +16,7 @@ function activateTab(key) {
     case 'dolarconsol': showDolarConsolTab(); break;
     case 'dolar':       showDolarTab();       break;
     case 'rolagem':     showRolagemTab();     break;
+    case 'boletas':     showBoletasTab();     break;
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
   if (typeof simSync === 'function') simSync();   // abas de dólar/rolagem: inativa a simulação
@@ -45,6 +46,11 @@ function showTraderTab(tabId) {
       loadPnlForTab(tabId);
       if (wasDirty && typeof rerenderPnlValues === 'function') rerenderPnlValues();
     }
+    // Cache que veio do PREFETCH não tem as boletas do Sophis (a 2ª onda só roda na aba
+    // ativa). Abrir a aba é o gatilho que faltava — sem isto as duas seções de câmbio
+    // ficariam vazias até um ⟳ ou um "Atualizar tudo".
+    const cfg = TRADER_TABS.find(t => t.id === tabId);
+    if (cfg?.fxFromDeals && !fxDealsByTab[tabId]) loadFxDealsForTab(tabId);
   }
   renderRestoreBtn();
   if (typeof _syncPnlRestoreBtn === 'function') _syncPnlRestoreBtn();
@@ -62,6 +68,7 @@ function _invalidateAllTabs() {
   for (const t of Object.keys(dolarConsolData)) _dropTabCache(DOLAR_CONSOL_TAB_ID, t);
   _dropTabCache(DOLAR_TAB_ID);
   _dropTabCache(ROLAGEM_TAB_ID);
+  _dropTabCache(BOLETAS_TAB_ID);
 }
 
 /* Apaga o cache de UMA aba (e o estado de UI derivado dele). `trader` só vale p/ a aba de
@@ -79,6 +86,7 @@ function _dropTabCache(key, trader) {
     delete _tabFetchSig[ENQ_RF_TAB_KEY];
   }
   delete posDataByTab[key];
+  delete fxDealsByTab[key];   // a 2ª onda (câmbio) é da MESMA data — cai junto
   delete hiddenRows[key];
   delete _tabFetchSig[key];
   _dirtyTabs.delete(key);
@@ -99,6 +107,7 @@ function _invalidateStaleTabs() {
   }
   if (posDataByTab[DOLAR_TAB_ID]   && _tabFetchSig[DOLAR_TAB_ID]   !== sig) _dropTabCache(DOLAR_TAB_ID);
   if (posDataByTab[ROLAGEM_TAB_ID] && _tabFetchSig[ROLAGEM_TAB_ID] !== sig) _dropTabCache(ROLAGEM_TAB_ID);
+  if (posDataByTab[BOLETAS_TAB_ID] && _tabFetchSig[BOLETAS_TAB_ID] !== sig) _dropTabCache(BOLETAS_TAB_ID);
 }
 
 /* "Atualizar tudo" — a ação GLOBAL da toolbar, e a única que limpa as marretas.
@@ -147,11 +156,19 @@ function reloadActiveTab(opts = {}) {
     loadRolagem();
     return;
   }
+  if (activeTraderTab === BOLETAS_TAB_ID) {
+    loadBoletas();
+    return;
+  }
   loadPositionsForTab(activeTraderTab, { fresh: true, prefetch });   // "Atualizar tudo" → preços ao vivo
 }
 
 function changeOtherTrader(trader) {
-  TRADER_TABS[3].trader = trader;
+  // Busca por ID, não por índice: `TRADER_TABS[3]` amarrava esta função à POSIÇÃO da aba
+  // no array, e acrescentar uma aba de trader (o PAbinader ganhou a sua em set/2026)
+  // passava a trocar o trader da aba ERRADA, sem erro nenhum.
+  const cfg = TRADER_TABS.find(t => t.id === 'other');
+  if (cfg) cfg.trader = trader;
   const label = document.getElementById('otherTraderLabel');
   if (label) label.textContent = trader;
   delete posDataByTab['other'];
@@ -189,6 +206,9 @@ async function loadPositionsForTab(tabId, opts = {}) {
     if (forceOpening) params.set('force_opening', forceOpening);
     if (!tab.useGroups) params.set('use_groups', 'false');
     if (fresh) params.set('fresh', 'true');
+    // ⚠️ `fx_from_deals` NÃO entra aqui de propósito — vai na 2ª onda (loadFxDealsForTab).
+    // A query de boletas do Sophis custa ~1,5s contra 0,04s das duas do JRS/JDS juntas, e a
+    // mesa pediu Posição e PnL na tela antes do câmbio.
     const data = await (await fetch(`${API_BASE}/api/positions/reference?${params}`)).json();
 
     if (data.error) {
@@ -223,6 +243,12 @@ async function loadPositionsForTab(tabId, opts = {}) {
     if (typeof resetPnlForTab === 'function') resetPnlForTab(tabId);  // dados novos → re-render do PnL
     if (typeof loadPnlForTab === 'function') loadPnlForTab(tabId);
 
+    // 2ª onda: as seções de câmbio (aba do PAbinader). Sem `await` — Posição e PnL já
+    // estão na tela e o câmbio se pinta quando chegar. Só na aba ATIVA: pagar 1,5s de
+    // Oracle no prefetch de uma aba que ninguém abriu não se justifica (quem abre depois
+    // dispara pelo `showTraderTab`).
+    if (tab.fxFromDeals && tabId === activeTraderTab) loadFxDealsForTab(tabId);
+
     // após a aba ativa carregar, prefetch silencioso das demais (troca de aba instantânea).
     // O "⚡ Só esta aba" passa prefetch:false — as outras carregam ao serem abertas.
     if (!background && prefetch && tabId === activeTraderTab) setTimeout(prefetchOtherTabs, 300);
@@ -235,6 +261,63 @@ async function loadPositionsForTab(tabId, opts = {}) {
   } finally {
     PosBusy.off(`ref:${tabId}`);
     if (!background) btn.disabled = false;
+  }
+}
+
+/* ── 2ª ONDA: as seções de câmbio da aba do PAbinader ──────────────────────────────────
+   Refaz o MESMO `/reference` com `fx_from_deals=true` e substitui o cache da aba. O que
+   muda no payload é só a metade FX (posição vinda das boletas do Sophis, com as duas pernas
+   do par) — as duas fontes foram aferidas idênticas em 6 datas, então o re-render de Posição
+   e PnL não mexe em número nenhum; ele existe para as linhas de CAIXA da rolagem, que o
+   JRS/JDS não carrega, aparecerem quando os filtros permitirem.
+
+   ⚠️ **`fresh` NUNCA é repassado.** A 1ª onda acabou de buscar os preços ao vivo e encheu o
+   cache TTL do `bbg.py` (10s, `positions/market.py`); pedir ao vivo de novo 1,5s depois
+   dobraria o round-trip com a Bloomberg para obter o MESMO preço — e faria as duas ondas
+   discordarem por um tick, o que na tela leria como erro de conta.
+
+   Guarda de data: se a "Data ref"/"Forçar D-1" mudou enquanto a query rodava, a resposta é
+   DESCARTADA — servir câmbio de uma data sobre a posição de outra é o pior resultado. */
+const _fxDealsInFlight = new Set();
+
+async function loadFxDealsForTab(tabId) {
+  const tab = TRADER_TABS.find(t => t.id === tabId);
+  if (!tab?.fxFromDeals || _fxDealsInFlight.has(tabId)) return;
+  const sigAtStart = _currentDateSig();
+  _fxDealsInFlight.add(tabId);
+  PosBusy.on(`fxlegs:${tabId}`);
+  try {
+    const params = new URLSearchParams({ trader: tab.trader, fx_from_deals: 'true' });
+    const refDate = document.getElementById('refDate').value;
+    if (refDate) params.set('ref_date', refDate);
+    const forceOpening = document.getElementById('forceOpening').value;
+    if (forceOpening) params.set('force_opening', forceOpening);
+    if (!tab.useGroups) params.set('use_groups', 'false');
+
+    const data = await (await fetch(`${API_BASE}/api/positions/reference?${params}`)).json();
+    if (data.error || _currentDateSig() !== sigAtStart) return;
+
+    // ⚠️ Cache PRÓPRIO (`fxDealsByTab`), e NÃO o `posDataByTab`: a tabela de Posição e o PnL
+    // desta aba são os de sempre (JRS D-1 × JDS) e não podem ser reescritos por esta onda.
+    // A 1ª versão substituía o payload da aba — o que trocava a fonte da tabela principal,
+    // que é justamente o que a mesa NÃO quer.
+    fxDealsByTab[tabId] = data;
+    renderFxSectionsForTab(tabId);            // pinta SÓ a seção de câmbio + a conferência
+  } catch (e) {
+    // Posição e PnL já estão na tela e seguem válidos — o erro é SÓ do câmbio. Mas as duas
+    // seções podem estar com a tabela da carga ANTERIOR (outra data, outro trader), e o véu
+    // saindo por cima dela a deixaria parecendo atual. Melhor dizer que não carregou.
+    console.warn('câmbio (boletas do Sophis) falhou:', e);
+    for (const id of [`fxCcyContainer-${tabId}`, `fxFutContainer-${tabId}`, `fxTieout-${tabId}`]) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    }
+    const el = document.getElementById(`fxCcyContainer-${tabId}`);
+    if (el) el.innerHTML = '<div class="card no-data">Câmbio não carregou (boletas do Sophis) — '
+      + 'clique no ⟳ do título da seção para tentar de novo.</div>';
+  } finally {
+    PosBusy.off(`fxlegs:${tabId}`);
+    _fxDealsInFlight.delete(tabId);
   }
 }
 
@@ -281,6 +364,12 @@ function renderSectionsForTab(tabId, allRows) {
     prevContainer.style.alignItems    = 'flex-start';
     prevContainer.innerHTML           = '';   // trader sem MM Prev não deixa card velho no fim
   }
+
+  // Seções de CÂMBIO da aba do PAbinader (pos-fxlegs.js). ANTES do early return de "sem
+  // posição": elas moram em containers próprios e, se ficassem depois, uma aba que zerou
+  // deixaria a tabela de moedas do render anterior na tela, mentindo.
+  // `typeof` porque o snapshot estático não carrega o pos-fxlegs.js.
+  if (typeof renderFxSectionsForTab === 'function') renderFxSectionsForTab(tabId);
 
   if (!sections.length) {
     container.innerHTML = '<div class="card no-data">Não há posição para este trader.</div>';

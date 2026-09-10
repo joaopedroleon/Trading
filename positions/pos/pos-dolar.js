@@ -368,8 +368,16 @@ function renderDolarConsol(trader) {
   /* Nota de premissa. Aparece SÓ quando há EURBRL na tabela — é a única linha cujo
      UC-equiv não sai de uma razão de contrato/face, e sim de uma equivalência de perna de
      BRL que supõe o EURUSD parado. Fica dentro do `.section-copy-target` de propósito: o
-     número copiado para o WhatsApp tem de levar a premissa com ele. */
-  const eurbrlNote = eurbrlRows.length ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5">
+     número copiado para o WhatsApp tem de levar a premissa com ele.
+     ☠️ **`jgp-tbl-note` é obrigatório, não enfeite** (set/2026): o alvo do "⎘ Copiar" é o
+     `.section-copy-target`, que é `width: fit-content` para medir exatamente a TABELA. Um
+     parágrafo de texto corrido tem `max-content` gigante e passa a ditar esse fit-content —
+     o alvo ia à largura do card e a imagem saía com uma faixa branca morta à direita
+     (medido com as 2 EURBRL do EMota: alvo 1504px × tabela 1084px, 420px de branco em
+     viewport de 1600 — e mais no monitor da mesa). A classe (`width:0; min-width:100%`)
+     zera a contribuição do texto na largura e o devolve quebrando na borda da tabela.
+     Mesma trava das notas da Análise de Opções, logo abaixo. */
+  const eurbrlNote = eurbrlRows.length ? `<div class="jgp-tbl-note" style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5">
       <b>EURBRL em UC-equiv:</b> o nocional em EUR vira USD pelo EURUSD spot e o delta é contra o EURBRL,
       então o número é a <b>perna de BRL equivalente</b> — a posição em USDBRL de mesma sensibilidade ao real,
       supondo <b>EURUSD constante</b> (EURBRL = EURUSD × USDBRL). Não é posição em dólar contra o euro.

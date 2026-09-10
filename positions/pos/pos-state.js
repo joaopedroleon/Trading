@@ -1,12 +1,24 @@
 /* ── API base URL ─────────────────────────────────────────────────────────── */
 const API_BASE = location.protocol === 'file:' ? 'http://localhost:8083' : '';
 
-/* ── Trader tab config ───────────────────────────────────────────────────── */
+/* ── Trader tab config ─────────────────────────────────────────────────────
+   `fxFromDeals`: a aba pede a posição de CÂMBIO pelas boletas do Sophis em vez do merge
+   JRS(D-1)×JDS(D0) (`fx_from_deals=true` no /reference). É a MESMA posição — aferido
+   contra o JRS em 6 datas, 0 divergências —, mas com as DUAS pernas do par, que só a
+   boleta tem (a taxa contratada de cada negócio não existe no JRS). Ver
+   positions/fx_sophis.py e o renderizador em pos-fxlegs.js.
+   ⚠️ Só o PAbinader usa: o livro dele é câmbio, e as pernas exigem uma query a mais + duas
+   tabelas próprias no DOM da aba. Ligar numa aba sem os containers `#fxCcyContainer-*` não
+   quebra (o renderizador sai cedo), mas paga a query sem mostrar nada. */
 const TRADER_TABS = [
   { id: 'emota',       trader: 'EMota',      filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
   { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
   { id: 'portfoliorf', trader: 'PortfolioRF',filters: ['no_cash'],                         useGroups: false },
   { id: 'other',       trader: 'PAlves',     filters: ['no_hedge_cambial'],               useGroups: false },
+  // ⚠️ SEM o `no_fx_small`, a pedido da mesa: no livro de câmbio a posição pequena é o
+  // resíduo de rolagem a liquidar, e ele é para ser visto. As outras abas mantêm o filtro.
+  { id: 'pabinader',   trader: 'PAbinader',  filters: ['no_hedge_cambial'], useGroups: false,
+    fxFromDeals: true },
 ];
 
 /* Abas que ganham a tira "NET por grupo de ativo" abaixo da tabela de Posição (pedido da
@@ -17,7 +29,7 @@ const TRADER_TABS = [
    ⚠️ O corte é feito NO CONTAINER (`renderSectionsForTab`, pos-tabs.js): sem `#netsum_*` no
    DOM, o `renderTable` não pinta nada. Não filtrar dentro do `renderNetSummary` é de propósito
    — a aba de fora não paga o cálculo, e a regra fica num lugar só. */
-const POS_NET_TABS = new Set(['emota', 'ecotrim', 'portfoliorf']);
+const POS_NET_TABS = new Set(['emota', 'ecotrim', 'portfoliorf', 'pabinader']);
 
 /* ── State ───────────────────────────────────────────────────────────────── */
 let positionsData = null;       // active tab data (kept for pnl.js compat)
@@ -30,6 +42,18 @@ const swapTradedOverrides  = new Map(); // rowKey → number (override trades SW
 const swapDv01Overrides    = new Map(); // rowKey → number (override DV01 total do SWAP → #PL segue)
 const plOverrides          = new Map(); // rowKey → number (override manual #PL, fração — só posição)
 const wdoUcAggregated      = new Set(); // tabIds com agregação WDO+UC ativa
+/* Cache da 2ª ONDA da aba de câmbio (payload do /reference com `fx_from_deals=true`).
+   ☠️ **SEPARADO do `posDataByTab` de propósito** (decisão da mesa, set/2026): a tabela de
+   Posição e o PnL desta aba são iguais aos de todo trader — abertura do JRS D-1 × boletas do
+   JDS — e o tratamento pelas boletas do Sophis vive SÓ nas duas tabelas de câmbio. Guardar os
+   dois payloads no mesmo lugar faria a 2ª onda reescrever a tabela principal, que é
+   exatamente o que não se quer. Ver pos-fxlegs.js e `loadFxDealsForTab` (pos-tabs.js). */
+const fxDealsByTab = {};             // tabId → payload da 2ª onda (só as seções de câmbio)
+/* Abas com a tabela "Posição por moeda" QUEBRADA POR VÉNTICE (chip "⤵ Por vencimento").
+   Default VAZIO — a mesa pediu o resumo (uma linha por moeda) como leitura de relance, com a
+   quebra por vencimento sob demanda. Estado por aba, não global: é escolha de exibição de uma
+   tela só, e sobrevive ao re-render porque o card é remontado a partir deste Set. */
+const fxCcyByVertex = new Set();
 
 // ── FONTE ÚNICA de marreta de preço/delta, por INSTRUMENTO (instKey), não por aba/trader.
 //    Mesmo ticker → mesmo valor em todas as abas. Live vem do backend (price_live/option_delta).

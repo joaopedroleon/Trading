@@ -56,6 +56,8 @@ const PosBusy = (() => {
     // quando a base muda: `loadRolagem` zera `rolagemBoletas` e a prévia volta ao
     // estado "Configure e clique Gerar boletas". `also` = sources que só a acendem.
     'rol:bol':   { src: 'boletas',  also: ['rolagem'], containers: ['rolagemBoletaPanel'] },
+    // 'boldia' ≠ 'boletas': aquele é a prévia de boletas de ROLAGEM, este é a aba de resumo.
+    'bol:dia':   { src: 'boldia',   containers: ['boletasContainer', 'boletasControls'] },
   };
   // Cada seção de aba de trader pinta DOIS containers: o principal e o bloco colapsado
   // que desceu p/ o fim da aba (#posPrevContainer-* / #pnlDetailContainer-*, ver a ordem
@@ -64,6 +66,17 @@ const PosBusy = (() => {
   for (const t of TRADER_TABS) {
     SECTIONS[`pos:${t.id}`] = { src: `ref:${t.id}`, containers: [`posContainer-${t.id}`, `posPrevContainer-${t.id}`] };
     SECTIONS[`pnl:${t.id}`] = { src: `ref:${t.id}`, containers: [`pnlContainer-${t.id}`, `pnlDetailContainer-${t.id}`] };
+    // A seção de CÂMBIO da aba do PAbinader vive de um source PRÓPRIO (`fxlegs:*`), e não do
+    // `ref:*` — é justamente o ponto da 2ª onda: ela segue acesa ("Atualizando…") depois que
+    // Posição e PnL já apagaram. Um source só faria as três esperarem a query do Sophis, que
+    // é o que a mesa pediu para não acontecer.
+    // ⚠️ O `ref:*` também a acende (`also`): a 1ª onda invalida o que está desenhado nela.
+    if (!t.fxFromDeals) continue;
+    SECTIONS[`fxccy:${t.id}`] = { src: `fxlegs:${t.id}`, also: [`ref:${t.id}`],
+                                  containers: [`fxCcyContainer-${t.id}`, `fxTieout-${t.id}`] };
+    // O futuro de dólar tem SEÇÃO própria mas o MESMO source: sai do mesmo request da 2ª onda.
+    SECTIONS[`fxfut:${t.id}`] = { src: `fxlegs:${t.id}`, also: [`ref:${t.id}`],
+                                  containers: [`fxFutContainer-${t.id}`] };
   }
 
   /* ── Refetch por source. `ref:<tab>` é dinâmico (um por aba de trader). ───── */
@@ -73,7 +86,11 @@ const PosBusy = (() => {
     enqrf:    () => window.loadEnquadramentoRF({ fresh: true }),
     rolagem:  () => { _dropTabCache(ROLAGEM_TAB_ID); return window.loadRolagem(); },
     boletas:  () => window.gerarBoletas(),
+    boldia:   () => { _dropTabCache(BOLETAS_TAB_ID); return window.loadBoletas(); },
   };
+  // `fxlegs:<tab>` é dinâmico (um por aba de câmbio) e refaz SÓ a 2ª onda — as boletas do
+  // Sophis —, sem tocar em Posição/PnL, que saem do outro request.
+  const _isFxLegs = src => src.startsWith('fxlegs:');
 
   // Nome legível do source: vai no title do ⟳ e diz o que mais será refeito junto.
   const SRC_LABEL = {
@@ -82,6 +99,7 @@ const PosBusy = (() => {
     enqrf:    'Enquadramento de derivativos dos fundos RF',
     rolagem:  'Resumo + detalhe da rolagem (mesmo request)',
     boletas:  'Prévia de boletas (real + gerencial)',
+    boldia:   'Resumo de boletas do dia por ativo',
   };
 
   const _depth = new Map();   // src → nº de cargas em voo
@@ -95,7 +113,11 @@ const PosBusy = (() => {
   /* Containers que NÃO recebem esqueleto na 1ª carga: não são tabela de dados, então
      um card de barras cinzas ali só pesa. #rolagemControls é a tira de filtros — o
      esqueleto do "Resumo" logo abaixo já carrega o recado. Véu continua valendo. */
-  const NO_SKEL = new Set(['rolagemControls']);
+  // `fxTieout-*` (painel de conferência do câmbio) entra aqui: é uma linha de texto, não
+  // tabela — esqueleto de barras ali só pesa, e o "Sem dados" seria mentira num painel que
+  // legitimamente não aparece quando não há o que conferir.
+  const NO_SKEL = new Set(['rolagemControls', 'boletasControls',
+    ...TRADER_TABS.filter(t => t.fxFromDeals).map(t => `fxTieout-${t.id}`)]);
   // Os blocos colapsados do fim da aba de trader: não são a tabela que a mesa está
   // olhando, e podem ficar legitimamente VAZIOS (trader sem grupo MM Prev). Esqueleto ali
   // só pesa — e sem esqueleto o `_paintContainer` também não escreve o "Sem dados", que
@@ -141,9 +163,19 @@ const PosBusy = (() => {
     if (btn) { btn.disabled = busy; btn.classList.toggle('spinning', busy); }
   }
 
+  /* ☠️ **O estado é da SEÇÃO, não do source que acabou de mudar.** Era
+     `busy = _depth(src) > 0` aplicado a todas as seções que o `src` toca — então o `off` de
+     UM source apagava o aviso de uma seção que ainda estava em voo por OUTRO. Medido na aba
+     de câmbio do PAbinader: a 1ª onda (`ref:*`) terminava em 0,9s e apagava as seções de
+     câmbio, que só receberiam dado da 2ª onda (`fxlegs:*`) 2,7s depois — duas seções vazias,
+     sem aviso nenhum, exatamente no intervalo que a 2ª onda existe para cobrir. Vale também
+     p/ `rol:bol` (src `boletas`, `also` `rolagem`), que tinha o mesmo furo latente. */
+  const _isBusy = sec => ((_depth.get(sec.src) || 0) > 0)
+    || (sec.also ?? []).some(a => (_depth.get(a) || 0) > 0);
+
   function _paint(src) {
-    const busy = (_depth.get(src) || 0) > 0;
     for (const [secId, s] of _sectionsOf(src)) {
+      const busy = _isBusy(s);
       _paintHeader(secId, busy);
       for (const c of s.containers) _paintContainer(c, busy);
     }
@@ -176,6 +208,7 @@ const PosBusy = (() => {
       _dropTabCache(tabId);
       return window.loadPositionsForTab(tabId, { fresh: true, prefetch: false });
     }
+    if (_isFxLegs(src)) return window.loadFxDealsForTab(src.slice(7));
     const run = RUNNERS[src];
     if (run) return run();
   }
@@ -191,7 +224,9 @@ const PosBusy = (() => {
       h.dataset.secBuilt = '1';
       const shared = _ownedBy(sec.src).length > 1;
       const tip = 'Atualizar os dados desta seção ao vivo.'
-        + `\nRefaz: ${SRC_LABEL[sec.src] ?? 'a posição e o PnL desta aba (mesmo request)'}.`
+        + `\nRefaz: ${SRC_LABEL[sec.src] ?? (_isFxLegs(sec.src)
+              ? 'a posição por moeda + a conferência (boletas do Sophis — a query lenta desta aba)'
+              : 'a posição e o PnL desta aba (mesmo request)')}.`
         + (shared ? '\nAs seções irmãs saem do mesmo request e são refeitas junto.' : '')
         + '\nPreserva as marretas de preço/delta — o "Atualizar" da toolbar as limpa.';
       const tools = document.createElement('span');

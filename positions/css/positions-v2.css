@@ -153,6 +153,39 @@ html.theme-v2 .jgp-tbl tbody td {
   text-align: right; white-space: nowrap;
 }
 html.theme-v2 .jgp-tbl tbody td.sep  { border-left: 1px solid var(--border); }
+/* ═══ ⓘ de informação no rodapé de uma tabela ═══════════════════════════════
+   Substituiu o parágrafo de nota (`.jgp-tbl-note`) na "Posição por moeda" (set/2026, pedido
+   da mesa): eram 8 linhas de texto competindo com a tabela que elas explicam. O conteúdo
+   virou REGRA GENÉRICA num painel de hover; o que é ALERTA do momento (linha fora da soma)
+   continua visível ao lado, porque aviso escondido atrás de hover não é aviso.
+   Mesmo mecanismo do `td[data-bbg]` (positions.html): `::after` com `content: attr(...)` e
+   `white-space: pre` — sem JS, e o texto já vem quebrado da origem.
+   ⚠️ Abre para BAIXO e alinhado à ESQUERDA. Para baixo porque o ⓘ vive no RODAPÉ do card:
+   aberto para cima, o painel (~450px de altura) cobria justamente a tabela que ele explica —
+   medido. Alinhado à esquerda porque centralizar um painel de ~450px num ícone de 13px o
+   jogaria metade para fora da tela. */
+html.theme-v2 .jgp-info {
+  position: relative; cursor: help; color: var(--accent);
+  font-size: 13px; line-height: 1; user-select: none;
+}
+html.theme-v2 .jgp-info:hover { color: var(--green); }
+html.theme-v2 .jgp-info:hover::after {
+  content: attr(data-info);
+  position: absolute; top: calc(100% + 6px); left: 0;
+  background: var(--text); color: var(--bg-card);
+  padding: 10px 14px; border-radius: 4px; border: 1px solid var(--border);
+  white-space: pre; font-size: 11.5px; line-height: 1.55; font-weight: 400;
+  letter-spacing: 0; text-transform: none; text-align: left;
+  z-index: 200; pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0,0,0,.22);
+}
+
+/* Separador LARGO — abre um bloco de colunas à direita, em vez de só riscar entre duas.
+   Nasceu na "Posição por moeda" da aba de câmbio (set/2026), a pedido da mesa: as colunas de
+   PREÇO (D-1, live) e o RESULTADO do dia foram para o fim da tabela e precisavam se descolar
+   das colunas de posição — o risco de 1px do `.sep` não separava BLOCO, separava coluna. */
+html.theme-v2 .jgp-tbl thead th.sep-wide,
+html.theme-v2 .jgp-tbl tbody td.sep-wide { border-left: 2px solid var(--border); padding-left: 22px; }
 html.theme-v2 .jgp-tbl tbody td.lbl  { text-align: left; font-weight: 600; color: var(--accent); }
 html.theme-v2 .jgp-tbl tbody td.sel  { text-align: center; width: 28px; }
 html.theme-v2 .jgp-tbl tbody tr:nth-child(even):not(.grp) td { background: var(--bg-row-alt); }
@@ -169,7 +202,7 @@ html.theme-v2 .jgp-tbl tbody tr.grp td {
 html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CHIPS DE FILTRO DA ROLAGEM DE DÓLAR  (#rolagemControls)
+   CHIPS DE FILTRO — ROLAGEM DE DÓLAR (#rolagemControls) e BOLETAS DO DIA (#boletasControls)
    ═══════════════════════════════════════════════════════════════════════════
    O `.filter-chip.on` global (positions.html) é quase igual ao `.off`: `--bg-row-alt`
    #FAFAF7 contra `--bg` #F6F4EE, ~2% de diferença de luminância. Numa faixa com 5
@@ -180,23 +213,28 @@ html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
    classe também veste BADGES que não são botão (`🚫 N ocultos`, as áreas excluídas — ambos
    `cursor:default`) e o seletor de conversão do resumo. Pintar todos de verde diria que
    são clicáveis e que estão "ativos", que é o oposto do que aqueles dois informam. */
-html.theme-v2 #rolagemControls .filter-chip.on {
+html.theme-v2 #rolagemControls .filter-chip.on,
+html.theme-v2 #boletasControls .filter-chip.on {
   background: var(--green); color: #fff; border-color: var(--green-dark); font-weight: 600;
 }
-html.theme-v2 #rolagemControls .filter-chip.off {
+html.theme-v2 #rolagemControls .filter-chip.off,
+html.theme-v2 #boletasControls .filter-chip.off {
   background: transparent; color: var(--text-muted); border-style: dashed; font-weight: 400;
 }
 /* Chip de AÇÃO ("Marcar todos" / "Desmarcar todos"): não é valor selecionado, então não
    pode usar nem o verde do `.on` nem o tracejado do `.off` — ficaria na mesma fileira dos
    traders parecendo mais um deles. Contorno sólido no azul de rótulo da tela. */
-html.theme-v2 #rolagemControls .filter-chip.chip-act {
+html.theme-v2 #rolagemControls .filter-chip.chip-act,
+html.theme-v2 #boletasControls .filter-chip.chip-act {
   background: transparent; color: var(--accent); border-color: var(--accent);
   border-style: solid; font-weight: 600;
 }
-html.theme-v2 #rolagemControls .filter-chip.chip-act:hover {
+html.theme-v2 #rolagemControls .filter-chip.chip-act:hover,
+html.theme-v2 #boletasControls .filter-chip.chip-act:hover {
   background: var(--accent); color: var(--bg-card);
 }
-html.theme-v2 #rolagemControls .filter-chip:hover { opacity: 1; filter: brightness(1.08); }
+html.theme-v2 #rolagemControls .filter-chip:hover,
+html.theme-v2 #boletasControls .filter-chip:hover { opacity: 1; filter: brightness(1.08); }
 
 /* Respiro BRANCO entre blocos e antes do TOTAL GERAL (Consolidado Dólar) — a mesa pediu
    uma "linha branca dividindo" (ago/2026): as réguas sozinhas não separavam o bloco de
