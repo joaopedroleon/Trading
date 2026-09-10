@@ -72,11 +72,11 @@ const PosBusy = (() => {
     // é o que a mesa pediu para não acontecer.
     // ⚠️ O `ref:*` também a acende (`also`): a 1ª onda invalida o que está desenhado nela.
     if (!t.fxFromDeals) continue;
+    // A seção 02 pinta TRÊS containers: a tabela de moeda, a tabela do futuro de dólar
+    // (2ª tabela da mesma seção) e o painel de conferência. Os três saem do mesmo request.
     SECTIONS[`fxccy:${t.id}`] = { src: `fxlegs:${t.id}`, also: [`ref:${t.id}`],
-                                  containers: [`fxCcyContainer-${t.id}`, `fxTieout-${t.id}`] };
-    // O futuro de dólar tem SEÇÃO própria mas o MESMO source: sai do mesmo request da 2ª onda.
-    SECTIONS[`fxfut:${t.id}`] = { src: `fxlegs:${t.id}`, also: [`ref:${t.id}`],
-                                  containers: [`fxFutContainer-${t.id}`] };
+                                  containers: [`fxCcyContainer-${t.id}`, `fxFutContainer-${t.id}`,
+                                               `fxTieout-${t.id}`] };
   }
 
   /* ── Refetch por source. `ref:<tab>` é dinâmico (um por aba de trader). ───── */
