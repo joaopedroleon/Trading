@@ -64,6 +64,11 @@ const _FX_GROUPS = [
 // `fx` e `fut` eram um grupo só, "FX linear"; caiu quando o futuro ganhou tabela própria.)
 const _fxGroupOf = basis => basis;
 
+/* Piso para AFIRMAR o check de alocação MM × MM Prev, em USD. Ver `alcRow`: abaixo disso a
+   linha é resíduo de rolagem e a proporção não significa nada. Mesmo número do filtro
+   "Excluir FX < 200k" (`no_fx_small`, pos-helpers.js) — a régua da casa para "FX pequeno". */
+const _ALLOC_MIN_USD = 200_000;
+
 /* Família de uma row, MESMO que ela não tenha produzido perna nenhuma — é o que permite
    cada tabela declarar só as SUAS órfãs (`_fxOrphans`) em vez de listar as da outra. */
 function _fxRowBasis(r) {
@@ -164,12 +169,16 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       const key = `${l.ccy}||${mat}||${byVtx ? inst : grp}`;
       if (!acc.has(key)) acc.set(key, { ccy: l.ccy, mat, grp, inst, basis: l.basis,
         px: r.price, live: (typeof effectivePrice === 'function' ? effectivePrice(r) : r.price_live),
-        o: 0, t: 0, f: 0, uo: 0, ut: 0, uf: 0, res: 0, hasRes: false,
+        o: 0, t: 0, f: 0, fMM: 0, fPrev: 0, uo: 0, ut: 0, uf: 0, res: 0, hasRes: false,
         semUsd: [], nSemO: 0 });
       const a = acc.get(key);
       a.o += (l.open   ?? 0) * k;
       a.t += (l.traded ?? 0) * k;
       a.f += (l.final  ?? 0) * k;
+      // A perna final QUEBRADA POR GRUPO alimenta o check de alocação ao lado. A tabela
+      // principal soma os dois (é exposição do livro); o check é justamente sobre a divisão.
+      if (r.group === 'MM Prev') a.fPrev += (l.final ?? 0) * k;
+      else if (r.group === 'MM') a.fMM += (l.final ?? 0) * k;
       if (l.open == null || l.traded == null) a.nSemO++;   // fut/opt sem `unit_pl`
       /* RESULTADO do dia: é do CONTRATO (não de cada perna), e entra na perna que o backend
          marca com `is_res` — **a moeda que se moveu contra o dólar** (MXN no USD/MXN, BRL no
@@ -202,9 +211,11 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   const byCcy = new Map();
   for (const a of acc.values()) {
     if (_flat(a)) continue;
-    if (!byCcy.has(a.ccy)) byCcy.set(a.ccy, { ccy: a.ccy, legs: [], uf: 0, uo: 0, ut: 0, res: 0, nRes: 0, semUsd: [] });
+    if (!byCcy.has(a.ccy)) byCcy.set(a.ccy, { ccy: a.ccy, legs: [], uf: 0, uo: 0, ut: 0, res: 0, nRes: 0,
+                                             fMM: 0, fPrev: 0, semUsd: [] });
     const g = byCcy.get(a.ccy);
     g.legs.push(a); g.uf += a.uf; g.uo += a.uo; g.ut += a.ut; g.res += a.res;
+    g.fMM += a.fMM; g.fPrev += a.fPrev;
     if (a.hasRes) g.nRes++;
     g.semUsd.push(...a.semUsd);
   }
@@ -239,6 +250,15 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
         ? '\n\nA tabela soma MM + MM Prev, e o NAV do trader cobre só o MM — o equivalente'
           + ' do Prev entra pelo alvo de alocação dele (ALLOC_TARGETS), o mesmo do check MM×Prev.'
         : '\n\nSem linha de MM Prev na soma: denominador = NAV do trader, sem ajuste.');
+
+  // Check de alocação ao lado: só com alvo cadastrado p/ o trader E com perna no MM Prev —
+  // sem uma das duas a tabela seria uma coluna de traços.
+  const target    = (typeof ALLOC_TARGETS !== 'undefined' && ALLOC_TARGETS[cfg.trader]) ?? null;
+  const showAlloc = target != null && list.some(g => Math.abs(g.fPrev) > 1e-9);
+  // Altura do cabeçalho das DUAS tabelas é a mesma (mesma classe, 1 linha, nowrap), então o
+  // alinhamento sai do próprio fluxo; este espaçador é 0 e existe como ponto único de ajuste
+  // caso um dia o cabeçalho de uma delas passe a ter duas linhas.
+  const AUX_HEAD_GAP = 0;
 
   const pct   = u => (nav ? fmtPL(u / nav, 'pct') : '<span style="color:var(--text-muted)">—</span>');
   const _dash = t => `<span style="color:var(--text-muted)"${t ? ` title="${_fxEsc(t)}"` : ''}>—</span>`;
@@ -303,6 +323,58 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
     return band + trs + (g.legs.length > 1 ? tot : '');
   }).join(byVtx ? `<tr class="gap"><td colspan="${NC}"></td></tr>` : '');
 
+  /* ── Auxiliar: check da alocação MM × MM Prev ────────────────────────────────────
+     ☠️ **Espelha linha a linha a tabela principal** — mesma ordem, mesmas faixas, mesmos
+     subtotais, mesmo respiro. É o que faz as duas ficarem ALINHADAS lado a lado sem
+     JavaScript de medição; é o mesmo contrato que a `renderAllocTable` tem com a tabela de
+     Posição. Mexer na estrutura de uma sem mexer na outra desalinha tudo.
+     O alvo é o `ALLOC_TARGETS[trader]` (0,30 p/ o PAbinader) e o check é **Prev ÷ MM** — a
+     mesma razão do check da tabela de Posição, não Prev ÷ total. */
+  /* ⚠️ **O check NÃO é afirmado em linha pequena** — e isso saiu da 1ª medição na tela: as
+     moedas cujo net é só RESÍDUO DE ROLAGEM saíam com CHF 21,1%, MXN 13,3% e COP −100%, ao
+     lado das posições de verdade todas em 30,3-30,4%. Numa sobra de US$ 54 mil a proporção
+     MM×Prev não significa nada, e pintar aquilo de amarelo/vermelho todo dia treina a mesa a
+     ignorar a coluna. O piso é o mesmo US$ 200 mil do filtro "Excluir FX < 200k"
+     (`no_fx_small`), que é a régua que a casa já usa para "posição de câmbio pequena". */
+  const alcRow = (mmQ, prevQ, usdAbs) => {
+    const small = !(usdAbs == null || Math.abs(usdAbs) >= _ALLOC_MIN_USD);
+    const pctv  = (mmQ && !small) ? prevQ / mmQ : null;
+    const cls   = allocClass(pctv != null && target != null ? pctv - target : null);
+    const cell  = pctv != null ? fmtPct(pctv)
+      : `<span style="color:var(--text-muted)" title="${_fxEsc(small
+          ? 'Posição abaixo de US$ 200 mil — resíduo de rolagem. A proporção MM×Prev aqui não '
+            + 'diz nada, então o check não é afirmado (mesmo corte do filtro "Excluir FX < 200k").'
+          : 'Sem perna no MM para comparar.')}">—</span>`;
+    return `<td class="num">${fmtFinalQty(mmQ)}</td>
+            <td class="num">${fmtFinalQty(prevQ)}</td>
+            <td class="num">${fmtFinalQty(mmQ + prevQ)}</td>
+            <td class="num ${cls}">${cell}</td>`;
+  };
+  const auxBody = !showAlloc ? '' : list.map(g => {
+    const band = byVtx ? `<tr class="grp"><td colspan="4">&nbsp;</td></tr>` : '';
+    const trs  = g.legs.map(a => `<tr>${alcRow(a.fMM, a.fPrev, a.uf)}</tr>`).join('');
+    const tot  = `<tr class="tot tot-sub">${alcRow(
+      g.legs.reduce((s2, a) => s2 + a.fMM, 0), g.legs.reduce((s2, a) => s2 + a.fPrev, 0), g.uf)}</tr>`;
+    return band + trs + (g.legs.length > 1 ? tot : '');
+  }).join(byVtx ? `<tr class="gap"><td colspan="4"></td></tr>` : '');
+
+  const aux = !showAlloc ? '' : `<div data-html2canvas-ignore="true">
+    <div style="height:${AUX_HEAD_GAP}px"></div>
+    <table class="jgp-tbl">
+      <thead><tr>
+        <th title="Perna final desta moeda nos fundos do grupo MM.">Qtd MM</th>
+        <th title="Perna final desta moeda nos fundos do grupo MM Prev.">Qtd MM Prev</th>
+        <th title="MM + MM Prev — o mesmo número da coluna Final da tabela ao lado.">Qtd total</th>
+        <th title="${_fxEsc('MM Prev ÷ MM, contra o alvo de alocação do trader (' + fmtPct(target)
+          + '). Mesma razão e mesma régua do check da tabela de Posição: verde dentro de '
+          + fmtPct(ALLOC_TOL) + ', amarelo até o dobro, vermelho além.\n\n'
+          + 'Linha abaixo de US$ 200 mil não é afirmada: ali o net é resíduo de rolagem e a proporção não diz nada.')
+          }">Check ${fmtPct(target)}</th>
+      </tr></thead>
+      <tbody>${auxBody}<tr class="tot"><td colspan="4"></td></tr></tbody>
+    </table>
+  </div>`;
+
   const chip = cfg.chip
     ? `<span class="filter-chip ${byVtx ? 'on' : 'off'}" data-html2canvas-ignore="true"
             style="font-weight:400" onclick="toggleFxCcyVertex('${tabId}')"
@@ -318,6 +390,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       <button class="btn btn-secondary" data-html2canvas-ignore="true"
               style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="copyCardImage(this)">⎘ Copiar</button>
     </div>
+    <div style="display:flex;gap:32px;align-items:flex-start">
     <div class="section-copy-target" style="max-width:100%">
       <div style="overflow-x:auto">
         <table class="jgp-tbl">
@@ -366,6 +439,8 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
             + 'exigiria o movimento de cada uma contra o dólar, que não está neste cálculo.')
           }">cross: ${[...crossPairs].join(' · ')}</span>` : ''}
       </p>
+    </div>
+    ${aux}
     </div>
   </div>`;
 }
@@ -488,8 +563,10 @@ function renderFxSectionsForTab(tabId) {
   const navSrc = posDataByTab[tabId] ?? data;
   const navInfo = _fxNavInfo(rows, tab?.trader, navSrc);
   if (elC) elC.innerHTML = renderFxCcyTable(rows, navInfo, tabId,
-    { bases: new Set(['fx', 'opt']), titulo: 'Posição por moeda', chip: true, help: _FX_CCY_HELP });
+    { bases: new Set(['fx', 'opt']), titulo: 'Posição por moeda', chip: true,
+      help: _FX_CCY_HELP, trader: tab?.trader });
   if (elF) elF.innerHTML = renderFxCcyTable(rows, navInfo, tabId,
-    { bases: new Set(['fut']), titulo: 'Futuro de dólar', chip: false, help: _FX_FUT_HELP });
+    { bases: new Set(['fut']), titulo: 'Futuro de dólar', chip: false,
+      help: _FX_FUT_HELP, trader: tab?.trader });
   if (elT) elT.innerHTML = renderFxTieout(data);
 }

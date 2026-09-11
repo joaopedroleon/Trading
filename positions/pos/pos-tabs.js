@@ -78,17 +78,20 @@ function _dropTabCache(key, trader) {
     const t = trader ?? dolarConsolTrader;
     delete dolarConsolData[t];
     delete _tabFetchSig[`dc:${t}`];
+    delete _tabFetchedAt[`dc:${t}`];
     _dirtyTabs.delete(DOLAR_CONSOL_TAB_ID);
     return;
   }
   if (key === DOLAR_TAB_ID) {   // as duas tabelas da aba são carregadas juntas
     delete posDataByTab[ENQ_RF_TAB_KEY];
     delete _tabFetchSig[ENQ_RF_TAB_KEY];
+    delete _tabFetchedAt[ENQ_RF_TAB_KEY];
   }
   delete posDataByTab[key];
   delete fxDealsByTab[key];   // a 2ª onda (câmbio) é da MESMA data — cai junto
   delete hiddenRows[key];
   delete _tabFetchSig[key];
+  delete _tabFetchedAt[key];   // cache apagado não pode deixar carimbo de idade para trás
   _dirtyTabs.delete(key);
   if (typeof resetPnlForTab === 'function') resetPnlForTab(key);
 }
@@ -182,6 +185,13 @@ function changeOtherTrader(trader) {
 //   false = 1 request em vez de 4 — é o que o ⟳ de seção usa (PosBusy.refresh).
 async function loadPositionsForTab(tabId, opts = {}) {
   const { background = false, fresh = false, prefetch = true } = opts;
+  // Prefetch não duplica carga já em voo: o boot dispara EMota e ECotrim em paralelo
+  // (prefetchPriorityTabs) e o prefetchOtherTabs vem logo atrás — sem isto a ECotrim
+  // seria pedida duas vezes. A carga de PRIMEIRO PLANO nunca é barrada: ela é ação do
+  // usuário ("Atualizar", ⟳, trocar de trader) e tem de ir ao vivo.
+  if (background && _posInFlight.has(tabId)) return;
+  // Nº deste disparo. Só o ÚLTIMO escreve no cache (ver `_posLoadSeq`, pos-state.js).
+  const seq = _posLoadSeq[tabId] = (_posLoadSeq[tabId] || 0) + 1;
   const tab      = TRADER_TABS.find(t => t.id === tabId);
   const refDate  = document.getElementById('refDate').value;
   const status   = document.getElementById('refStatus');
@@ -200,6 +210,10 @@ async function loadPositionsForTab(tabId, opts = {}) {
   }
 
   try {
+    // ⚠️ DENTRO do try, para o `finally` sempre desmarcar: acima desta linha há código que
+    // pode estourar fora de qualquer catch (no snapshot estático o `PosBusy` nem existe) —
+    // e uma aba marcada "em voo" para sempre nunca mais seria buscada pelo prefetch.
+    _posInFlight.add(tabId);
     const params = new URLSearchParams({ trader: tab.trader });
     if (refDate) params.set('ref_date', refDate);
     const forceOpening = document.getElementById('forceOpening').value;
@@ -219,6 +233,11 @@ async function loadPositionsForTab(tabId, opts = {}) {
       }
       return;
     }
+
+    // Resposta de uma carga que já foi superada por outra desta MESMA aba → descartada.
+    // Chegar por último não a torna a mais nova: escrever aqui deixaria a tela com o dado
+    // mais VELHO dos dois, sem erro nenhum.
+    if (_posLoadSeq[tabId] !== seq) return;
 
     posDataByTab[tabId] = data;
     _noteFetchSig(tabId);
@@ -259,8 +278,23 @@ async function loadPositionsForTab(tabId, opts = {}) {
       status.style.color = 'var(--red)';
     }
   } finally {
+    if (_posLoadSeq[tabId] === seq) _posInFlight.delete(tabId);
     PosBusy.off(`ref:${tabId}`);
     if (!background) btn.disabled = false;
+  }
+}
+
+/* ── Boot: as DUAS abas prioritárias em PARALELO ──────────────────────────────────────
+   EMota é a aba ativa e ECotrim sai junto, sem esperar por ela. Antes a ECotrim entrava na
+   fila SEQUENCIAL do `prefetchOtherTabs`, que só começa 300ms DEPOIS da ativa terminar:
+   medido, ela ficava pronta em ~9,3s para uma carga que custa 1,5s sozinha.
+   As outras três seguem em série no `prefetchOtherTabs` (e pulam o que já está em voo).
+   ⚠️ Nada aqui é cache: as duas são buscadas AO VIVO a cada abertura/F5 da página. */
+const PRIORITY_PREFETCH_TABS = ['emota', 'ecotrim'];
+function prefetchPriorityTabs() {
+  for (const id of PRIORITY_PREFETCH_TABS) {
+    if (id === activeTraderTab || posDataByTab[id]) continue;
+    loadPositionsForTab(id, { background: true });   // sem await → em paralelo com a ativa
   }
 }
 
@@ -326,7 +360,7 @@ async function loadFxDealsForTab(tabId) {
 async function prefetchOtherTabs() {
   for (const tab of TRADER_TABS) {
     if (tab.id === activeTraderTab) continue;
-    if (posDataByTab[tab.id]) continue;
+    if (posDataByTab[tab.id] || _posInFlight.has(tab.id)) continue;
     try { await loadPositionsForTab(tab.id, { background: true }); }
     catch { /* prefetch é best-effort */ }
   }

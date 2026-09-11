@@ -5,3 +5,4 @@ document.getElementById('refDate').value = lastBusinessDay(
 );
 renderFilterBars();
 showTraderTab('emota');
+prefetchPriorityTabs();   // ECotrim em PARALELO com a EMota (pos-tabs.js), não atrás dela

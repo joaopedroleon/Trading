@@ -20,7 +20,7 @@
 const BOLETAS_TAB_ID = 'boletas';
 
 // Filtro padrão (mesa, set/2026). Quem não boletou no dia não vira chip.
-const BOLETAS_DEFAULT_TRADERS = ['EMota', 'PAlves', 'ECotrim', 'PortfolioRF', 'PortfolioPrev'];
+const BOLETAS_DEFAULT_TRADERS = ['EMota', 'PAlves', 'ECotrim', 'PortfolioRF', 'Portfolio', 'PortfolioPrev'];
 
 // Ordem das áreas na tabela; o que não estiver aqui vai para o fim, alfabético.
 const BOLETAS_AREA_ORDER = ['Rates', 'Currencies', 'Equities', 'Commodities'];
@@ -120,7 +120,7 @@ function renderBoletas() {
   // Ordem única de trader na aba — chips E colunas da tabela. Os do conjunto padrão
   // primeiro, na ordem da mesa; o resto por volume de boletas. ⚠️ Não é só estética:
   // ordenar as COLUNAS por nº de boletas faria a tabela trocar de ordem a cada dia,
-  // e a mesa lê sempre as mesmas 5 primeiras posições.
+  // e a mesa lê sempre as mesmas 6 primeiras posições.
   const ordered = [...data.traders].sort((a, b) => {
     const rk = t => { const i = BOLETAS_DEFAULT_TRADERS.indexOf(t.trader); return i >= 0 ? i : 100; };
     return rk(a) - rk(b) || b.n_deals - a.n_deals;

@@ -80,6 +80,33 @@ function isUsdBrlDollarRow(r) {
   return k != null && _DOLLAR_USDBRL_KINDS.has(k);
 }
 
+/* ── Payload REAPROVEITÁVEL da aba de trader ───────────────────────────────────────────
+   A aba "Análise de Opções" chama o MESMO `/api/positions/reference` que a aba do trader, e
+   com os MESMOS parâmetros — conferido query string por query string: as duas mandam
+   `use_groups=false` fora de EMota/ECotrim, e nada mais difere (o `fx_from_deals` da aba do
+   PAbinader é a 2ª onda, vai para o `fxDealsByTab`, não para o `posDataByTab`). Aferido
+   também no servidor: duas chamadas com os mesmos parâmetros devolvem payload idêntico,
+   campo a campo. Então, quando a aba do trader acabou de buscar, refazer o request é pagar
+   de novo por um resultado que já está na memória.
+
+   ☠️ **Só vale DENTRO da janela de frescor** (`_cacheIsFresh`, 10s = o TTL do cache de preço
+   da Bloomberg no backend). Fora dela esta função devolve `null` e a aba busca AO VIVO. É o
+   que garante que o reuso nunca mostre número mais velho do que uma busca nova mostraria —
+   sem isso a aba abriria com o preço do momento em que a PÁGINA carregou, que pode ser de
+   horas atrás.
+   ⚠️ A concordância de `use_groups` é CALCULADA dos dois lados, não escrita à mão: se um dia
+   o `useGroups` de uma aba mudar no `TRADER_TABS`, o reuso se desliga sozinho em vez de
+   servir um payload com outro corte de fundos. */
+function _reusableTraderPayload(trader) {
+  const tab = TRADER_TABS.find(t => t.trader === trader);
+  if (!tab || !posDataByTab[tab.id]) return null;
+  const dcNoGroups  = (trader !== 'EMota' && trader !== 'ECotrim');   // regra do loadDolarConsol
+  const tabNoGroups = !tab.useGroups;                                 // regra do loadPositionsForTab
+  if (dcNoGroups !== tabNoGroups) return null;
+  if (!_cacheIsFresh(tab.id)) return null;
+  return posDataByTab[tab.id];
+}
+
 function showDolarConsolTab() {
   activeTraderTab = DOLAR_CONSOL_TAB_ID;
   _showPanel(DOLAR_CONSOL_TAB_ID);
@@ -90,16 +117,60 @@ function showDolarConsolTab() {
     sel.innerHTML = DOLAR_CONSOL_TRADERS.map(t => `<option value="${t}">${t}</option>`).join('');
     sel.value = dolarConsolTrader;
   }
-  if (dolarConsolData[dolarConsolTrader]) { _dirtyTabs.delete(DOLAR_CONSOL_TAB_ID); renderDolarConsol(dolarConsolTrader); }
-  else loadDolarConsol(dolarConsolTrader);
+  _openDolarConsol(dolarConsolTrader);
 }
 
 function selectDolarConsolTrader(trader) {
   dolarConsolTrader = trader;
   // Grava a escolha: é ela que a aba abre da próxima vez (inclusive depois de F5).
   try { localStorage.setItem(LS_DOLAR_CONSOL_TRADER, trader); } catch (_) {}
-  if (dolarConsolData[trader]) renderDolarConsol(trader);
-  else loadDolarConsol(trader);
+  _openDolarConsol(trader);
+}
+
+/* Abrir a aba (ou trocar o trader nela) — a ordem das 3 chances, da mais barata à mais cara:
+     1) cache PRÓPRIO da aba, se FRESCO         → pinta na hora, 0 request
+     2) payload da aba do trader, se FRESCO     → pinta na hora, 0 request
+     3) busca AO VIVO
+   ☠️ O `_cacheIsFresh` no passo 1 é a mudança que importa: antes bastava `dolarConsolData[t]`
+   EXISTIR para a aba repintar dele, sem olhar idade nenhuma — abrir a aba às 16h mostrava o
+   preço da última vez que ela foi aberta, ainda que de manhã, e nada na tela dizia isso.
+   A aba continua **não se atualizando sozinha** (não entra em prefetch nenhum, não tem
+   polling): quem dispara a busca é abrir a aba, trocar o trader, o ⟳ ou o "Atualizar tudo". */
+async function _openDolarConsol(trader) {
+  if (dolarConsolData[trader] && _cacheIsFresh(`dc:${trader}`)) {
+    _dirtyTabs.delete(DOLAR_CONSOL_TAB_ID);
+    renderDolarConsol(trader);
+    return;
+  }
+  const reuse = _reusableTraderPayload(trader);
+  if (reuse) {
+    dolarConsolData[trader] = reuse;
+    _noteFetchSig(`dc:${trader}`);
+    _dirtyTabs.delete(DOLAR_CONSOL_TAB_ID);
+    noteBbgSource(reuse);
+    document.getElementById('srcLabel').textContent =
+      `Abertura: ${fmtDate(reuse.opening_date)}  |  Boletas: ${fmtDate(reuse.ref_date)}`;
+    // ⚠️ O cadastro de ticker de DOL NÃO vem no `/reference` — quem o busca é o
+    // `loadDolarConsol`, que este caminho está pulando. Sem ele a coluna de ticker da
+    // tabela de opções (`dolarOptTickers[...]`, adiante) sairia VAZIA, como se nenhuma
+    // opção estivesse cadastrada. É cadastro, não preço: basta uma vez por página.
+    await _ensureDolarOptTickers();
+    renderDolarConsol(trader);
+    return;
+  }
+  loadDolarConsol(trader);
+}
+
+/* Cadastro de ticker BBG das opções de DOL (arquivo local, 0,2s). Não é dado de mercado —
+   só muda quando alguém edita um ticker na própria tela, e aí os handlers já atualizam o
+   mapa em memória. Por isso é buscado UMA vez e não entra na janela de frescor. */
+let _dolarOptTickersLoaded = false;
+async function _ensureDolarOptTickers() {
+  if (_dolarOptTickersLoaded) return;
+  try {
+    dolarOptTickers = await (await fetch(`${API_BASE}/api/positions/dolar-opt-tickers`)).json() || {};
+    _dolarOptTickersLoaded = true;
+  } catch { /* mantém o que tiver; tenta de novo na próxima abertura */ }
 }
 
 async function loadDolarConsol(trader, opts = {}) {
@@ -136,7 +207,8 @@ async function loadDolarConsol(trader, opts = {}) {
     document.getElementById('srcLabel').textContent =
       `Abertura: ${fmtDate(data.opening_date)}  |  Boletas: ${fmtDate(data.ref_date)}`;
     // carrega o mapa de tickers cadastrados (compartilhado com a aba Check Dólar Exposure)
-    try { dolarOptTickers = await (await fetch(`${API_BASE}/api/positions/dolar-opt-tickers`)).json() || {}; }
+    try { dolarOptTickers = await (await fetch(`${API_BASE}/api/positions/dolar-opt-tickers`)).json() || {};
+          _dolarOptTickersLoaded = true; }
     catch { /* mantém o que tiver */ }
     if (dolarConsolTrader === trader) {
       // delta/preço live já vêm do backend (option_delta/price_live, inclusive DOL via ticker)

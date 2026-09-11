@@ -76,7 +76,38 @@ function _currentDateSig() {
   const f = document.getElementById('forceOpening');
   return `${d ? d.value : ''}|${f ? f.value : ''}`;
 }
-function _noteFetchSig(key) { _tabFetchSig[key] = _currentDateSig(); }
+function _noteFetchSig(key) { _tabFetchSig[key] = _currentDateSig(); _tabFetchedAt[key] = Date.now(); }
+
+/* ── IDADE de cada cache de aba, e a janela em que ele pode ser REUSADO ──────────────
+   `_tabFetchedAt[chave] = Date.now()` da resposta (mesmas chaves do `_tabFetchSig`).
+   Existe para a aba "Análise de Opções" poder aproveitar o payload que a aba do trader já
+   trouxe — ela chama o MESMO `/reference` com os MESMOS parâmetros (conferido query string
+   por query string p/ os 5 traders que têm aba) — **sem nunca mostrar preço velho**.
+
+   ☠️ **A janela é 10s de propósito, e o número NÃO é arbitrário:** é o mesmo TTL do cache de
+   resposta crua da Bloomberg no backend (`BBG_CACHE_TTL`, positions/market.py). Dentro dela,
+   refazer o request devolveria os MESMOS números — o backend serviria do próprio cache. Ou
+   seja, o reuso aqui **não pode** ser mais velho do que uma busca nova seria; ele economiza o
+   round-trip sem criar uma classe nova de dado atrasado. Passou de 10s, busca ao vivo.
+   ⚠️ Se um dia o `BBG_CACHE_TTL` do backend mudar, ESTE número muda junto — é o que sustenta
+   a garantia acima. Não aumentar um sem o outro. */
+const POS_REUSE_MAX_AGE_MS = 10_000;
+const _tabFetchedAt = {};   // chave de cache → Date.now() da resposta que a preencheu
+function _cacheAgeMs(key) {
+  const t = _tabFetchedAt[key];
+  return t ? Date.now() - t : Infinity;
+}
+function _cacheIsFresh(key) {
+  return _tabFetchSig[key] === _currentDateSig() && _cacheAgeMs(key) <= POS_REUSE_MAX_AGE_MS;
+}
+
+/* Guarda de CORRIDA por aba. Com o EMota e o ECotrim carregando em PARALELO no boot (e o
+   prefetch das demais logo atrás), duas cargas da mesma aba podem estar em voo — a resposta
+   mais VELHA chegando por último sobrescreveria a mais nova em silêncio, que é exatamente o
+   dado atrasado que não se quer. Cada disparo pega um nº; só o ÚLTIMO disparado tem
+   permissão de escrever no `posDataByTab`. */
+const _posLoadSeq = {};      // tabId → nº da última carga disparada
+const _posInFlight = new Set();   // tabIds com carga em voo (o prefetch não duplica)
 
 // ── Análise de Opções: seleção de linhas p/ o "⎘ Copiar" e p/ os totais ────
 //    rowKey → bool. Default (1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
