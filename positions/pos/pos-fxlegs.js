@@ -123,7 +123,11 @@ const _FX_CCY_HELP =
   'RESULT.DIA  o P&L é do CONTRATO: entra na moeda que se moveu contra o\n' +
   '            dólar, então a linha do USD fica vazia e a soma da coluna é\n' +
   '            o resultado do dia. Em cross (par sem perna em dólar) vai\n' +
-  '            inteiro para a moeda-base.\n' +
+  '            inteiro para a moeda-base — e as DUAS células envolvidas\n' +
+  '            levam um * com a conta aberta no hover: quanto é da moeda\n' +
+  '            contra o dólar, quanto é do cross, e onde está o resultado\n' +
+  '            da perna que ficou sem. É o que faz esta coluna conversar\n' +
+  '            com a seção de PnL, onde o cross é uma linha com nome.\n' +
   'PREÇOS      só na visão por vencimento — taxa é do contrato, não da\n' +
   '            moeda. A opção fica de fora: prêmio não é taxa.\n' +
   'EQUIV. USD  a perna é CONTRATUAL (taxa da boleta), mas o equivalente em\n' +
@@ -161,6 +165,10 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   for (const r of rows) {
     const mat  = byVtx ? (r.maturity ? String(r.maturity).slice(0, 10) : '') : '';
     const inst = byVtx ? (r.instrument_name ?? '') : '';
+    /* P&L da ROW, UMA vez: é o mesmo para todas as pernas dela, e a perna que NÃO recebe o
+       resultado também precisa dele — para declarar para onde ele foi (ver `resInfo`). */
+    const totRow = (typeof pnlFor === 'function' ? pnlFor(r).total : r.total_usd);
+    const pairNm = r.instrument_name ?? '—';
     for (const l of (r.ccy_legs ?? [])) {
       if (!bases.has(l.basis)) continue;
       anyLeg = true;
@@ -170,7 +178,11 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       if (!acc.has(key)) acc.set(key, { ccy: l.ccy, mat, grp, inst, basis: l.basis,
         px: r.price, live: (typeof effectivePrice === 'function' ? effectivePrice(r) : r.price_live),
         o: 0, t: 0, f: 0, fMM: 0, fPrev: 0, uo: 0, ut: 0, uf: 0, res: 0, hasRes: false,
-        semUsd: [], nSemO: 0 });
+        semUsd: [], nSemO: 0,
+        // Procedência do "Result. dia": `xFrom` = o que ENTROU nesta moeda vindo de um par
+        // cross; `xTo` = o resultado de um cross desta perna que foi para OUTRA moeda (a
+        // base do par), com `xToPara` dizendo qual. Ver `resInfo`.
+        xFrom: {}, xTo: {}, xToPara: {} });
       const a = acc.get(key);
       a.o += (l.open   ?? 0) * k;
       a.t += (l.traded ?? 0) * k;
@@ -187,11 +199,17 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
          ⚠️ `pnlFor` (pnl.js), e não o `total_usd` cru: é a MESMA função da aba PnL, então uma
          marreta de preço — inclusive a do "Buscar Settle D0", que troca a taxa live pelo
          FECHAMENTO de D0 — aparece aqui e lá com o mesmo número. */
-      if (l.is_res) {
-        const tot = (typeof pnlFor === 'function' ? pnlFor(r).total : r.total_usd);
-        if (tot != null) {
-          a.res += tot * k; a.hasRes = true;
-          if (l.res_cross) crossPairs.add(r.instrument_name ?? '—');
+      if (l.is_res && totRow != null) {
+        a.res += totRow * k; a.hasRes = true;
+        if (l.res_cross) crossPairs.add(pairNm);
+      }
+      // Um par sem perna em dólar põe o P&L inteiro na moeda-BASE. Registra os dois lados da
+      // afirmação para a célula poder declará-la — o número não muda, a procedência aparece.
+      if (l.res_cross && totRow != null) {
+        if (l.is_res) a.xFrom[pairNm] = (a.xFrom[pairNm] ?? 0) + totRow * k;
+        else {
+          a.xTo[pairNm]     = (a.xTo[pairNm] ?? 0) + totRow * k;
+          a.xToPara[pairNm] = (r.ccy_legs ?? []).find(o => o.basis === l.basis && o.is_res)?.ccy ?? '—';
         }
       }
       // Perna sem spot da moeda não vira zero: some do equivalente em USD e é NOMEADA.
@@ -212,12 +230,15 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   for (const a of acc.values()) {
     if (_flat(a)) continue;
     if (!byCcy.has(a.ccy)) byCcy.set(a.ccy, { ccy: a.ccy, legs: [], uf: 0, uo: 0, ut: 0, res: 0, nRes: 0,
-                                             fMM: 0, fPrev: 0, semUsd: [] });
+                                             fMM: 0, fPrev: 0, semUsd: [],
+                                             xFrom: {}, xTo: {}, xToPara: {} });
     const g = byCcy.get(a.ccy);
     g.legs.push(a); g.uf += a.uf; g.uo += a.uo; g.ut += a.ut; g.res += a.res;
     g.fMM += a.fMM; g.fPrev += a.fPrev;
     if (a.hasRes) g.nRes++;
     g.semUsd.push(...a.semUsd);
+    for (const pn in a.xFrom) g.xFrom[pn] = (g.xFrom[pn] ?? 0) + a.xFrom[pn];
+    for (const pn in a.xTo) { g.xTo[pn] = (g.xTo[pn] ?? 0) + a.xTo[pn]; g.xToPara[pn] = a.xToPara[pn]; }
   }
   const zeroed = [...new Set([...acc.values()].filter(_flat).map(a => a.ccy))]
     .filter(c => !byCcy.has(c));
@@ -267,6 +288,62 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   // taxa, e pô-lo na mesma coluna de 5,1013 seria trocar a régua no meio da coluna.
   const _NOT_RATE = 'Opção é cotada em PRÊMIO, não na taxa do par — ver a tabela de Posição.';
 
+  /* ── Procedência do "Result. dia" ────────────────────────────────────────────────────
+     ☠️ **O P&L é do CONTRATO, e num par sem perna em dólar ele fica INTEIRO na moeda-BASE**
+     — então a linha da moeda mostra um número que em boa parte não é dela. Medido em
+     14/09/2026: o **CHF** dizia **(20.748)** num dia em que o CHF contra o dólar (`USD/CHF`)
+     rendera **+231** — 99% da linha era o `CHF/JPY` — e o **JPY**, com 5,50% do NAV na mesma
+     tabela, ficava com a célula em branco, indistinguível do traço de "não se aplica" do USD.
+     Os TOTAIS sempre fecharam; o que não fechava era a leitura MOEDA A MOEDA contra a seção
+     de PnL, onde o `CHF/JPY` é uma linha com nome próprio. Foi o que a mesa reportou.
+     ⚠️ **A célula NÃO muda de número, e isso foi decisão da mesa (set/2026).** Repartir o
+     cross entre as duas moedas é possível — `Δ(N_base/S_base) + Δ(N_ctr/S_ctr)` é aditivo e
+     exato — mas precisa do spot de D-1 de cada moeda (o `spot_rates` do router é só live) e,
+     sobretudo, **as duas pernas são grandes e de sinais opostos**: medido em 10/09/2026, no
+     `EUR/AUD` o termo do EUR é **+167 mil** e o do AUD **−223 mil** num contrato que perdeu
+     **55 mil**, e o EUR sairia de **(208.546)** para **+14.216**, deixando de casar com
+     QUALQUER linha da seção de PnL — o oposto do que se queria. (O resíduo de triangulação
+     entre o forward do cross e os dois spots também não é pequeno: 3,5% no `CHF/JPY` e até
+     19,7% no `EUR/AUD`.) Então a célula só para de ESCONDER de onde veio o número. */
+  const _m0 = v => ((v < 0 ? '(' : v > 0 ? '+' : ' ')
+    + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
+    + (v < 0 ? ')' : '')).padStart(13);
+  const _hint = t => ` <span style="color:var(--yellow);cursor:help;font-weight:700"
+      title="${_fxEsc(t)}">*</span>`;
+  /* `x` é o acumulador (perna) ou o grupo (subtotal) — os dois carregam xFrom/xTo/xToPara. */
+  const resInfo = (ccy, res, hasRes, x) => {
+    const from = Object.entries(x.xFrom ?? {}).filter(([, v]) => Math.abs(v) >= 1);
+    const to   = Object.entries(x.xTo   ?? {}).filter(([, v]) => Math.abs(v) >= 1);
+    const cel  = hasRes ? fmtMoney(res) : _dash('');
+    /* ⚠️ `from` e `to` NÃO são exclusivos: uma moeda pode ter resultado próprio E ser a perna
+       contrária de um cross — medido em 10/09/2026, o AUD tinha (78) do `AUD/USD` e ainda era
+       a contra-perna do `EUR/AUD` (55.698), que foi para a linha do EUR. Tratar só o `from`
+       deixava a linha do AUD calada justamente sobre o que faltava nela. */
+    if (!from.length && !to.length) {
+      return hasRes ? cel : _dash(ccy === 'USD'
+        ? 'Vazio por construção: o resultado vai para a moeda que se moveu CONTRA o dólar, e o dólar não se move contra ele mesmo.'
+        : 'Nenhum contrato desta moeda atribuiu resultado a ela.');
+    }
+    const L = [];
+    if (hasRes) {
+      const own = res - from.reduce((acc, [, v]) => acc + v, 0);
+      L.push(`${ccy} · Result. dia ${_m0(res).trim()}`, '');
+      L.push(`${_m0(own)}   o ${ccy} contra o dólar`);
+      for (const [pn, v] of from) L.push(`${_m0(v)}   ${pn} — CROSS: o P&L é do PAR`);
+    } else {
+      L.push(`${ccy} — sem resultado próprio nesta linha.`, '');
+    }
+    if (to.length) {
+      L.push(hasRes ? '' : null, 'FORA desta linha:');
+      for (const [pn, v] of to) L.push(`${_m0(v)}   ${pn} — está na linha do ${x.xToPara[pn]}`);
+    }
+    L.push('', 'Par sem perna em dólar não se divide entre as duas moedas sem o movimento de',
+               'cada uma contra o dólar, que não está neste payload — então o P&L do contrato',
+               'fica inteiro na moeda-BASE do par. Na seção de PnL cada cross é UMA linha, com',
+               'o nome do par: é com ela que os valores acima conversam.');
+    return cel + _hint(L.filter(v => v !== null).join('\n'));
+  };
+
   const body = list.map(g => {
     const warn = g.semUsd.length
       ? ` <span class="net-warn" title="${_fxEsc(
@@ -293,13 +370,9 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       const px = byVtx ? `
         <td class="sep-wide">${temPx ? _fxRate(a.px) : _dash(_NOT_RATE)}</td>
         <td>${temPx ? _fxRate(a.live) : _dash(_NOT_RATE)}</td>
-        <td class="sep">${a.hasRes ? fmtMoney(a.res) : _dash(a.ccy === 'USD'
-            ? 'Vazio por construção: o resultado vai para a moeda que se moveu CONTRA o dólar, e o dólar não se move contra ele mesmo.'
-            : 'O resultado deste contrato está na linha da moeda que se moveu contra o dólar.')}</td>`
+        <td class="sep">${resInfo(a.ccy, a.res, a.hasRes, a)}</td>`
         : `
-        <td class="sep-wide">${a.hasRes ? fmtMoney(a.res) : _dash(a.ccy === 'USD'
-            ? 'Vazio por construção: o resultado vai para a moeda que se moveu CONTRA o dólar, e o dólar não se move contra ele mesmo.'
-            : 'Nenhum contrato desta moeda atribuiu resultado a ela.')}</td>`;
+        <td class="sep-wide">${resInfo(a.ccy, a.res, a.hasRes, a)}</td>`;
       return `<tr>
         ${cells}
         <td class="sep">${semAb ? _dash('Abertura não determinada: sem NAV/preço para a exposição por unidade.') : fmtFinalQty(a.o)}</td>
@@ -317,8 +390,8 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       <td class="sep val">${fmtFinalQty(g.legs.reduce((s, a) => s + a.f, 0))}</td>
       <td class="sep">${fmtMoney(g.uf)}</td>
       <td>${pct(g.uf)}</td>
-      ${byVtx ? `<td class="sep-wide"></td><td></td><td class="sep">${g.nRes ? fmtMoney(g.res) : ''}</td>`
-              : `<td class="sep-wide">${g.nRes ? fmtMoney(g.res) : ''}</td>`}
+      ${byVtx ? `<td class="sep-wide"></td><td></td><td class="sep">${g.nRes ? resInfo(g.ccy, g.res, true, g) : ''}</td>`
+              : `<td class="sep-wide">${g.nRes ? resInfo(g.ccy, g.res, true, g) : ''}</td>`}
     </tr>`;
     return band + trs + (g.legs.length > 1 ? tot : '');
   }).join(byVtx ? `<tr class="gap"><td colspan="${NC}"></td></tr>` : '');
@@ -435,9 +508,12 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
             'Nada em abertura, operada, final nem resultado — as pernas se anularam entre contratos.')
           }">${zeroed.length} moeda(s) zerada(s) fora da tabela: ${zeroed.join(' · ')}</span>` : ''}
         ${crossPairs.size ? `<span style="margin-left:10px" title="${_fxEsc(
-            'Par sem perna em dólar: o resultado inteiro foi para a moeda-BASE. Separá-lo entre as duas '
-            + 'exigiria o movimento de cada uma contra o dólar, que não está neste cálculo.')
-          }">cross: ${[...crossPairs].join(' · ')}</span>` : ''}
+            'Par sem perna em dólar: o resultado inteiro foi para a moeda-BASE, e a célula que o recebeu '
+            + 'leva um * com a conta aberta (quanto é da moeda contra o dólar e quanto é do cross). '
+            + 'A perna contrária também leva * e diz em que linha o resultado dela está.\n\n'
+            + 'Separá-lo entre as duas exigiria o movimento de cada uma contra o dólar, que não está '
+            + 'neste cálculo.')
+          }">cross: ${[...crossPairs].join(' · ')} <span style="color:var(--yellow);font-weight:700">*</span></span>` : ''}
       </p>
     </div>
     ${aux}

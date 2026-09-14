@@ -65,8 +65,12 @@ const _DOLLAR_KIND_TIP = {
            + 'o delta é contra o EURBRL. O UC-equiv é a PERNA DE BRL equivalente '
            + '(EURBRL = EURUSD × USDBRL, com EURUSD constante) — não é posição em dólar.',
 };
-// Opções, para os dois lugares que precisam do MESMO recorte (bloco e formato de preço).
-const _DOLLAR_OPT_KINDS = new Set(['dolopt', 'fxopt', 'eurbrlopt']);
+/* Opções da tabela, quebradas por MOEDA — cada recorte é um BLOCO com total próprio
+   (set/2026, pedido da mesa). DOL BMF e USDBRL somam a MESMA perna (dólar contra real) e
+   por isso continuam juntos; a EURBRL entra por equivalência de perna de BRL, sob a
+   premissa de EURUSD parado (ver `_DOLLAR_KIND_TIP` e a nota de rodapé) — misturá-la no
+   mesmo subtotal escondia o tamanho dessa premissa dentro do número do dólar. */
+const _DOLLAR_OPT_USDBRL_KINDS = new Set(['dolopt', 'fxopt']);
 
 /* ☠️ `_dollarKind(r) != null` DEIXOU DE SIGNIFICAR "é dólar" quando a EURBRL passou a ter
    kind (set/2026) — e era exatamente esse teste que o chip de par das abas de trader
@@ -284,13 +288,9 @@ function renderDolarConsol(trader) {
     return { ref, ik, nav, isOpt, kind, delta, price, expUsd, expPct, ucEq, premium };
   };
 
-  const optRows = rows.filter(x => _DOLLAR_OPT_KINDS.has(x.kind));
-  const futRows = rows.filter(x => x.kind === 'uc' || x.kind === 'wdo' || x.kind === 'fxfwd');
-  /* Parcela da EURBRL no total, para o rodapé DIZER o tamanho da premissa em vez de só
-     declará-la. `metric` é pura (lê a row + as marretas), então recomputar aqui não muda
-     nada — os acumuladores `g*` seguem saindo do `renderRows`, fonte única da tabela. */
+  const optUsdRows = rows.filter(x => _DOLLAR_OPT_USDBRL_KINDS.has(x.kind));
+  const futRows    = rows.filter(x => x.kind === 'uc' || x.kind === 'wdo' || x.kind === 'fxfwd');
   const eurbrlRows = rows.filter(x => x.kind === 'eurbrlopt');
-  const eurbrlUc   = eurbrlRows.reduce((a, x) => { const u = metric(x).ucEq; return a + (u ?? 0); }, 0);
 
   // Cabeçalho em DUAS linhas, padrão `.jgp-tbl` (mesmo da Análise de Opções logo abaixo):
   // a 1ª linha agrupa por natureza — o que o papel É, como ele está MARCADO, e o que isso
@@ -409,22 +409,35 @@ function renderDolarConsol(trader) {
     }
     const keys = [...byMat.keys()].sort((a, b) =>
       (a === '' ? 1 : b === '' ? -1 : String(a).localeCompare(String(b))));
-    const blk = { sUsd: 0, sPct: 0, sUc: 0, sPrem: 0 };
-    let inner = '';
+    const blk   = { sUsd: 0, sPct: 0, sUc: 0, sPrem: 0 };
+    const parts = [];
     for (const k of keys) {
       const g   = byMat.get(k);
-      const s   = renderRows(g.rows);
+      const s   = renderRows(g.rows);   // ⚠️ 1× por conjunto: acumula os `g*` do TOTAL GERAL
       const lbl = k ? fmtDate(k) + (g.derived ? '~' : '') : 'Sem vencimento';
       const tip = g.derived
         ? ' title="Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste vencimento."' : '';
-      inner += s.trs + subtotalRow(`Subtotal · ${lbl}`, s, ' tot-sub', tip);
+      parts.push({ s, lbl, tip });
       blk.sUsd += s.sUsd; blk.sPct += s.sPct; blk.sUc += s.sUc; blk.sPrem += s.sPrem;
     }
+    /* UM vencimento só ⇒ UMA linha de total. Passou a importar quando o bloco de opções se
+       quebrou por moeda (set/2026): o de EURBRL costuma ter vencimento único, e ali
+       "Subtotal · 06/11/2026" seguido de "Subtotal · Opções EURBRL" repetia os MESMOS
+       números em duas linhas. O rótulo funde bloco + data; a conta é a mesma. */
+    if (parts.length === 1) {
+      const p = parts[0];
+      return header + p.s.trs + subtotalRow(`Subtotal · ${title} · ${p.lbl}`, p.s, '', p.tip);
+    }
+    const inner = parts.map(p => p.s.trs + subtotalRow(`Subtotal · ${p.lbl}`, p.s, ' tot-sub', p.tip)).join('');
     return header + inner + subtotalRow(`Subtotal · ${title}`, blk);
   };
 
+  /* Um bloco por MOEDA da opção, cada um com seu total — o de dólar (DOL BMF + USDBRL) e o
+     de EURBRL. `renderBlock` devolve '' para lista vazia, então o trader sem EURBRL vê
+     exatamente a tabela de antes, com o título do bloco mais preciso. */
   const body = [
-    renderBlock('Opções (DOL / USDBRL / EURBRL)', optRows, true),
+    renderBlock('Opções DOL / USDBRL', optUsdRows, true),
+    renderBlock('Opções EURBRL', eurbrlRows, true),
     renderBlock('Futuros e Spot (UC / WDO / USD/BRL)', futRows),
   ].filter(Boolean).join(spacer);
 
@@ -441,6 +454,9 @@ function renderDolarConsol(trader) {
      UC-equiv não sai de uma razão de contrato/face, e sim de uma equivalência de perna de
      BRL que supõe o EURUSD parado. Fica dentro do `.section-copy-target` de propósito: o
      número copiado para o WhatsApp tem de levar a premissa com ele.
+     ⚠️ Ela APONTA para o subtotal do bloco de EURBRL em vez de repetir o número: desde que o
+     bloco de opções se quebrou por moeda (set/2026) a parcela já está numa linha própria da
+     tabela, e ter os dois obrigaria a mesa a conferir se batem.
      ☠️ **`jgp-tbl-note` é obrigatório, não enfeite** (set/2026): o alvo do "⎘ Copiar" é o
      `.section-copy-target`, que é `width: fit-content` para medir exatamente a TABELA. Um
      parágrafo de texto corrido tem `max-content` gigante e passa a ditar esse fit-content —
@@ -453,7 +469,8 @@ function renderDolarConsol(trader) {
       <b>EURBRL em UC-equiv:</b> o nocional em EUR vira USD pelo EURUSD spot e o delta é contra o EURBRL,
       então o número é a <b>perna de BRL equivalente</b> — a posição em USDBRL de mesma sensibilidade ao real,
       supondo <b>EURUSD constante</b> (EURBRL = EURUSD × USDBRL). Não é posição em dólar contra o euro.
-      Contribuição no total: <b>${fmtUc(eurbrlUc)}</b> UC de ${eurbrlRows.length} linha${eurbrlRows.length > 1 ? 's' : ''} de EURBRL.
+      O tamanho dessa premissa é o <b>Subtotal · Opções EURBRL</b> acima
+      (${eurbrlRows.length} linha${eurbrlRows.length > 1 ? 's' : ''}), que o total em dólar embute.
     </div>` : '';
 
   const navStr = navTrader ? `NAV: USD ${navTrader.toLocaleString('en-US',{maximumFractionDigits:0})}` : '';

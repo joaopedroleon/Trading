@@ -58,6 +58,9 @@ const PosBusy = (() => {
     'rol:bol':   { src: 'boletas',  also: ['rolagem'], containers: ['rolagemBoletaPanel'] },
     // 'boldia' ≠ 'boletas': aquele é a prévia de boletas de ROLAGEM, este é a aba de resumo.
     'bol:dia':   { src: 'boldia',   containers: ['boletasContainer', 'boletasControls'] },
+    // A conferência com o tradebook sai do MESMO request da aba (o /boletas-resumo já
+    // traz as duas pontas), como 'dc:consol'/'dc:opt' — dois ⟳, um source.
+    'bol:chk':   { src: 'boldia',   containers: ['boletasCheck'] },
   };
   // Cada seção de aba de trader pinta DOIS containers: o principal e o bloco colapsado
   // que desceu p/ o fim da aba (#posPrevContainer-* / #pnlDetailContainer-*, ver a ordem
