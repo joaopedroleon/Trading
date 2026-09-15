@@ -4,7 +4,8 @@
    e quebrar por grupo dobrava toda linha.
 
    Dois modos, pelo chip "⤵ Por vencimento" (default: resumido):
-     • **resumido** — uma linha por moeda (abertura · operada · final + equiv. USD + % NAV),
+     • **resumido** — uma linha por moeda (abertura · operada · final + equiv. USD + % NAV;
+       o equiv. USD sai no sinal visto do DÓLAR — ver `_fxUsdSign`),
        com a coluna "Origem" separando linear × opção quando há opção aberta;
      • **por vértice** — uma linha por (moeda, vencimento, CONTRATO), com **preço marcado de
        D-1 do JRS**, **taxa live** e **resultado do dia**. O contrato entra na chave porque
@@ -63,6 +64,20 @@ const _FX_GROUPS = [
 // A ORIGEM exibida é o próprio `basis` da perna — ver `_FX_GROUPS`. (Houve uma versão em que
 // `fx` e `fut` eram um grupo só, "FX linear"; caiu quando o futuro ganhou tabela própria.)
 const _fxGroupOf = basis => basis;
+
+/* ── SINAL do equivalente em USD: a coluna diz a POSIÇÃO EM DÓLAR da perna ────────────
+   ⚠️ **Não é a perna convertida — é a perna VISTA DO DÓLAR** (pedido da mesa, set/2026):
+   vendido 4 MM de CLP é COMPRADO no equivalente em dólar, e a coluna imprime `+`. Era o
+   contrário até então (`perna ÷ spot`, mantendo o sinal da moeda), e a leitura linha a linha
+   pedia inverter de cabeça toda moeda estrangeira.
+   A perna de USD **não** inverte: ela já está em dólar, e comprado em USD segue `+`.
+   ☠️ **Consequência: as duas pernas do MESMO contrato passam a ter o MESMO sinal**, então a
+   coluna deixou de somar para a marcação — a linha do USD virou o ESPELHO de todas as outras
+   e não entra no total (ver `totUsd`). O total passou a ser a exposição líquida em dólar, e a
+   linha do USD é o tie-out dela: as duas só diferem pela marcação/caixa a liquidar.
+   ⚠️ Um par CROSS (sem perna em dólar) continua somando ~0 sozinho, que é o certo — ele não
+   carrega exposição a dólar. */
+const _fxUsdSign = ccy => (ccy === 'USD' ? 1 : -1);
 
 /* Piso para AFIRMAR o check de alocação MM × MM Prev, em USD. Ver `alcRow`: abaixo disso a
    linha é resíduo de rolagem e a proporção não significa nada. Mesmo número do filtro
@@ -130,9 +145,16 @@ const _FX_CCY_HELP =
   '            com a seção de PnL, onde o cross é uma linha com nome.\n' +
   'PREÇOS      só na visão por vencimento — taxa é do contrato, não da\n' +
   '            moeda. A opção fica de fora: prêmio não é taxa.\n' +
-  'EQUIV. USD  a perna é CONTRATUAL (taxa da boleta), mas o equivalente em\n' +
-  '            dólar é a MERCADO: converte pelo spot de agora. Por isso a\n' +
-  '            soma não dá zero — o que sobra é a marcação. NÃO é exposição.\n';
+  'EQUIV. USD  a POSIÇÃO EM DÓLAR que a perna representa, vista do dólar:\n' +
+  '            vendido em CLP é COMPRADO no equivalente, então imprime +.\n' +
+  '            A perna de USD não inverte (comprado em USD segue +). A perna\n' +
+  '            é CONTRATUAL (taxa da boleta); o equivalente é a MERCADO.\n' +
+  'EXPOSIÇÃO   o total soma as moedas SEM a linha do USD: com este sinal as\n' +
+  '            duas pernas de um contrato dizem a MESMA posição, e somá-las\n' +
+  '            contaria o mesmo dólar 2×. A linha do USD é o TIE-OUT do\n' +
+  '            total — a diferença entre os dois é a marcação (a perna é\n' +
+  '            contratual) mais o caixa a liquidar da rolagem. Um par CROSS\n' +
+  '            soma ~0 sozinho: sem perna em dólar, sem exposição a ele.\n';
 
 const _FX_FUT_HELP =
   'FUTURO DE DÓLAR — a mesma leitura por moeda, para WDO/UC, somando\n' +
@@ -141,7 +163,10 @@ const _FX_FUT_HELP =
   'ORIGEM      aqui o nocional é DERIVADO da coluna #PL (contratos ×\n' +
   '            valor do ponto × preço), então move com o mercado — ao\n' +
   '            contrário do forward, cuja perna é contratual.\n' +
-  'PERNAS      +USD contra −BRL, pelo nocional do contrato.\n' +
+  'PERNAS      +USD contra −BRL, pelo nocional do contrato. O Equiv. USD\n' +
+  '            sai no sinal visto do DÓLAR (vendido em BRL é comprado em\n' +
+  '            dólar), e a linha do USD — que não inverte — é o tie-out do\n' +
+  '            total, não uma parcela dele.\n' +
   'RESULT.DIA  vai para o BRL, que é a moeda que se move contra o dólar.\n' +
   '            Mesma função da aba PnL, então segue as marretas de preço.\n';
 
@@ -215,7 +240,12 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       // Perna sem spot da moeda não vira zero: some do equivalente em USD e é NOMEADA.
       // (É o buraco do item 12 do CLAUDE.md — moeda nova entra muda.)
       if (l.usd_final == null) a.semUsd.push(r.instrument_name ?? '—');
-      else { a.uo += (l.usd_open ?? 0) * k; a.ut += (l.usd_traded ?? 0) * k; a.uf += l.usd_final * k; }
+      else {
+        const su = _fxUsdSign(l.ccy);
+        a.uo += (l.usd_open ?? 0) * k * su;
+        a.ut += (l.usd_traded ?? 0) * k * su;
+        a.uf += l.usd_final * k * su;
+      }
     }
   }
   if (!anyLeg) return '';
@@ -251,7 +281,12 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   }
   const list = [...byCcy.values()].sort((x, y) => Math.abs(y.uf) - Math.abs(x.uf));
   if (!list.length) return '';
-  const totUsd  = list.reduce((s, g) => s + g.uf, 0);
+  /* ⚠️ **A linha do USD fica FORA do total, e sem isso o número dobra.** Com o sinal do
+     equivalente visto do dólar (ver `_fxUsdSign`), a perna de USD de cada contrato e a perna
+     estrangeira dele dizem a MESMA posição — somar as duas conta o mesmo dólar 2×. O total é
+     a **exposição líquida em dólar**; a linha do USD é o tie-out (difere pela marcação). */
+  const usdRow  = list.find(g => g.ccy === 'USD') ?? null;
+  const totUsd  = list.reduce((s, g) => s + (g.ccy === 'USD' ? 0 : g.uf), 0);
   const totRes  = list.reduce((s, g) => s + g.res, 0);
   const orphans = _fxOrphans(rows, bases);
   const nLegs   = list.reduce((s, g) => s + g.legs.length, 0);
@@ -259,6 +294,20 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   // "Contrato" já diz o que é cada linha, e com um grupo só ela repetiria o mesmo rótulo.
   const showG = !byVtx && new Set(list.flatMap(g => g.legs.map(a => a.grp))).size > 1;
   const NC    = (byVtx ? 10 : 7) + (showG ? 1 : 0) - (byVtx ? 0 : 1);
+
+  /* Tie-out do total contra a linha do USD — ver `_fxUsdSign`. Montado aqui, e não dentro
+     do template, porque `fmtMoney` devolve HTML e o título precisa do número cru. */
+  const _plain  = v => fmtMoney(v).replace(/<[^>]*>/g, '');
+  const totTip  =
+      'Exposição LÍQUIDA em dólar: soma do Equiv. USD de todas as moedas, SEM a linha do USD.\n\n'
+    + 'Com o sinal visto do dólar, a perna de USD de um contrato e a perna estrangeira dele dizem '
+    + 'a mesma posição — somar as duas contaria o mesmo dólar duas vezes. A linha do USD é o '
+    + 'TIE-OUT deste número, não uma parcela dele.\n\n'
+    + (usdRow
+        ? 'Linha do USD: ' + _plain(usdRow.uf) + '\n'
+          + 'Diferença: ' + _plain(totUsd - usdRow.uf) + ' — é a marcação a mercado das posições '
+          + 'em ser (a perna é contratual) mais o caixa a liquidar da rolagem.'
+        : 'Sem linha de USD nesta tabela: só cross, que não carrega exposição a dólar.');
 
   const navTip = 'Equivalente em USD sobre o NAV.\nDenominador: '
     + (navInfo?.den == null ? '—'
@@ -474,7 +523,12 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
             <th class="sep" title="Nocional da perna na ABERTURA (D-1), na própria moeda.">Abertura</th>
             <th title="Nocional que as boletas de HOJE acrescentaram (ou tiraram) à perna.">Operada</th>
             <th class="sep" title="Abertura + operada, na própria moeda.">Final</th>
-            <th class="sep" title="A perna FINAL em dólar, ao spot de agora (USD{moeda} Curncy). A perna é contratual; o equivalente é a mercado.">Equiv. USD</th>
+            <th class="sep" title="${_fxEsc(
+              'A POSIÇÃO EM DÓLAR que a perna final representa, ao spot de agora (USD{moeda} Curncy).\n\n'
+              + 'Sinal visto do DÓLAR: vendido em CLP é COMPRADO no equivalente em dólar, então a '
+              + 'linha imprime +. A perna de USD não inverte — comprado em USD segue +.\n\n'
+              + 'A perna é CONTRATUAL (taxa da boleta); o equivalente é a MERCADO (spot de agora).')
+              }">Equiv. USD</th>
             <th title="${_fxEsc(navTip)}">% NAV${navInfo?.factor > 1 ? ' *' : ''}</th>
             ${byVtx ? `
             <th class="sep-wide" title="Preço MARCADO de D-1 pelo JRS para este contrato (jrs.vw_results). É a base do resultado de estoque do dia.">Preço D-1</th>
@@ -489,7 +543,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
           <tbody>
             ${body}
             <tr class="tot">
-              <td class="lbl" title="As duas pernas de cada contrato se anulam em dólar, então a soma do Equiv. USD NÃO é exposição — é a marcação a mercado das posições em ser (mais o caixa a liquidar).">Soma</td>
+              <td class="lbl" title="${_fxEsc(totTip)}">Exposição USD</td>
               ${byVtx || showG ? '<td></td>' : ''}<td class="sep"></td><td></td><td class="sep"></td>
               <td class="sep">${fmtMoney(totUsd)}</td>
               <td>${nav ? fmtPL(totUsd / nav, 'pct') : ''}</td>
