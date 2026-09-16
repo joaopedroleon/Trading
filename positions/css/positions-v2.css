@@ -213,11 +213,18 @@ html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
    classe também veste BADGES que não são botão (`🚫 N ocultos`, as áreas excluídas — ambos
    `cursor:default`) e o seletor de conversão do resumo. Pintar todos de verde diria que
    são clicáveis e que estão "ativos", que é o oposto do que aqueles dois informam. */
+/* ⭐ `#boletasCheck` entrou no escopo (set/2026): a conferência boleta × execução ganhou
+   pareamento MANUAL, com chips próprios de executor (tradebook) e de livro (JDS) dentro do
+   card. São a mesma interação dos chips de trader do topo e têm de se vestir igual — sem
+   isso o marcado ficaria nos ~2% de luminância do `.on` global, que é o problema descrito
+   logo acima. */
 html.theme-v2 #rolagemControls .filter-chip.on,
+html.theme-v2 #boletasCheck .filter-chip.on,
 html.theme-v2 #boletasControls .filter-chip.on {
   background: var(--green); color: #fff; border-color: var(--green-dark); font-weight: 600;
 }
 html.theme-v2 #rolagemControls .filter-chip.off,
+html.theme-v2 #boletasCheck .filter-chip.off,
 html.theme-v2 #boletasControls .filter-chip.off {
   background: transparent; color: var(--text-muted); border-style: dashed; font-weight: 400;
 }
@@ -225,15 +232,18 @@ html.theme-v2 #boletasControls .filter-chip.off {
    pode usar nem o verde do `.on` nem o tracejado do `.off` — ficaria na mesma fileira dos
    traders parecendo mais um deles. Contorno sólido no azul de rótulo da tela. */
 html.theme-v2 #rolagemControls .filter-chip.chip-act,
+html.theme-v2 #boletasCheck .filter-chip.chip-act,
 html.theme-v2 #boletasControls .filter-chip.chip-act {
   background: transparent; color: var(--accent); border-color: var(--accent);
   border-style: solid; font-weight: 600;
 }
 html.theme-v2 #rolagemControls .filter-chip.chip-act:hover,
+html.theme-v2 #boletasCheck .filter-chip.chip-act:hover,
 html.theme-v2 #boletasControls .filter-chip.chip-act:hover {
   background: var(--accent); color: var(--bg-card);
 }
 html.theme-v2 #rolagemControls .filter-chip:hover,
+html.theme-v2 #boletasCheck .filter-chip:hover,
 html.theme-v2 #boletasControls .filter-chip:hover { opacity: 1; filter: brightness(1.08); }
 
 /* Respiro BRANCO entre blocos e antes do TOTAL GERAL (Consolidado Dólar) — a mesa pediu
