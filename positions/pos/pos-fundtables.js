@@ -14,6 +14,15 @@ function fmtPct(v) {
   return v == null ? '—' : (v * 100).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
 }
 
+/* ── Bloco "Somente MM Prev" — DESLIGADO por trader (set/2026) ─────────────
+   O bloco lista as posições que SÓ o grupo Prev tem (sem par no MM). Pedido da mesa:
+   na aba do EMota elas não interessam ao check de enquadramento (ex.: a opção de
+   EWZ US Equity, que é do Prev e não do livro dele) e poluem a tabela auxiliar.
+   ⚠️ É DESLIGAMENTO TEMPORÁRIO e só de EXIBIÇÃO: nada muda no casamento MM×Prev
+   (o `matchedPrev` continua varrendo todas as linhas) nem no backend.
+   Para religar, tire o trader do Set — ou esvazie-o para voltar a valer em todas as abas. */
+const HIDE_SO_PREV_TRADERS = new Set(['EMota']);
+
 function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   const target   = ALLOC_TARGETS[trader] ?? null;
   // Linha simulada fica FORA do check de alocação MM×MM Prev: ela não tem par no Prev por
@@ -57,12 +66,15 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   // (que itera o MM). Casamos contra TODAS as linhas MM — não só as visíveis — pra
   // não tratar uma linha MM oculta/filtrada como "sem MM"; depois aplicamos os chips
   // de filtro às órfãs. Renderizadas abaixo, alinhadas com a coluna do Prev.
+  // ⚠️ Trader em `HIDE_SO_PREV_TRADERS` não recebe o bloco (ver o topo do arquivo).
   const matchedPrev = new Set();
   for (const mm of allRows.filter(r => r.group === 'MM' && r.trader === trader)) {
     const p = lookupPrev(mm);
     if (p) matchedPrev.add(p);
   }
-  const orphanRows = sortRows(filterFn(prevRows.filter(p => !matchedPrev.has(p))));
+  const orphanRows = HIDE_SO_PREV_TRADERS.has(trader)
+    ? []
+    : sortRows(filterFn(prevRows.filter(p => !matchedPrev.has(p))));
 
   if (!visRows.length && !orphanRows.length) return '';
 
