@@ -47,6 +47,7 @@ const PosBusy = (() => {
     'dc:consol': { src: 'dc',       containers: ['dolarConsolContainer'] },
     'dc:opt':    { src: 'dc',       containers: ['optAnalysisContainer'] },
     'dolar:exp': { src: 'dolarexp', containers: ['dolarContainer'] },
+    'dolar:dir': { src: 'dolardir', containers: ['dolarDirContainer'] },
     'dolar:enq': { src: 'enqrf',    containers: ['enqRfContainer'] },
     // #rolagemControls entra junto do Resumo: `_rolagemRenderControls` o remonta no
     // mesmo load, e um seletor de vencimento ativo sobre dado em voo convida ao clique.
@@ -86,6 +87,7 @@ const PosBusy = (() => {
   const RUNNERS = {
     dc:       () => window.loadDolarConsol(dolarConsolTrader, { fresh: true }),
     dolarexp: () => window.loadDolarExposure({ fresh: true }),
+    dolardir: () => window.loadDolarDirecional({ fresh: true }),
     enqrf:    () => window.loadEnquadramentoRF({ fresh: true }),
     rolagem:  () => { _dropTabCache(ROLAGEM_TAB_ID); return window.loadRolagem(); },
     boletas:  () => window.gerarBoletas(),
@@ -99,6 +101,7 @@ const PosBusy = (() => {
   const SRC_LABEL = {
     dc:       'Consolidado Dólar + Análise de Opções (mesmo request)',
     dolarexp: 'Exposição a dólar local dos fundos prev.',
+    dolardir: 'Exposição direcional a dólar com look-through do offshore (fundos prev.)',
     enqrf:    'Enquadramento de derivativos dos fundos RF',
     rolagem:  'Resumo + detalhe da rolagem (mesmo request)',
     boletas:  'Prévia de boletas (real + gerencial)',

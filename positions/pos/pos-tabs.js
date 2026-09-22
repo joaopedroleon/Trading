@@ -82,10 +82,12 @@ function _dropTabCache(key, trader) {
     _dirtyTabs.delete(DOLAR_CONSOL_TAB_ID);
     return;
   }
-  if (key === DOLAR_TAB_ID) {   // as duas tabelas da aba são carregadas juntas
-    delete posDataByTab[ENQ_RF_TAB_KEY];
-    delete _tabFetchSig[ENQ_RF_TAB_KEY];
-    delete _tabFetchedAt[ENQ_RF_TAB_KEY];
+  if (key === DOLAR_TAB_ID) {   // as três seções da aba são carregadas juntas
+    for (const k of [ENQ_RF_TAB_KEY, DOLAR_DIR_KEY]) {
+      delete posDataByTab[k];
+      delete _tabFetchSig[k];
+      delete _tabFetchedAt[k];
+    }
   }
   delete posDataByTab[key];
   delete fxDealsByTab[key];   // a 2ª onda (câmbio) é da MESMA data — cai junto
@@ -148,6 +150,7 @@ function reloadActiveTab(opts = {}) {
     // "Atualizar tudo" = foto do mercado AGORA → fresh, como o loadDolarConsol abaixo.
     // (A carga preguiçosa ao abrir a aba, em showDolarTab, segue usando o cache.)
     loadDolarExposure({ fresh: true });
+    loadDolarDirecional({ fresh: true });
     loadEnquadramentoRF({ fresh: true });
     return;
   }

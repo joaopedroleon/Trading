@@ -120,6 +120,7 @@ const optPrintSel = new Map();
 /* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */
 const DOLAR_TAB_ID        = 'dolar';
 const ENQ_RF_TAB_KEY      = 'enqrf';    // chave de cache do check de derivativos RF (não é aba nova)
+const DOLAR_DIR_KEY       = 'dolardir'; // chave de cache da exposição direcional com look-through (mesma aba)
 let   dolarOptTickers     = {};         // optKey → ticker BBG (cache do backend; cadastro de DOL)
 
 /* ── Hidden rows helpers ─────────────────────────────────────────────────── */

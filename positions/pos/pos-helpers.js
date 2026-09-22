@@ -159,7 +159,11 @@ function _markTabsDirtyAndRerender() {
 // Re-render da aba ativa conforme o tipo (sem refetch; preserva estado de colapso/ocultas).
 function rerenderActive() {
   if (activeTraderTab === DOLAR_CONSOL_TAB_ID) { renderDolarConsol(dolarConsolTrader); }
-  else if (activeTraderTab === DOLAR_TAB_ID)   { if (posDataByTab[DOLAR_TAB_ID]) renderDolarTable(posDataByTab[DOLAR_TAB_ID]); }
+  else if (activeTraderTab === DOLAR_TAB_ID)   {
+    if (posDataByTab[DOLAR_TAB_ID]) renderDolarTable(posDataByTab[DOLAR_TAB_ID]);
+    // a marreta de delta das opções de DOL também muda a seção direcional (mesma `_dolarInstExp`)
+    if (posDataByTab[DOLAR_DIR_KEY] && typeof renderDolarDirecional === 'function') renderDolarDirecional(posDataByTab[DOLAR_DIR_KEY]);
+  }
   else if (activeTraderTab === ROLAGEM_TAB_ID) { if (posDataByTab[ROLAGEM_TAB_ID]) renderRolagem(); }
   else { rerenderTables(); if (typeof rerenderPnlValues === 'function') rerenderPnlValues(); }
 }
