@@ -439,7 +439,10 @@ function renderSectionsForTab(tabId, allRows) {
           <div class="section-title" style="padding:8px 0 8px 0;display:flex;align-items:baseline;gap:16px">
             <span>MM Prev <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${s.trader}</span></span>
             ${navStr ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr}</span>` : ''}
-            <span class="mmPrevArrow" style="margin-left:auto;font-size:13px;color:var(--text-muted)">▶</span>
+            <button class="btn" id="${sectionRestoreId(s)}" style="margin-left:auto;padding:2px 10px;font-size:12px;background:var(--red);color:#fff;display:none"
+                    onclick="event.stopPropagation();restoreHiddenInSection('${sectionBodyId(s)}')"
+                    title="Traz de volta as linhas ocultas DESTA tabela (pelo ✕ de linha). Só esta seção."></button>
+            <span class="mmPrevArrow" style="font-size:13px;color:var(--text-muted)">▶</span>
           </div>
         </div>
         <div id="${bodyWrapId}" style="display:none">
@@ -466,7 +469,21 @@ function renderSectionsForTab(tabId, allRows) {
           <div class="section-title" ${titleId} style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:16px">
             <span>${s.group} <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${s.trader}</span></span>
             ${navStr ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr}</span>` : ''}
-            <button class="btn btn-secondary" data-html2canvas-ignore="true" style="margin-left:auto;padding:2px 10px;font-size:12px" onclick="copyCardImage(this)">⎘ Copiar</button>
+            <!-- Ferramentas do card, SEMPRE encostadas à direita: o margin-left:auto fica no GRUPO,
+                 não num botão — os dois primeiros alternam display:none, e com o auto num deles o
+                 que sobrava ficava solto no meio do título (era o sintoma reportado pela mesa).
+                 (Sem crase neste comentário: ele vive dentro de um template literal.) -->
+            <span class="sec-tools" data-html2canvas-ignore="true" style="margin-left:auto;display:inline-flex;gap:6px;align-items:center">
+            <button class="btn" id="${sectionRestoreId(s)}"
+                    style="padding:2px 10px;font-size:12px;background:var(--red);color:#fff;display:none"
+                    onclick="restoreHiddenInSection('${sectionBodyId(s)}')"
+                    title="Traz de volta as linhas ocultas DESTA tabela (pelo ✕ de linha ou pelo ✕ Ocultar zeradas). Só esta seção."></button>
+            <button class="btn btn-secondary" id="${sectionHideZeroId(s)}"
+                    style="padding:2px 10px;font-size:12px;display:none"
+                    onclick="hideZeroRowsInSection('${sectionBodyId(s)}')"
+                    title="Oculta, de uma vez, as linhas DESTA tabela cuja quantidade FINAL é zero (posição zerada no dia ou que já veio zerada).&#10;É a mesma ferramenta do ✕ de cada linha — o ↩ Restaurar ocultas traz tudo de volta.&#10;Linha simulada não entra."></button>
+            <button class="btn btn-secondary" style="padding:2px 10px;font-size:12px" onclick="copyCardImage(this)">⎘ Copiar</button>
+            </span>
           </div>
           ${POS_NET_TABS.has(tabId) ? `<div class="net-summary" id="${sectionNetId(s)}"></div>` : ''}
           <table class="data-table" style="white-space:nowrap;width:auto">

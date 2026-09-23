@@ -174,6 +174,15 @@ function sectionNetId(s) {
   return `netsum_${s.group}_${s.trader}`.replace(/[^a-zA-Z0-9]/g, '_');
 }
 
+// Id do botão "✕ Ocultar zeradas" da seção — mesmo esquema: `hidezero_` + o sufixo do tbody.
+function sectionHideZeroId(s) {
+  return `hidezero_${s.group}_${s.trader}`.replace(/[^a-zA-Z0-9]/g, '_');
+}
+// Id do botão "↩ Restaurar ocultas" da seção — idem, `restore_` + o sufixo do tbody.
+function sectionRestoreId(s) {
+  return `restore_${s.group}_${s.trader}`.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
 function thead() {
   const d = detailVisible ? '' : 'style="display:none"';
   return `<thead><tr>

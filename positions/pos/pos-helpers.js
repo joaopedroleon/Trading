@@ -185,6 +185,94 @@ function restoreHidden() {
   renderRestoreBtn();
 }
 
+/* ── Linhas EXIBIDAS de uma aba de trader — a MESMA seleção do `rerenderTables` ─────────
+   Agregação WDO+UC (se ligada) + filtros de aba ativos. Existe para que quem precise da
+   lista do que está na tela (o atalho "Ocultar zeradas") não recopie a regra dos dois
+   renders — uma cópia que divergisse ocultaria linha que a tabela nem mostra. O ✕ manual
+   (`hiddenRows`) NÃO entra aqui: é a camada de cima, aplicada pelo `renderTable`. */
+function tabRowFilter(tabId) {
+  const tab        = TRADER_TABS.find(t => t.id === tabId);
+  const tabFilters = FILTERS.filter(f => (tab?.filters ?? []).includes(f.id) && activeFilters.has(f.id));
+  return r => tabFilters.every(f => f.fn(r));
+}
+function tabDisplayRows(tabId) {
+  const rows = posDataByTab[tabId]?.rows;
+  if (!rows) return null;
+  return wdoUcAggregated.has(tabId) ? applyWdoUcAggregation(rows) : rows;
+}
+
+/* ── Atalho "✕ Ocultar zeradas" — POR TABELA de Posição (set/2026, pedido da mesa) ────
+   Vive no título de cada card de Posição (ao lado do ⎘ Copiar), um por seção (grupo ×
+   trader) — a mesa quis por trader, não um botão geral na toolbar (a 1ª versão era global e
+   saiu no mesmo dia). É o MESMO mecanismo do ✕ de linha (`hiddenRows` da aba), só que de
+   uma vez para as linhas exibidas DAQUELA tabela cuja QUANTIDADE FINAL efetiva é zero — a
+   posição que zerou no dia (ou que já veio zerada) e continua ocupando linha. Entra pelo
+   `↩ Restaurar ocultas` como qualquer outra. A quantidade é a EFETIVA (`effectiveRowValues`,
+   marreta de qtd aplicada), para concordar com a coluna Final; em SWAP a "qtd" é o DV01, e
+   DV01 zero também some. Linha SIMULADA fica de fora — o ✕ dela remove a simulação, não
+   oculta, e o atalho não deve fazer o que o ✕ não faria.
+   Quem sabe o que está na tabela é o `renderTable` (pos-render.js): ele calcula as chaves
+   zeradas das MESMAS `visibleRows` que pinta e as deixa aqui, por tbody, para o clique —
+   nada é recontado fora do render, então botão e tabela nunca discordam. */
+const _zeroKeysBySection = new Map();   // tbodyId → [rowKey] zeradas exibidas
+
+const _isZeroQtyRow = r => !r.is_simulated && !(Math.abs(Number(effectiveRowValues(r).final) || 0) > 0);
+
+// Chamado pelo renderTable com as linhas que ele acabou de exibir: guarda as chaves e
+// atualiza o botão da seção (some quando não há o que ocultar; diz quantas quando há).
+function syncHideZeroBtn(tbodyId, visibleRows) {
+  const keys = visibleRows.filter(_isZeroQtyRow).map(rowKey);
+  _zeroKeysBySection.set(tbodyId, keys);
+  const btn = document.getElementById(tbodyId.replace(/^body_/, 'hidezero_'));
+  if (!btn) return;
+  btn.textContent   = `✕ Ocultar zeradas (${keys.length})`;
+  btn.style.display = keys.length ? '' : 'none';
+}
+
+function hideZeroRowsInSection(tbodyId) {
+  const keys = _zeroKeysBySection.get(tbodyId) ?? [];
+  if (!keys.length) return;
+  const hid = _hiddenForTab(activeTraderTab);
+  for (const k of keys) hid.add(k);
+  rerenderTables(keys[0]);   // só o tbody desta seção (a chave carrega group||trader)
+  renderRestoreBtn();
+}
+
+/* ── "↩ Restaurar ocultas" POR SEÇÃO (set/2026, pedido da mesa) ────────────────────────
+   O restaurar GLOBAL da toolbar saiu: quem oculta numa tabela restaura NAQUELA tabela. O
+   `hiddenRows` continua UM Set por aba (o ✕ de linha, o "Ocultar zeradas" e o restaurar do
+   snapshot dependem dele) — a seção é lida da PRÓPRIA chave: o `rowKey` começa por
+   `group||trader||…`, então o prefixo diz a que tabela a linha pertence, sem estado novo.
+   `_sectionPrefixByBody` guarda o prefixo por tbody (o `renderTable` o carimba a partir das
+   linhas que recebe), para o clique e a contagem não precisarem de uma linha exibida. */
+const _sectionPrefixByBody = new Map();   // tbodyId → 'group||trader||'
+
+function _hiddenKeysOfSection(tbodyId) {
+  const pfx = _sectionPrefixByBody.get(tbodyId);
+  if (!pfx) return [];
+  return [..._hiddenForTab(activeTraderTab)].filter(k => k.startsWith(pfx));
+}
+
+// Chamado pelo renderTable: carimba o prefixo da seção e atualiza o botão (some quando
+// não há oculta; diz quantas quando há).
+function syncRestoreBtn(tbodyId, rows) {
+  if (rows.length) _sectionPrefixByBody.set(tbodyId, `${rows[0].group}||${rows[0].trader}||`);
+  const btn = document.getElementById(tbodyId.replace(/^body_/, 'restore_'));
+  if (!btn) return;
+  const n = _hiddenKeysOfSection(tbodyId).length;
+  btn.textContent   = `↩ Restaurar ocultas (${n})`;
+  btn.style.display = n ? '' : 'none';
+}
+
+function restoreHiddenInSection(tbodyId) {
+  const keys = _hiddenKeysOfSection(tbodyId);
+  if (!keys.length) return;
+  const hid = _hiddenForTab(activeTraderTab);
+  for (const k of keys) hid.delete(k);
+  rerenderTables(keys[0]);   // só esta seção
+  renderRestoreBtn();        // o global (snapshot) — no positions.html não há botão e ela sai cedo
+}
+
 function renderRestoreBtn() {
   const btn = document.getElementById('restoreBtn');
   if (!btn) return;

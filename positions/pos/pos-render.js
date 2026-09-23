@@ -2,12 +2,10 @@ function rerenderTables(onlyKey) {
   const data = posDataByTab[activeTraderTab];
   if (!data?.rows) return;
   const onlySection = onlyKey ? onlyKey.split('||') : null;  // [group, trader, ...]
-  const tab        = TRADER_TABS.find(t => t.id === activeTraderTab);
-  const tabFilters = FILTERS.filter(f => (tab?.filters ?? []).includes(f.id) && activeFilters.has(f.id));
-  const filterRows = rows => rows.filter(r => tabFilters.every(f => f.fn(r)));
+  const keep       = tabRowFilter(activeTraderTab);        // pos-helpers.js — fonte única
+  const filterRows = rows => rows.filter(keep);
   const hasFundBreak = activeTraderTab === 'portfoliorf' && !!(data?.fund_rows?.length);
-  const displayRows  = wdoUcAggregated.has(activeTraderTab)
-    ? applyWdoUcAggregation(data.rows) : data.rows;
+  const displayRows  = tabDisplayRows(activeTraderTab);
   for (const s of getSections(displayRows)) {
     const isTarget = !onlySection || (s.group === onlySection[0] && s.trader === onlySection[1]);
     const rows = filterRows(sortRows(
@@ -493,15 +491,31 @@ function optEditApply(input, td) {
    antes de cair em "Juros off", mas tem de APARECER no bloco de moedas, depois dos juros.
 
    ── Um balde pode virar VÁRIOS chips (`sub`) ─────────────────────────────────────────
-   Moedas quebram por PAR (USDBRL, EURBRL, USDCLP…) e commodities pelo ATIVO (Gold…), a
-   pedido da mesa: "moedas" num número só não diz nada quando há USDBRL, EURUSD e USDZAR na
-   mesma linha, e "commodities" idem. Juros/bolsa continuam num chip cada.
+   Commodities quebram pelo ATIVO (Gold…) e bolsa BR pelo objeto; juros continuam num chip
+   cada. Moedas quebram por MOEDA — ver o bloco abaixo.
+
+   ── Moedas: TODOS OS PARES CONTRA O DÓLAR — e UMA linha pode alimentar DOIS chips (`legs`) ──
+   (set/2026, pedido da mesa, em duas rodadas.) 1ª: "por moeda, não por par" — comprado 4 %
+   em USD/MXN e vendido 4 % em USD/BRL é BRL +4 % · MXN −4 %, e o dólar se cancela. 2ª: a
+   mesa quis ler cada moeda como o PAR DE MERCADO contra o USD, então o chip do BRL virou
+   **USDBRL**, o do MXN **USDMXN**, o do EUR **EURUSD** (base ou contra pela convenção de
+   mercado — `_NET_USD_BASE_CCYS`) — e um **cross vira dois pares**: EURBRL vendido 4 % é
+   EURUSD −4 % e USDBRL −4 %. Mecânica: cada linha de FX entra com `+pl` na moeda-BASE e
+   `−pl` na moeda-CONTRA (perna por moeda); a perna não-USD é rotulada com o seu par contra o
+   dólar e o sinal vira junto quando o USD é a base do rótulo (BRL −4 % ⇒ USDBRL +4 %). A
+   perna de USD **não vira chip** (3ª rodada, pedido da mesa: um "USD comprado" solto ao
+   lado de USDBRL/USDMXN não se lia) — o dólar já está dentro de cada par.
+   ⚠️ Só vale porque o `pl` de TODA linha de FX é "fração do NAV comprada na base":
+   `is_fx` (qty na ccy1, router.py), WDO/UC e opção de DOL (base USD contra BRL) e opção de
+   FX (delta da BBG sobre o par como nomeado, `CUSDMXN…` → USD).
    ⚠️ `isUsdBrlDollarRow` (pos-dolar.js) é a fonte única do recorte de dólar e já recolhe
-   futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF — o "tudo concentrado".
-   ☠️ EURBRL NÃO entra no USDBRL: é opção contra o BRL mas não é dólar (ver o gotcha do
-   `Digital_EURBRL` no `_dollarKind` e em classify.py). Vira o SEU chip, logo depois.
+   futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF — tudo vira USD/BRL.
+   ☠️ EURBRL NÃO é dólar (ver o gotcha do `Digital_EURBRL` no `_dollarKind` e em
+   classify.py): vira EURUSD + USDBRL.
    ⚠️ NÃO trocar por `_dollarKind(r) != null`: desde set/2026 a EURBRL TEM kind (ela entra
-   na tabela Consolidado Dólar pela perna de BRL) e cairia aqui no chip do dólar.
+   na tabela Consolidado Dólar pela perna de BRL) e cairia aqui como USD/BRL puro.
+   Linha cujo par não se reconhece cai no chip "Moedas", sem quebrar em pernas — melhor um
+   rótulo genérico do que inventar moeda.
 
    ── Balde vazio não aparece ──────────────────────────────────────────────────────────
    Chip cujo net arredonda para zero em todas as unidades é OMITIDO (pedido da mesa: "só
@@ -635,16 +649,34 @@ function _netFxPair(r) {
   return 'Moedas';
 }
 
-// USDBRL primeiro, EURBRL logo depois, o resto em ordem alfabética (pedido da mesa).
-const _NET_PAIR_HEAD = ['USDBRL', 'EURBRL'];
-function _netPairRank(p) {
-  const i = _NET_PAIR_HEAD.indexOf(p);
-  return i >= 0 ? i : _NET_PAIR_HEAD.length;
+/* Moedas que são BASE contra o dólar na convenção de mercado (EURUSD, GBPUSD, AUDUSD, NZDUSD).
+   Todas as outras cotam como USDxxx. É o rótulo do chip — a exposição por moeda é a mesma. */
+const _NET_USD_BASE_CCYS = new Set(['EUR', 'GBP', 'AUD', 'NZD']);
+const _netUsdPair = ccy => (_NET_USD_BASE_CCYS.has(ccy) ? ccy + 'USD' : 'USD' + ccy);
+
+/* As pernas da linha de FX, para os chips contra o dólar (ver "TODOS OS PARES CONTRA O DÓLAR"
+   acima). Base recebe `+pl`, contra recebe `−pl`; a perna não-USD é rotulada pelo seu par de
+   mercado contra o USD e o sinal vira junto quando o USD é a base do rótulo (exposição BRL
+   −4 % ⇒ USDBRL +4 %). A perna de USD não gera chip. Par irreconhecível → chip "Moedas"
+   só, sem quebrar. `ccy` fica no leg para o tooltip dizer que perna entrou. */
+function _netFxLegs(r) {
+  const pair = _netFxPair(r);
+  if (pair.length !== 6) return [{ sub: pair, w: 1 }];
+  const legs = [];
+  for (const [ccy, side] of [[pair.slice(0, 3), 1], [pair.slice(3), -1]]) {
+    if (ccy === 'USD') continue;
+    const lbl = _netUsdPair(ccy);
+    legs.push({ sub: lbl, w: side * (lbl.startsWith('USD') ? -1 : 1), ccy });
+  }
+  return legs;
 }
 
+// USDBRL primeiro, os outros pares em ordem alfabética (pedido da mesa).
+const _netFxRank = lbl => (lbl === 'USDBRL' ? 0 : 1);
+
 const POS_NET_GROUPS = [
-  { id: 'fx', sort: 30, sub: _netFxPair, subRank: _netPairRank,
-    tip: 'Moedas, por par. USDBRL concentra futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF (recorte do isUsdBrlDollarRow); EURBRL é BRL mas não é dólar, e tem chip próprio.',
+  { id: 'fx', sort: 30, sub: _netFxPair, legs: _netFxLegs, subRank: _netFxRank,
+    tip: 'Moedas, todas em PARES CONTRA O DÓLAR (convenção de mercado: USDBRL, USDMXN, EURUSD…). Um cross vira dois pares: EURBRL vendido 4% = EURUSD −4% e USDBRL −4%. Futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF entram como USDBRL (recorte do isUsdBrlDollarRow).',
     match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || r.area === 'Currencies' },
 
   { id: 'di', sort: 10, sub: () => 'DI',
@@ -682,17 +714,22 @@ function posNetGroup(r) {
 function netByAssetGroup(rows) {
   const acc = new Map();
   for (const r of rows) {
-    const g   = posNetGroup(r);
-    const sub = g.sub(r);
-    const k   = `${g.id}||${sub}`;
-    if (!acc.has(k)) acc.set(k, { g, sub, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
-    const a = acc.get(k);
-    a.insts.push(r.instrument_name ?? '—');
+    const g    = posNetGroup(r);
+    // Balde com `legs` (moedas) espalha a linha em VÁRIOS chips, cada um com o seu peso
+    // (+1 base, −1 contra); os demais são uma perna só, peso 1 — comportamento de sempre.
+    const legs = g.legs ? g.legs(r) : [{ sub: g.sub(r), w: 1 }];
     const { pl, type } = effectiveRowPl(r);
-    if (pl == null || !isFinite(pl)) { a.missing.push(r.instrument_name ?? '—'); continue; }
-    if      (type === 'pct')     { a.pct += pl; a.nPct++; }
-    else if (type === 'nominal') { a.nom += pl; a.nNom++; }
-    else                         { a.missing.push(r.instrument_name ?? '—'); }
+    const name = r.instrument_name ?? '—';
+    for (const { sub, w } of legs) {
+      const k = `${g.id}||${sub}`;
+      if (!acc.has(k)) acc.set(k, { g, sub, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
+      const a = acc.get(k);
+      a.insts.push(legs.length > 1 ? `${name} (perna ${legs.find(l => l.sub === sub)?.ccy ?? sub}, ${w > 0 ? '+' : '−'}#PL)` : name);
+      if (pl == null || !isFinite(pl)) { a.missing.push(name); continue; }
+      if      (type === 'pct')     { a.pct += w * pl; a.nPct++; }
+      else if (type === 'nominal') { a.nom += w * pl; a.nNom++; }
+      else                         { a.missing.push(name); }
+    }
   }
   return [...acc.values()].sort((x, y) =>
        (x.g.sort - y.g.sort)
@@ -746,7 +783,7 @@ function renderNetSummary(rows) {
     return `<span class="net-chip" title="${_netEsc(tip)}"><span class="net-chip-lbl">${a.sub}</span> ${parts.join(' <span class="net-sep">·</span> ')}${warn}</span>`;
   });
   if (!chips.length) return '';
-  return `<span class="net-lbl" title="Soma da coluna #PL das linhas EXIBIDAS acima, por grupo de ativo, na mesma ordem de área da tabela (juros → bolsa → moedas → commodities). Com % = exposição sobre o NAV; sem % = PL por 100bp. Balde zerado não aparece.">Net</span>${chips.join('')}`;
+  return `<span class="net-lbl" title="Soma da coluna #PL das linhas EXIBIDAS acima, por grupo de ativo, na mesma ordem de área da tabela (juros → bolsa → moedas → commodities). Moedas em pares CONTRA O DÓLAR (USDBRL, USDMXN, EURUSD…): um cross vira dois pares (EURBRL = EURUSD + USDBRL). Com % = exposição sobre o NAV; sem % = PL por 100bp. Balde zerado não aparece.">Net</span>${chips.join('')}`;
 }
 
 /* ── Render single tbody ─────────────────────────────────────────────────────── */
@@ -761,6 +798,7 @@ function renderTable(rows, tbodyId) {
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="${body.closest('table')?.querySelector('thead tr')?.childElementCount ?? 12}" class="no-data">Nenhuma posição encontrada.</td></tr>`;
     if (netEl) netEl.innerHTML = '';   // senão a tira do render anterior fica mentindo
+    if (typeof syncHideZeroBtn === 'function') syncHideZeroBtn(tbodyId, []);
     return;
   }
 
@@ -768,6 +806,10 @@ function renderTable(rows, tbodyId) {
 
   // filtrar linhas ocultas manualmente (não afeta contagem de área)
   const visibleRows = rows.filter(r => !_hiddenForTab(activeTraderTab).has(rowKey(r)));
+  // Botão "✕ Ocultar zeradas" do título desta seção: conta sobre as MESMAS linhas que vão
+  // para a tela (pos-helpers.js). `typeof` p/ o snapshot estático antigo.
+  if (typeof syncHideZeroBtn === 'function') syncHideZeroBtn(tbodyId, visibleRows);
+  if (typeof syncRestoreBtn  === 'function') syncRestoreBtn(tbodyId, rows);   // ocultas DESTA seção
 
   let prevArea    = null;
   let prevSubarea = null;
