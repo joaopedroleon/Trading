@@ -670,6 +670,26 @@ function _pnlFundConfig() {
 // errado para um fundo isolado.)
 function _pnlForFund(r) {
   const cf = r.calc_factor;
+  // SWAP consolidado (mesmo ramo do `pnlFor`): estoque = DV01 do FUNDO × Δtaxa; boletas =
+  // a parte já em USD que o backend consolidou POR FUNDO (`swap_trade_usd`, somada em
+  // `_pnlSynthFundRows`). A marreta de abertura/DV01 é keyed pelo rowKey — igual nas duas
+  // tabelas —, então ela é lida na row PRINCIPAL (`_swapMain`) e aplicada ao fundo na
+  // PROPORÇÃO: sem marreta a razão é 1 e o Σ dos fundos bate o consolidado exatamente.
+  if (r.swap_trade_usd != null) {
+    const bpsOf = tot => (r.nav && tot != null) ? tot / r.nav * 10_000 : null;
+    if (cf == null) {   // sem curva (ex. ZAR) → só boletas, total pronto do backend
+      return { estoque: r.estoque_usd, compra: r.compra_usd, venda: r.venda_usd,
+               total: r.total_usd, bps: bpsOf(r.total_usd) };
+    }
+    const sp1 = effectivePrice(r);
+    const sp0 = r.price != null ? r.price : null;
+    let oq = r.opening_qty ?? 0;
+    const main = r._swapMain, eff = main ? _swapEff(main) : null;
+    if (eff && main.opening_qty) oq *= eff.opening / main.opening_qty;
+    const est = (sp0 != null && sp1 != null) ? oq * cf * (sp1 - sp0) : 0;
+    const tot = est + (r.swap_trade_usd || 0);
+    return { estoque: est, compra: r.compra_usd, venda: r.venda_usd, total: tot, bps: bpsOf(tot) };
+  }
   const p1 = effectivePrice(r);
   if (cf == null || p1 == null) return { estoque: null, compra: null, venda: null, total: null, bps: null };
   const p0 = r.price          != null ? r.price          : null;
@@ -717,11 +737,31 @@ function _pnlSynthFundRows(mainByKey, idx, includes, nav) {
       sn += (fr.sell_qty ?? 0) * (fr.avg_sell_price ?? 0);
     }
     if (!hit) continue;
-    out.push({ ...mainByKey.get(k), nav,
-               opening_qty: oq, traded_qty: tq, final_qty: oq + tq,
-               buy_qty: bq, sell_qty: sq,
-               avg_buy_price:  bq ? bn / bq : null,
-               avg_sell_price: sq ? sn / sq : null });
+    const main = mainByKey.get(k);
+    const row  = { ...main, nav,
+                   opening_qty: oq, traded_qty: tq, final_qty: oq + tq,
+                   buy_qty: bq, sell_qty: sq,
+                   avg_buy_price:  bq ? bn / bq : null,
+                   avg_sell_price: sq ? sn / sq : null };
+    // SWAP consolidado: o backend consolida o break por fundo com a MESMA rotina das rows
+    // principais (router: `_consolidate_swaps` fundo a fundo), então cada fund row já traz
+    // os campos de resultado em USD daquele fundo — aqui só se somam os `includes`.
+    // `_swapMain` guarda a row principal p/ o `_pnlForFund` ler a marreta de DV01.
+    if (main.swap_trade_usd != null) {
+      let e = 0, c = 0, v = 0, s = 0, t = 0;
+      for (const fl of includes) {
+        const fr = byFund.get(fl);
+        if (!fr) continue;
+        e += fr.estoque_usd    ?? 0;
+        c += fr.compra_usd     ?? 0;
+        v += fr.venda_usd      ?? 0;
+        s += fr.swap_trade_usd ?? 0;
+        t += fr.total_usd      ?? 0;
+      }
+      Object.assign(row, { estoque_usd: e, compra_usd: c, venda_usd: v,
+                           swap_trade_usd: s, total_usd: t, _swapMain: main });
+    }
+    out.push(row);
   }
   return out;
 }
@@ -732,8 +772,9 @@ function renderPnlSummaryByFund(mainRows) {
   const { mainByKey, idx } = _pnlFundIndex(mainRows);
 
   // Cobertura: row principal sem NENHUMA linha de fundo não aparece em tabela alguma —
-  // avisar em vez de sumir com o resultado (ex.: SWAP consolidado, cuja chave não existe
-  // no break por fundo).
+  // avisar em vez de sumir com o resultado. (O SWAP consolidado era o caso recorrente até
+  // set/2026: o break trazia a perna crua e a chave não casava. Hoje o backend consolida o
+  // break por fundo com a mesma rotina — `_consolidate_swaps` fundo a fundo.)
   // Linha SIMULADA não é órfã: por definição não existe no break por fundo (não veio do
   // Oracle). Fica fora das duas tabelas e é avisada à parte, sem poluir o alerta de cobertura.
   const orphans = mainRows.filter(r => !r.is_simulated && !idx.has(pnlRowKey(r)));
