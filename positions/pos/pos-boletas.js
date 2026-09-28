@@ -11,6 +11,11 @@
  * feita aqui: o filtro é a interação principal da aba e marcar/desmarcar um chip
  * não pode custar um round-trip ao Oracle.
  *
+ * ⛔ Boleta com contraparte GERENCIAL não entra (pedido da mesa, set/2026): é
+ * transferência interna entre livros, não negócio — o backend já a filtra
+ * (`get_deals_by_trader_instrument`) e manda em `excluidas.gerencial` quantas ficaram
+ * de fora, que a nota da tabela declara. Só esta aba; a posição continua com elas.
+ *
  * ⚠️ Os chips saem do DADO, não de lista fixa: trader que nunca apareceu ganha
  * chip sozinho, e trader do conjunto padrão que não boletou no dia simplesmente
  * não tem chip (não há o que somar). O conjunto padrão é o da mesa
@@ -241,11 +246,32 @@ function renderBoletas() {
         módulos, então giro que não muda posição aparece aqui. Os preços médios são ponderados
         por quantidade e vêm na unidade de cotação de cada ativo (taxa no DI, pontos no dólar).
         <b>Não há total geral</b>: as unidades não somam entre ativos.
+        ${_boletasGerencialNote(data)}
       </p>
     </div>
   </div>`;
 
   renderBoletasCheck(data, sel);
+}
+
+/* Nota da exclusão das boletas com contraparte Gerencial (transferência interna entre
+ * livros). Diz quantas ficaram de fora e de quem — e, se a contagem falhou no servidor,
+ * diz que o número está faltando, em vez de fingir que não havia nenhuma. */
+function _boletasGerencialNote(data) {
+  const g = (data.excluidas || {}).gerencial;
+  if (!g) return '';
+  if (g.error)
+    return `<br>⛔ Boletas com contraparte <b>Gerencial</b> (transferência interna entre livros)
+      <b>não entram</b> nesta aba — e a contagem das excluídas falhou no servidor, então não
+      dá para dizer quantas foram.`;
+  if (!g.n_deals)
+    return `<br>⛔ Boletas com contraparte <b>Gerencial</b> (transferência interna entre livros)
+      <b>não entram</b> nesta aba. Nenhuma nesta data.`;
+  const quem = (g.por_trader || [])
+    .map(t => `${t.trader} ${t.n_deals}`).join(' · ');
+  return `<br>⛔ <b>${g.n_deals} boleta(s)</b> com contraparte <b>Gerencial</b> (transferência
+    interna entre livros, não negócio) <b>ficaram de fora</b> desta aba e dos chips acima:
+    ${quem}. A posição das abas de trader continua com elas.`;
 }
 
 
@@ -601,9 +627,9 @@ function renderBoletasCheck(data, sel) {
         <b>bol.</b> = boletas do JDS (<code>vw_mm_prev_deals</code>), a mesma base da tabela acima.
         <b>&Delta; = boletado &minus; executado</b>, em quantidade. Só entram futuros e opções listadas —
         ação, câmbio à vista, swap e compromissada não passam pelo tradebook.
-        ⚠️ Nem toda execução passa por lá (voz, corretora, outro EMS) e transferência entre livros não
-        tem execução nenhuma: <b>boletado sem execução não é erro por si só</b>; o que costuma apontar
-        problema é executado sem boleta.
+        ⚠️ Nem toda execução passa por lá (voz, corretora, outro EMS): <b>boletado sem execução não
+        é erro por si só</b>; o que costuma apontar problema é executado sem boleta. Transferência
+        entre livros (contraparte <b>Gerencial</b>) já está fora das duas tabelas.
         ${extras.map(x => '<br>' + x).join('')}
       </p>
     </div>
