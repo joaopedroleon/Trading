@@ -21,6 +21,9 @@
  * não tem chip (não há o que somar). O conjunto padrão é o da mesa
  * (BOLETAS_DEFAULT_TRADERS) e a escolha do usuário sobrevive ao ⟳ e à troca de data.
  *
+ * ⚠️ As notas de baixo das duas tabelas ficam num <details> FECHADO ("ⓘ notas"), a pedido
+ * da mesa (set/2026): a tabela fala por si e o texto só abre para quem quer o porquê.
+ *
  * ⭐ São DOIS recortes independentes nesta aba, e confundi-los é o erro fácil:
  * este filtro de traders manda na TABELA DE BOLETAS; a conferência boleta × execução
  * (mais abaixo neste arquivo) tem pareamento próprio — por grupo, derivado deste
@@ -239,7 +242,8 @@ function renderBoletas() {
           <tbody>${body}</tbody>
         </table>
       </div>
-      <p class="csub jgp-tbl-note" style="margin:8px 0 0;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+      <details class="jgp-tbl-note" style="margin:6px 0 0;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+        <summary style="cursor:pointer;user-select:none">ⓘ notas</summary>
         Só boletas do dia (<b>JDS</b> · <code>vw_mm_prev_deals</code>) — não é posição: não entram
         a abertura D-1 nem preço de mercado. <b>Líquido</b> = compras − vendas (negativo entre
         parênteses, na convenção do JRS: positivo = comprado/tomado); <b>Bruto</b> = soma dos
@@ -247,7 +251,7 @@ function renderBoletas() {
         por quantidade e vêm na unidade de cotação de cada ativo (taxa no DI, pontos no dólar).
         <b>Não há total geral</b>: as unidades não somam entre ativos.
         ${_boletasGerencialNote(data)}
-      </p>
+      </details>
     </div>
   </div>`;
 
@@ -302,6 +306,15 @@ function _boletasGerencialNote(data) {
  * ⚠️ Nem tudo passa pelo tradebook (voz, corretora, outro EMS) e transferência entre
  * livros não tem execução nenhuma: boletado sem execução NÃO é erro por si só — quem
  * costuma apontar problema é o contrário.
+ *
+ * ⭐ "Boletado fora do par" (set/2026): quando o par executou MAIS do que os seus livros
+ * boletaram, o mesmo ativo é procurado nos livros que NÃO são do par e a tela aponta quem
+ * — caso recorrente da rolagem de WDO/DOL que o JLeon executa e cai no AJakurski —,
+ * DESCONTADO o que o dono daquele livro executou por conta própria (senão o Branquinho
+ * aparecia no ODF29 com os 700 que ele mesmo executou). E o
+ * spread da B3 (`WDOV6X6`/`UCV6UCX6`) entra como linha comparável sob o ref de spread do
+ * JDS (`WD1V6X6`/`DR1V6X6`, via `tradebook.b3_spread_ref`), em vez de ficar na nota de
+ * multi-leg. Detalhe e aferição em `positions/tradebook.py`.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 // Pareamento: 'grupo' = mapa da mesa (`tradebook.py`), 'livre' = escolha manual.
@@ -504,14 +517,24 @@ function renderBoletasCheck(data, sel) {
   const slot = (g, sym) => {
     const k = g + '|' + sym;
     let a = K.get(k);
-    if (!a) { a = { g, sym, eBuy: 0, eSell: 0, bBuy: 0, bSell: 0, fills: 0, deals: 0 }; K.set(k, a); }
+    if (!a) { a = { g, sym, eBuy: 0, eSell: 0, bBuy: 0, bSell: 0, fills: 0, deals: 0, src: new Set(), fora: [] }; K.set(k, a); }
     return a;
   };
+  // Refs comparáveis boletados no dia, em QUALQUER livro. Serve a dois usos: decidir se
+  // o spread da B3 abre balde (ver abaixo) e achar boleta FORA do par.
+  const jdsSyms = new Set(data.rows.filter(r => r.comparable).map(r => r.symbol));
+  const semSpread = [];   // pai de spread da B3 sem boleta de spread em livro nenhum
   for (const p of pairs) {
     for (const r of tb.rows || []) {
       if (!p.uuids.has(r.uuid)) continue;
+      // ⚠️ Spread da B3 (`WDOV6X6` → `WD1V6X6`): até ago/2026 o JDS boletava a rolagem por
+      // PERNA, e aí não existe boleta com o ref de spread — abrir o balde daria Δ vermelho
+      // de mentira (as pernas já estão nas linhas de WDOV26/WDOX26). Só abre se o ref
+      // foi boletado em algum livro; senão vai para a nota do rodapé.
+      if (r.spread_b3 && !jdsSyms.has(r.symbol)) { semSpread.push(r); continue; }
       const a = slot(p.nome, r.symbol);
       a.eBuy += r.buy_qty || 0; a.eSell += r.sell_qty || 0; a.fills += r.n_fills || 0;
+      if (r.symbol_src) a.src.add(r.symbol_src);
     }
     // Lado JDS: só o que o tradebook poderia ter executado — `comparable` = futuro/opção
     // listada. No modo grupo entram os livros INTEIROS do grupo (ver o ☠️ acima); no
@@ -526,6 +549,55 @@ function renderBoletasCheck(data, sel) {
   const all = [...K.values()].map(a => ({ ...a, dBuy: a.bBuy - a.eBuy, dSell: a.bSell - a.eSell }));
   const nBad = all.filter(a => a.dBuy || a.dSell).length;
 
+  // ⭐ Executado pelo par e boletado FORA dele. Quando o par executou MAIS do que os seus
+  // livros boletaram (Δ negativo), o mesmo ativo pode ter caído em livro de outro trader —
+  // é o caso recorrente da rolagem de WDO/DOL que o JLeon executa e cai no AJakurski.
+  // Só olha o lado (compra/venda) em que falta boleta, e só livros que NÃO são do par;
+  // `data.rows` tem TODOS os traders, por isso dá para achar sem round-trip.
+  // ☠️ E desconta o que o DONO do livro de fora executou por conta própria: em 29/09 o
+  // JLeon executou 880 ODF29 com 760 boletados no par, e o GBranquinho tinha 700 C no
+  // livro dele — só que ele MESMO executou esses 700. Listar o livro pelo boletado bruto
+  // apontaria o Branquinho como se tivesse boleta do JLeon. O que conta é o EXCEDENTE
+  // do livro: boletado − executado pelo grupo daquele livro (mapa do tradebook.py).
+  // Livro sem grupo no mapa não tem execução conhecida, então entra pelo bruto.
+  const livroGrupo = new Map();
+  (tb.grupos || []).forEach(g => g.livros.forEach(t => livroGrupo.set(t, g.nome)));
+  const execGrupo = new Map();   // grupo|sym → {buy, sell}
+  for (const r of tb.rows || []) {
+    if (!r.grupo) continue;
+    const k = r.grupo + '|' + r.symbol;
+    const e = execGrupo.get(k) || { buy: 0, sell: 0 };
+    e.buy += r.buy_qty || 0; e.sell += r.sell_qty || 0;
+    execGrupo.set(k, e);
+  }
+  for (const a of all) {
+    if (a.dBuy >= 0 && a.dSell >= 0) continue;
+    const p = pairs.find(x => x.nome === a.g);
+    const byTrader = new Map();
+    for (const r of data.rows) {
+      if (!r.comparable || r.symbol !== a.sym || p.livros.has(r.trader)) continue;
+      const f = byTrader.get(r.trader) || { trader: r.trader, buy: 0, sell: 0 };
+      f.buy += r.buy_qty || 0; f.sell += r.sell_qty || 0;
+      byTrader.set(r.trader, f);
+    }
+    // Excedente por GRUPO de fora (os livros do grupo somam, como no par em cena).
+    const grp = new Map();
+    for (const f of byTrader.values()) {
+      const gname = livroGrupo.get(f.trader) || f.trader;
+      const g = grp.get(gname) || { nome: gname, livros: [], buy: 0, sell: 0 };
+      g.livros.push(f.trader); g.buy += f.buy; g.sell += f.sell;
+      grp.set(gname, g);
+    }
+    a.fora = [...grp.values()].map(g => {
+      const e = execGrupo.get(g.nome + '|' + a.sym) || { buy: 0, sell: 0 };
+      return { trader: g.livros.join('+'),
+               buy:  a.dBuy  < 0 ? Math.max(0, g.buy  - e.buy)  : 0,
+               sell: a.dSell < 0 ? Math.max(0, g.sell - e.sell) : 0 };
+    }).filter(f => f.buy || f.sell)
+      .sort((x, y) => (y.buy + y.sell) - (x.buy + x.sell));
+  }
+  const nFora = all.filter(a => a.fora.length).length;
+
   // Divergência primeiro; dentro de cada par, par e ativo. A tabela existe para achar
   // problema, então o que bate desce.
   all.sort((a, b) => (Number(!!(b.dBuy || b.dSell)) - Number(!!(a.dBuy || a.dSell)))
@@ -537,15 +609,24 @@ function renderBoletasCheck(data, sel) {
 
   // A 1ª coluna só existe quando há MAIS DE UM balde. No modo manual o balde é um só e
   // repetir "Seleção" em toda linha seria ruído; o pareamento já está dito no cabeçalho.
+  const foraCell = a => a.fora.length
+    ? `<td class="left" style="font-weight:700;color:var(--red);white-space:nowrap">${a.fora.map(f =>
+        `${f.trader} ${f.buy ? fmtQty(f.buy) + ' C' : ''}${f.buy && f.sell ? ' / ' : ''}${f.sell ? fmtQty(f.sell) + ' V' : ''}`).join(' · ')}</td>`
+    : `<td class="left" style="color:var(--text-muted)">—</td>`;
+  const symCell = a => a.src.size
+    ? `${a.sym} <span style="color:var(--text-muted);font-weight:400" title="Símbolo do pai multi-leg no tradebook; o JDS boleta o spread da B3 com o ticker de spread">← ${[...a.src].join(', ')}</span>`
+    : a.sym;
+
   const body = all.map(a => `<tr>
       ${livre ? '' : `<td class="lbl">${a.g}</td>`}
-      <td class="left">${a.sym}</td>
+      <td class="left">${symCell(a)}</td>
       <td class="sep">${fmtQty(a.eBuy)}</td>
       <td>${fmtQty(a.bBuy)}</td>
       ${dCell(a.dBuy)}
       <td class="sep">${fmtQty(a.eSell)}</td>
       <td>${fmtQty(a.bSell)}</td>
       ${dCell(a.dSell)}
+      ${foraCell(a)}
       <td style="text-align:center">${(a.dBuy || a.dSell) ? '⚠' : '✓'}</td>
     </tr>`).join('');
 
@@ -589,9 +670,24 @@ function renderBoletasCheck(data, sel) {
          — livro fora desta base (a <code>vw_mm_prev_deals</code> é de multimercado/previdência).
          Também selecionáveis no modo <b>Manual</b>.`);
   }
+  const comFora = all.filter(a => a.fora.length);
+  if (comFora.length)
+    extras.push(`⚠️ <b>Executado pelo par e boletado em livro FORA dele</b> — é o que a coluna
+       "Boletado fora do par" aponta: ${comFora.map(a =>
+         `<b>${a.sym}</b> (${a.g}: ${a.dBuy < 0 ? fmtQty(-a.dBuy) + ' C' : ''}${a.dBuy < 0 && a.dSell < 0 ? ' / ' : ''}${
+           a.dSell < 0 ? fmtQty(-a.dSell) + ' V' : ''} executadas a mais do que os livros do par boletaram) → ${
+           a.fora.map(f => `${f.trader} ${f.buy ? fmtQty(f.buy) + ' C' : ''}${f.buy && f.sell ? ' / ' : ''}${f.sell ? fmtQty(f.sell) + ' V' : ''}`).join(' · ')}`
+       ).join('; ')}. Ou a boleta caiu no livro errado, ou o executor operou para outro trader —
+       a conferência não sabe qual; quem sabe é quem executou.`);
+  const ss = semSpread.filter(r => uuidsEmCena.has(r.uuid));
+  if (ss.length)
+    extras.push(`<b>Spread da B3</b> executado como estrutura, sem boleta de spread em livro nenhum
+       nesta data: ${[...new Set(ss.map(r => `${r.symbol_src} → ${r.symbol}`))].join(', ')}.
+       Se foi boletado <b>por perna</b> (como até ago/2026), as pernas já estão nas linhas dos
+       vencimentos; se não foi boletado, é executado sem boleta.`);
   if (ml.length)
-    extras.push(`Fora da conferência por serem <b>estruturas multi-leg</b> (um símbolo na fonte, duas
-       boletas no JDS — a rolagem casada de WDO é o caso comum):
+    extras.push(`Fora da conferência por serem <b>estruturas multi-leg de CME</b> (o pai vem com as
+       pernas, e são as pernas que casam com as boletas — o pai entraria em dobro):
        ${ml.map(r => `${r.symbol} (${!livre && r.grupo ? r.grupo : r.quem})`).join(', ')}.`);
 
   el.innerHTML = `<div class="card">
@@ -599,6 +695,7 @@ function renderBoletasCheck(data, sel) {
       <span>Boleta × execução em ${fmtDate(data.ref_date)}
         <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${all.length} ativo(s) ·
           ${all.length - nBad} batem · <b style="color:${nBad ? 'var(--red)' : 'inherit'}">${nBad} com diferença</b>${
+          nFora ? ` · <b style="color:var(--red)">${nFora} boletado fora do par</b>` : ''}${
           livre ? ` · <b>manual</b>: ${pairs[0].uuids.size} executor(es) × ${pairs[0].livros.size} livro(s)` : ''}</span>
       </span>
       <button class="btn btn-secondary" data-html2canvas-ignore="true"
@@ -617,12 +714,14 @@ function renderBoletasCheck(data, sel) {
             <th class="sep">Venda exec.</th>
             <th>Venda bol.</th>
             <th>&Delta;</th>
+            <th class="left sep" title="Mesmo ativo boletado em livro que NÃO é do par, quando o par executou mais do que boletou — descontado o que o dono daquele livro executou por conta própria">Boletado fora do par</th>
             <th>&nbsp;</th>
           </tr></thead>
-          <tbody>${body || `<tr><td colspan="${livre ? 8 : 9}" style="color:var(--text-muted)">Nada a conferir nesta data.</td></tr>`}</tbody>
+          <tbody>${body || `<tr><td colspan="${livre ? 9 : 10}" style="color:var(--text-muted)">Nada a conferir nesta data.</td></tr>`}</tbody>
         </table>
       </div>
-      <p class="csub jgp-tbl-note" style="margin:8px 0 0;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+      <details class="jgp-tbl-note" style="margin:6px 0 0;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+        <summary style="cursor:pointer;user-select:none">ⓘ notas</summary>
         <b>Exec.</b> = fills do tradebook da Bloomberg (<code>jds.blp_fix_deals</code>, a fonte);
         <b>bol.</b> = boletas do JDS (<code>vw_mm_prev_deals</code>), a mesma base da tabela acima.
         <b>&Delta; = boletado &minus; executado</b>, em quantidade. Só entram futuros e opções listadas —
@@ -630,8 +729,10 @@ function renderBoletasCheck(data, sel) {
         ⚠️ Nem toda execução passa por lá (voz, corretora, outro EMS): <b>boletado sem execução não
         é erro por si só</b>; o que costuma apontar problema é executado sem boleta. Transferência
         entre livros (contraparte <b>Gerencial</b>) já está fora das duas tabelas.
+        <b>Boletado fora do par</b> = o mesmo ativo em livro que não é do par, descontado o que o
+        dono daquele livro executou por conta própria.
         ${extras.map(x => '<br>' + x).join('')}
-      </p>
+      </details>
     </div>
   </div>`;
 }
