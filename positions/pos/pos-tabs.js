@@ -169,17 +169,34 @@ function reloadActiveTab(opts = {}) {
   loadPositionsForTab(activeTraderTab, { fresh: true, prefetch });   // "Atualizar tudo" → preços ao vivo
 }
 
-function changeOtherTrader(trader) {
-  // Busca por ID, não por índice: `TRADER_TABS[3]` amarrava esta função à POSIÇÃO da aba
-  // no array, e acrescentar uma aba de trader (o PAbinader ganhou a sua em set/2026)
-  // passava a trocar o trader da aba ERRADA, sem erro nenhum.
-  const cfg = TRADER_TABS.find(t => t.id === 'other');
-  if (cfg) cfg.trader = trader;
-  const label = document.getElementById('otherTraderLabel');
+/* Troca o TRADER de uma aba-dropdown (`other` = PAlves/AJakurski/…; `pabinader` =
+   PAbinader/LAguiar desde out/2026). Uma função para as duas: o que muda é o id da aba.
+   Busca por ID, não por índice: `TRADER_TABS[3]` amarrava isto à POSIÇÃO da aba no array, e
+   acrescentar uma aba de trader (o PAbinader ganhou a sua em set/2026) passava a trocar o
+   trader da aba ERRADA, sem erro nenhum.
+   ⚠️ Limpa TODO o estado por aba que é do trader, não só o `posDataByTab`: a 2ª onda de câmbio
+   (`fxDealsByTab`) e as linhas ocultas (`hiddenRows`) são do trader anterior, e o
+   `renderFxSectionsForTab` NÃO apaga os containers quando a 2ª onda ainda não chegou (de
+   propósito — ver o comentário lá), então a tabela de moedas do PAbinader ficaria na tela sob
+   o véu de "Atualizando…" até o câmbio do LAguiar chegar. Por isso os três containers de
+   câmbio são esvaziados aqui. */
+function changeTabTrader(tabId, trader) {
+  const cfg = TRADER_TABS.find(t => t.id === tabId);
+  if (!cfg || cfg.trader === trader) return;
+  cfg.trader = trader;
+  const label = document.getElementById(`${tabId}TraderLabel`);
   if (label) label.textContent = trader;
-  delete posDataByTab['other'];
-  if (activeTraderTab === 'other') loadPositionsForTab('other');
+  delete posDataByTab[tabId];
+  delete fxDealsByTab[tabId];
+  delete hiddenRows[tabId];
+  for (const id of [`fxCcyContainer-${tabId}`, `fxFutContainer-${tabId}`, `fxTieout-${tabId}`]) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  }
+  if (activeTraderTab === tabId) loadPositionsForTab(tabId);
 }
+// Nome antigo (o `onchange` do HTML já chama `changeTabTrader`; fica p/ quem chamar de fora).
+function changeOtherTrader(trader) { changeTabTrader('other', trader); }
 
 /* ── Load positions for a tab ────────────────────────────────────────────── */
 // opts.background: carga silenciosa (prefetch) — não mexe na UI global (status/botão).

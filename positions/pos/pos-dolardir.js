@@ -220,7 +220,7 @@ function renderDolarDirecional(data) {
   const spotSrc = data.market?.usdbrl_src === 'jrs' ? ' <span style="color:var(--yellow)">(dólar interno JRS — sem spot BBG)</span>' : ' (BBG)';
   const navMismatch = data.nav_date && data.opening_date && data.nav_date !== data.opening_date;
   const headInfo = `<span style="font-weight:400;color:${navMismatch ? 'var(--yellow)' : 'var(--text-muted)'};font-size:12px">
-    ${navMismatch ? '⚠ ' : ''}NAV: ${fmtDate(data.nav_date)} &nbsp;·&nbsp; USDBRL ${fx ? fx.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—'}${spotSrc}
+    ${navMismatch ? '⚠ ' : ''}NAV: ${fmtDate(data.nav_date)}${typeof _navSourceInline === 'function' ? _navSourceInline(data) : ''} &nbsp;·&nbsp; USDBRL ${fx ? fx.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—'}${spotSrc}
     &nbsp;·&nbsp; FIM IE detém ${shareH ? _ddPct(shareH) : '—'} do Class H</span>`;
 
   const groups = [];

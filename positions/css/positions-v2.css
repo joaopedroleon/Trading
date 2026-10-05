@@ -81,8 +81,8 @@ html.theme-v2 .tabbtn {
 }
 html.theme-v2 .tabbtn:hover { color: var(--text); }
 html.theme-v2 .tabbtn.on { color: var(--text); border-bottom: 2px solid var(--green); }
-html.theme-v2 #tab-btn-other { position: relative; }
-html.theme-v2 #tab-btn-other .tab-chevron { margin-left: 6px; }
+html.theme-v2 #tab-btn-other, html.theme-v2 #tab-btn-pabinader { position: relative; }
+html.theme-v2 #tab-btn-other .tab-chevron, html.theme-v2 #tab-btn-pabinader .tab-chevron { margin-left: 6px; }
 html.theme-v2 .tab { display: none; }
 html.theme-v2 .tab.on { display: block; }
 

@@ -766,6 +766,21 @@ function _pnlSynthFundRows(mainByKey, idx, includes, nav) {
   return out;
 }
 
+// Chip de origem do NAV de UM fundo (PortfolioRF): "JDS c/ mov." com abertura + movimentação
+// no tooltip, ou "JRS abertura" em amarelo quando o JDS ainda não gravou o dia.
+function _pnlNavSourceChip(fundLabel) {
+  const meta = pnlData?.fund_navs_meta;
+  const src  = meta?.nav_sources?.[fundLabel];
+  if (!src) return '';
+  const f = v => v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (src === 'JDS') {
+    const fl = meta?.nav_flows?.[fundLabel] || {};
+    const tip = `JDS.NAVS: abertura USD ${f(fl.opening_usd)} + movimentações do dia USD ${f(fl.flow_usd)} = USD ${f(fl.nav_usd)}${fl.updated_at ? ` (gravado ${String(fl.updated_at).replace('T', ' ')})` : ''}`;
+    return ` <span style="font-size:10px;color:var(--text-muted)" title="${tip}">· JDS c/ mov. do dia</span>`;
+  }
+  return ` <span style="font-size:10px;color:var(--yellow)" title="JRS: NAV de abertura — o JDS ainda não gravou as movimentações do dia (grava ~16h)">· JRS abertura</span>`;
+}
+
 function renderPnlSummaryByFund(mainRows) {
   const cfg   = _pnlFundConfig();
   const navs  = pnlData.fund_navs || {};
@@ -786,7 +801,7 @@ function renderPnlSummaryByFund(mainRows) {
     const rows  = _pnlSynthFundRows(mainByKey, idx, t.includes, nav);
     const { tbody, grandUsd } = _pnlSummaryBody(_pnlAggregate(rows, _pnlForFund));
     const navStr = nav != null
-      ? `NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}`
+      ? `NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}${_pnlNavSourceChip(t.fund)}`
       : `<span style="color:var(--red)">⚠ NAV indisponível — bps em branco</span>`;
     const sleeves = t.includes.filter(fl => fl !== t.fund);
     const sleeveStr = sleeves.length
@@ -811,6 +826,12 @@ function renderPnlSummaryByFund(mainRows) {
   const navWarn = (navDate && pnlData?.opening_date && navDate !== pnlData.opening_date)
     ? `<span style="color:var(--yellow);font-size:11px" title="NAV por fundo indisponível para ${pnlData.opening_date}">⚠ NAV de ${navDate}</span>`
     : '';
+  // Origem do NAV (out/2026): JDS.NAVS traz o NAV COM as movimentações do dia (aplicações −
+  // resgates), gravado ~16h; antes disso o backend cai no JRS (abertura) e diz isso aqui.
+  const navSrcLabel = pnlData?.fund_navs_meta?.nav_source_label;
+  const navSrc = navSrcLabel
+    ? `<span style="color:${/^JDS \(/.test(navSrcLabel) ? 'var(--text-muted)' : 'var(--yellow)'};font-size:11px" title="NAV de cota ${navDate ?? ''}. JDS = NAV oficial + movimentações do dia (o que o sistema de boletas usa p/ alocar); JRS = NAV de abertura, usado enquanto o JDS não gravou o dia (~16h).">NAV: ${navSrcLabel}</span>`
+    : '';
   const orphanWarn = orphans.length
     ? `<span style="color:var(--yellow);font-size:11px" title="${[...new Set(orphans.map(r => r.instrument_name))].join(', ')}">⚠ ${orphans.length} posição(ões) sem break por fundo (${fmtUSD(orphanUsd)}) — fora das duas tabelas</span>`
     : '';
@@ -821,6 +842,7 @@ function renderPnlSummaryByFund(mainRows) {
   return `<div class="pnl-fund-split">
     <div class="section-title" style="padding:4px 0 8px 0;font-size:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <span>PnL por fundo <span style="font-weight:400;color:var(--text-muted);font-size:11px">— PortfolioRF</span></span>
+      ${navSrc}
       ${navWarn}
       ${orphanWarn}
       ${simWarn}

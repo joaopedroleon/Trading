@@ -210,10 +210,10 @@ async function loadDolarConsol(trader, opts = {}) {
     status.textContent = '';
     document.getElementById('srcLabel').textContent =
       `Abertura: ${fmtDate(data.opening_date)}  |  Boletas: ${fmtDate(data.ref_date)}`;
-    // carrega o mapa de tickers cadastrados (compartilhado com a aba Check Dólar Exposure)
-    try { dolarOptTickers = await (await fetch(`${API_BASE}/api/positions/dolar-opt-tickers`)).json() || {};
-          _dolarOptTickersLoaded = true; }
-    catch { /* mantém o que tiver */ }
+    // mapa de tickers cadastrados (compartilhado com a aba Check Dólar Exposure) — é cadastro,
+    // não preço: `_ensureDolarOptTickers` busca UMA vez por página (02/10/2026; antes refazia
+    // o fetch a cada carga, inclusive no prefetch).
+    await _ensureDolarOptTickers();
     if (dolarConsolTrader === trader) {
       // delta/preço live já vêm do backend (option_delta/price_live, inclusive DOL via ticker)
       renderDolarConsol(trader);
@@ -560,8 +560,7 @@ async function loadDolarExposure(opts = {}) {
     status.textContent = '';
     srcLabel.textContent =
       `Abertura: ${fmtDate(data.opening_date)}  |  Boletas: ${fmtDate(data.ref_date)}`;
-    try { dolarOptTickers = await (await fetch(`${API_BASE}/api/positions/dolar-opt-tickers`)).json() || {}; }
-    catch { dolarOptTickers = {}; }
+    await _ensureDolarOptTickers();   // cadastro, 1× por página (ver acima)
     // delta live das opções de DOL já vem do backend (option via ticker cadastrado)
     renderDolarTable(data);
   } catch (e) {
@@ -573,6 +572,15 @@ async function loadDolarExposure(opts = {}) {
   }
 }
 
+// Origem do NAV por fundo (out/2026): JDS.NAVS = NAV oficial + movimentações do dia (gravado
+// ~16h); antes disso o backend usa o JRS (abertura) e o `nav_source_label` diz isso.
+function _navSourceInline(data) {
+  const lbl = data?.nav_source_label;
+  if (!lbl) return '';
+  const ok = /^JDS \(/.test(lbl);
+  return ` <span style="color:${ok ? 'var(--text-muted)' : 'var(--yellow)'}" title="JDS = NAV oficial + movimentações do dia (o que o sistema de boletas usa p/ alocar); JRS = NAV de abertura, usado enquanto o JDS não gravou o dia (~16h).">(${lbl})</span>`;
+}
+
 function renderDolarTable(data) {
   const container = document.getElementById('dolarContainer');
   if (!container) return;
@@ -582,7 +590,7 @@ function renderDolarTable(data) {
     ? data.usdbrl.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—';
   const navMismatch = data.nav_date && data.opening_date && data.nav_date !== data.opening_date;
   const navInfo = `<span style="font-weight:400;color:${navMismatch ? 'var(--yellow)' : 'var(--text-muted)'};font-size:12px">
-    ${navMismatch ? '⚠ ' : ''}NAV: ${navDateStr} &nbsp;·&nbsp; USDBRL (interno): ${usdbrlStr}</span>`;
+    ${navMismatch ? '⚠ ' : ''}NAV: ${navDateStr}${_navSourceInline(data)} &nbsp;·&nbsp; USDBRL (interno): ${usdbrlStr}</span>`;
 
   // Valor BRL de 1 contrato (mini=10, cheio=50) × preço do dólar (UCA PX_LAST)
   const miniVal = data.uca_px ? 10 * data.uca_px : null;
@@ -1074,7 +1082,7 @@ function renderEnquadramentoRF(data) {
     <div class="section-title" style="padding:8px 0 6px 0">
       Enquadramento de derivativos — Fundos RF
       <span style="font-weight:400;color:${navMismatch ? 'var(--yellow)' : 'var(--text-muted)'};font-size:12px">
-        ${navMismatch ? '⚠ ' : ''}Abertura: ${fmtDate(data.opening_date)} · Boletas: ${fmtDate(data.ref_date)} · NAV: ${navDateStr} · USDBRL (interno): ${usdbrlStr} · limite 100% do NAV por caixinha</span>
+        ${navMismatch ? '⚠ ' : ''}Abertura: ${fmtDate(data.opening_date)} · Boletas: ${fmtDate(data.ref_date)} · NAV: ${navDateStr}${_navSourceInline(data)} · USDBRL (interno): ${usdbrlStr} · limite 100% do NAV por caixinha</span>
     </div>
     ${warn}
     <div style="overflow-x:auto">

@@ -7,9 +7,11 @@ const API_BASE = location.protocol === 'file:' ? 'http://localhost:8083' : '';
    contra o JRS em 6 datas, 0 divergências —, mas com as DUAS pernas do par, que só a
    boleta tem (a taxa contratada de cada negócio não existe no JRS). Ver
    positions/fx_sophis.py e o renderizador em pos-fxlegs.js.
-   ⚠️ Só o PAbinader usa: o livro dele é câmbio, e as pernas exigem uma query a mais + duas
-   tabelas próprias no DOM da aba. Ligar numa aba sem os containers `#fxCcyContainer-*` não
-   quebra (o renderizador sai cedo), mas paga a query sem mostrar nada. */
+   ⚠️ Só a aba `pabinader` usa — que desde out/2026 é um DROPDOWN com os dois traders de
+   câmbio (PAbinader · LAguiar; `changeTabTrader`, pos-tabs.js). O id da aba não muda com o
+   trader: é contrato de DOM com o pos-fxlegs.js e o PosBusy. As pernas exigem uma query a
+   mais + duas tabelas próprias no DOM da aba. Ligar numa aba sem os containers
+   `#fxCcyContainer-*` não quebra (o renderizador sai cedo), mas paga a query sem mostrar nada. */
 const TRADER_TABS = [
   { id: 'emota',       trader: 'EMota',      filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
   { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
