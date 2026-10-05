@@ -481,6 +481,473 @@ function _boletasCheckControls(data, tb) {
        Na seleção mas sem boleta nesta data (somam zero): ${semChip.join(', ')}.</div>` : ''}`;
 }
 
+/* ── Execuções feitas FORA do tradebook (out/2026, pedido do JLeon) ──────────────────
+ * Nem toda execução passa pelo FIX — voz, corretora, outro EMS. A boleta existe no JDS, o
+ * fill não existe no tradebook, e a conferência acusava Δ positivo todo dia para um negócio
+ * sem erro nenhum. Aqui a mesa registra a execução que ficou de fora; ela soma no lado
+ * EXECUTADO (o backend a devolve dentro de `tradebook.rows`, marcada `manual`) e o Δ fecha.
+ *
+ * ⚠️ **É dado digitado, e a tela DECLARA o que veio daqui** — "man." na célula de execução, com a
+ * parcela no hover, e uma linha no rodapé. Um Δ zerado por lançamento manual não pode parecer
+ * um Δ que fechou sozinho: a conferência existe para achar boleta errada, e esconder a
+ * diferença em vez de explicá-la a desligaria em silêncio.
+ * ⛔ Não cria nem altera boleta: a boleta do JDS continua sendo a base oficial.
+ *
+ * Estado de MÓDULO (como o `boletasCheckMode`): o `<details>` é remontado a cada re-render da
+ * conferência — um chip clicado no meio do preenchimento apagaria o que foi digitado. */
+let boletasManuaisOpen = false;
+let _execManualDraft = {};
+
+function _emDraft(k, v) { _execManualDraft[k] = v; }
+function _emEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function salvarExecManual(btn) {
+  const g    = id => document.getElementById(id);
+  const msg  = g('emMsg');
+  const data = posDataByTab[BOLETAS_TAB_ID];
+  if (!data) return;
+  const body = {
+    data:     data.ref_date,
+    symbol:   g('emSym').value,
+    uuid:     g('emUuid').value,
+    buy_qty:  g('emBuy').value,
+    sell_qty: g('emSell').value,
+    obs:      g('emObs').value,
+  };
+  btn.disabled = true;
+  msg.textContent = 'Gravando...'; msg.style.color = 'var(--text-muted)';
+  try {
+    const res = await fetch(`${API_BASE}/api/positions/execucoes-manuais`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const out = await res.json();
+    if (!res.ok || out.error) {   // 422 = motivo legível (data, ativo, executor, quantidade)
+      msg.textContent = out.error || 'Falha ao gravar.'; msg.style.color = 'var(--red)';
+      return;
+    }
+    _execManualDraft = {};
+    boletasManuaisOpen = true;
+    await loadBoletas();   // a entrada só soma no lado executado depois de voltar do backend
+  } catch (e) {
+    msg.textContent = 'Erro: ' + e.message; msg.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function excluirExecManual(id, rotulo) {
+  if (!confirm(`Remover a execução manual ${rotulo}?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/positions/execucoes-manuais/${encodeURIComponent(id)}`,
+                            { method: 'DELETE' });
+    const out = await res.json();
+    if (!res.ok || out.error) { alert(out.error || 'Falha ao excluir.'); return; }
+    boletasManuaisOpen = true;
+    await loadBoletas();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+/* ── Ferramenta "de onde vem esta divergência?" (out/2026, pedido do JLeon) ──────────────
+ * A conferência diz QUANTO falta de execução num ativo. Esta ferramenta casa boleta × fill
+ * **no PREÇO** e lista **só os blocos que não batem**, quebrados por preço × corretora ×
+ * livro, para a mesa ticar o que foi na voz/corretora e não passou pelo tradebook.
+ *
+ * ⭐ **O preço casa — medido, não suposto** (02/10/2026, `ODF31`): as compras de 14,040 somam
+ * 1.326 (EMota) + 76 (ECotrim) = **1.402** na boleta e **1.402** no fill, e os 19 preços do
+ * grupo JLeon+PAlves batem um a um. Os três do **Banco Itaú** (14,060 / 14,065 / 14,105, livro
+ * `Portfolio`) não têm fill nenhum — são exatamente o Δ de +1.333. Resultado: de **36 blocos**
+ * a tela passa a mostrar **3**.
+ *
+ * ⚠️ **O filtro é ATALHO, não verdade** — por isso o botão "mostrar todos os blocos". Boleta
+ * lançada a preço MÉDIO de vários fills não casa por preço e apareceria como divergente; e se
+ * a ponta do tradebook falhar (`fills_ok: false`) a tela cai sozinha para a lista cheia, em vez
+ * de afirmar que "não bate" o que ela não conseguiu conferir.
+ *
+ * ⚠️ **A ferramenta NÃO adivinha o bloco culpado.** Ela filtra, soma o que foi ticado contra o
+ * Δ e deixa a decisão com quem operou — marcar sozinha "o que fecha a conta" acertaria no caso
+ * fácil e fecharia Δ errado em silêncio no dia em que dois problemas somassem por acaso.
+ *
+ * Estado de MÓDULO: o painel é remontado a cada re-render da conferência (um chip clicado no
+ * meio da escolha apagaria o que foi ticado), e a quebra custa um round-trip ao Oracle. */
+let _quebra = null;   // {sym, par, dBuy, dSell, rows, fills, fillsOk, sel:Set, uuid, livro, todos, msg}
+
+function _qbPx(v) {
+  return v == null ? '—'
+    : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+}
+const _qbKey = (lado, px) => `${lado}|${Number(px).toFixed(8)}`;
+
+/* Boletado × executado POR (lado, preço), restrito ao par em cena — é o que decide o que
+   aparece. Livro fora do par não entra no boletado (o Δ não é dele) e executor fora do par não
+   entra no executado, senão o fill de outro grupo "explicaria" uma boleta que não é dele.
+
+   ☠️ **O que JÁ FOI CADASTRADO conta como executado — e isso não é detalhe** (out/2026,
+   reportado pelo JLeon). O lançamento manual vive em `tradebook.rows` (fecha o Δ da
+   conferência), mas NÃO vem na quebra por preço, que sai do FIX cru. Sem somá-lo aqui, o dia
+   em que aparecesse uma divergência NOVA no mesmo ativo reabria a quebra listando de novo os
+   blocos já resolvidos — a mesa teria de reconhecer, entre eles, qual era o novo. Agora o
+   bloco cadastrado sai da lista (e no "mostrar todos" aparece marcado `·cadastrado`).
+   ⚠️ Casa por **(lado, preço)**: entrada criada PELA quebra sempre carrega o preço do bloco.
+   A do formulário livre pode não ter — essas entram em `semPreco` e a tela declara, em vez de
+   serem ignoradas em silêncio ou abatidas de um preço que não é o delas. */
+function _qbPorPreco(q, data) {
+  const pares = _boletasPairs(data, data.tradebook, _boletasEnsureSel(data.traders));
+  const par   = pares.find(p => p.nome === q.par) || { livros: new Set(), uuids: new Set() };
+  const bol = new Map(), exe = new Map(), cad = new Map();
+  const add = (m, k, v) => m.set(k, (m.get(k) || 0) + v);
+  for (const r of q.rows || []) {
+    if (!par.livros.has(r.trader)) continue;
+    if (r.buy_qty)  add(bol, _qbKey('C', r.price), r.buy_qty);
+    if (r.sell_qty) add(bol, _qbKey('V', r.price), r.sell_qty);
+  }
+  for (const f of q.fills || []) {
+    if (!par.uuids.has(f.uuid)) continue;
+    add(exe, _qbKey(f.side === '1' ? 'C' : 'V', f.price), f.qty || 0);
+  }
+  let semPreco = 0;
+  for (const m of data.manuais || []) {
+    if ((m.symbol || '') !== q.sym || !par.uuids.has(m.uuid)) continue;
+    const qt = m.buy_qty || m.sell_qty || 0;
+    if (!qt) continue;
+    if (m.price == null) { semPreco += qt; continue; }
+    const k = _qbKey(m.buy_qty ? 'C' : 'V', m.price);
+    add(exe, k, qt);    // já cadastrado = já executado, para efeito deste casamento
+    add(cad, k, qt);
+  }
+  return { par, bol, exe, cad, semPreco };
+}
+
+/* Uma linha por (bloco, LADO): o mesmo preço/corretora/livro pode ter compra e venda, e o Δ é
+   por lado. A chave entra no Set de ticados e sobrevive ao re-render. */
+function _qbLinhas(rows) {
+  const out = [];
+  for (const r of rows || []) {
+    for (const [lado, q] of [['C', r.buy_qty], ['V', r.sell_qty]]) {
+      if (!q) continue;
+      out.push({
+        k: `${r.instrument_reference}|${r.trader}|${r.broker || ''}|${r.price}|${lado}`,
+        ref: r.instrument_reference, symbol: r.symbol, trader: r.trader,
+        broker: r.broker || '—', giveup: r.giveup, price: r.price,
+        lado, qty: q, n: r.n_deals,
+      });
+    }
+  }
+  // Maior primeiro: o bloco que explica um Δ grande costuma ser um só.
+  out.sort((a, b) => b.qty - a.qty || String(a.broker).localeCompare(String(b.broker)));
+  return out;
+}
+
+async function abrirQuebra(sym, parNome, dBuy, dSell) {
+  const data = posDataByTab[BOLETAS_TAB_ID];
+  if (!data) return;
+  const alvo = data.rows.filter(r => r.symbol === sym && r.comparable);
+  const refs = [...new Set(alvo.map(r => r.instrument_reference).filter(Boolean))];
+  // Nomes do lado BBG: o símbolo da conferência + o do pai multi-leg, quando houver (no
+  // spread da B3 os dois lados têm nome diferente — `WDOV6X6` × `WD1V6X6`).
+  const syms = new Set([sym]);
+  for (const r of (data.tradebook && data.tradebook.rows) || [])
+    if (r.symbol === sym && r.symbol_src) syms.add(r.symbol_src);
+  let uuid = '';
+  if (boletasCheckMode === 'livre') uuid = [...(boletasExecSel || [])][0] || '';
+  else {
+    const g = ((data.tradebook && data.tradebook.grupos) || []).find(x => x.nome === parNome);
+    uuid = (g && g.uuids && g.uuids[0]) || '';
+  }
+  _quebra = { sym, par: parNome, dBuy, dSell, rows: null, fills: [], fillsOk: true,
+              sel: new Set(), uuid: String(uuid || ''), livro: '', todos: false,
+              msg: 'Conferindo boleta × execução por preço…' };
+  boletasManuaisOpen = true;
+  _rerenderBoletasCheck();
+  try {
+    const p = new URLSearchParams({ refs: refs.join(','), symbols: [...syms].join(',') });
+    if (data.ref_date) p.set('ref_date', data.ref_date);
+    const out = await (await fetch(`${API_BASE}/api/positions/boletas-quebra?${p}`)).json();
+    if (!_quebra || _quebra.sym !== sym) return;   // o usuário já abriu outro ativo
+    if (out.error) _quebra.msg = 'Erro: ' + out.error;
+    else {
+      _quebra.rows = out.rows || [];
+      _quebra.fills = out.fills || [];
+      _quebra.fillsOk = out.fills_ok !== false;
+      _quebra.todos = !_quebra.fillsOk;   // sem a ponta do tradebook não dá para filtrar
+      _quebra.msg = '';
+    }
+  } catch (e) {
+    if (_quebra) _quebra.msg = 'Erro: ' + e.message;
+  }
+  _rerenderBoletasCheck();
+}
+
+function fecharQuebra() { _quebra = null; _rerenderBoletasCheck(); }
+
+function toggleQuebraLinha(k) {
+  if (!_quebra) return;
+  if (_quebra.sel.has(k)) _quebra.sel.delete(k); else _quebra.sel.add(k);
+  _rerenderBoletasCheck();
+}
+function setQuebraCampo(campo, v) { if (_quebra) _quebra[campo] = v; }
+function toggleQuebraTodos() {
+  if (!_quebra || !_quebra.fillsOk) return;
+  _quebra.todos = !_quebra.todos;
+  _rerenderBoletasCheck();
+}
+
+/* Grava TODOS os blocos ticados de uma vez (tudo ou nada no backend) e recarrega a aba — é só
+   depois de voltar do servidor que a execução soma no lado executado e o Δ fecha. */
+async function marcarQuebra(btn) {
+  if (!_quebra || !_quebra.sel.size) return;
+  const data = posDataByTab[BOLETAS_TAB_ID];
+  const linhas = _qbLinhas(_quebra.rows).filter(l => _quebra.sel.has(l.k));
+  const itens = linhas.map(l => ({
+    data:     data.ref_date,
+    symbol:   l.symbol || _quebra.sym,
+    uuid:     _quebra.uuid,
+    buy_qty:  l.lado === 'C' ? l.qty : 0,
+    sell_qty: l.lado === 'V' ? l.qty : 0,
+    price:    l.price,
+    broker:   l.broker,
+    livro:    _quebra.livro || l.trader,
+    obs:      `fora do tradebook · ${l.broker} @ ${_qbPx(l.price)}`,
+  }));
+  btn.disabled = true;
+  _quebra.msg = 'Gravando…';
+  _rerenderBoletasCheck();
+  try {
+    const res = await fetch(`${API_BASE}/api/positions/execucoes-manuais`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itens }),
+    });
+    const out = await res.json();
+    if (!res.ok || out.error) {
+      _quebra.msg = out.error || 'Falha ao gravar.';
+      _rerenderBoletasCheck();
+      return;
+    }
+    _quebra = null;            // fechou: a lista de cadastradas passa a mostrar o que foi gravado
+    boletasManuaisOpen = true;
+    await loadBoletas();
+  } catch (e) {
+    if (_quebra) { _quebra.msg = 'Erro: ' + e.message; _rerenderBoletasCheck(); }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function _boletasQuebraPanel(data) {
+  if (!_quebra) return '';
+  const q = _quebra;
+  const head = `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+      <b style="font-size:12px">Divergência de ${_emEsc(q.sym)}${q.par ? ' · ' + _emEsc(q.par) : ''}</b>
+      <span style="font-size:11.5px;color:var(--text-muted)">falta execução de ${
+        q.dBuy > 0 ? fmtQty(q.dBuy) + ' C' : ''}${q.dBuy > 0 && q.dSell > 0 ? ' / ' : ''}${
+        q.dSell > 0 ? fmtQty(q.dSell) + ' V' : ''}</span>
+      <span style="margin-left:auto;cursor:pointer;color:var(--text-muted);font-size:12px"
+            onclick="fecharQuebra()">✕ fechar</span>
+    </div>`;
+
+  if (!q.rows) return `<div style="margin-bottom:10px">${head}
+      <div style="font-size:11.5px;color:var(--text-muted)">${_emEsc(q.msg || 'Carregando…')}</div></div>`;
+
+  const { par, bol, exe, cad, semPreco } = _qbPorPreco(q, data);
+  const todas = _qbLinhas(q.rows).map(l => {
+    const k = _qbKey(l.lado, l.price);
+    const noPar = par.livros.has(l.trader);
+    return { ...l, noPar,
+             bolPx: bol.get(k) || 0,
+             exePx: exe.get(k) || 0,
+             cadPx: cad.get(k) || 0,
+             faltaPx: noPar ? (bol.get(k) || 0) - (exe.get(k) || 0) : 0 };
+  });
+  // ⭐ O recorte que a mesa pediu: só o que NÃO bate. Bloco de livro fora do par sai junto —
+  // o Δ desta linha não é dele, e ticá-lo lançaria execução num balde que não é este.
+  const linhas = q.todos ? todas : todas.filter(l => l.noPar && l.faltaPx > 1e-9);
+  const nOcultos = todas.length - linhas.length;
+  // Dos ocultos, quantos sumiram porque JÁ foram cadastrados como fora do tradebook — a mesa
+  // precisa ver que eles continuam cobertos, não que a ferramenta os esqueceu.
+  const nCad = todas.filter(l => !linhas.includes(l) && l.cadPx > 0).length;
+
+  const alt = q.fillsOk
+    ? `<span class="filter-chip ${q.todos ? 'on' : 'chip-act'}" style="margin-left:8px"
+         title="O filtro casa boleta × fill pelo PREÇO. Boleta lançada a preço médio de vários fills não casa e apareceria aqui — este botão mostra tudo."
+         onclick="toggleQuebraTodos()">${q.todos ? 'mostrando todos' : `mostrar todos (${todas.length})`}</span>`
+    : `<span style="margin-left:8px;font-size:11.5px;color:var(--yellow)">⚠ sem a ponta do tradebook — listando todos os blocos</span>`;
+
+  const notaCad = nCad
+    ? ` <span title="Blocos que já têm lançamento manual neste mesmo preço — continuam cobertos; veja a lista &quot;Cadastrado como feito fora do tradebook&quot;">(${nCad} já cadastrado(s) como fora do tradebook)</span>` : '';
+  const notaSP = semPreco
+    ? `<div style="font-size:11.5px;color:var(--yellow);margin-bottom:6px">⚠ ${fmtQty(semPreco)}
+         contrato(s) já lançado(s) <b>sem preço</b> (formulário livre) não entram no casamento por
+         preço — eles já abatem o &Delta; da conferência, mas podem deixar um bloco aparecendo aqui.</div>` : '';
+  const resumo = `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">
+      ${q.todos
+        ? `Todos os blocos de boleta do ativo (${todas.length}).`
+        : `<b>${linhas.length}</b> bloco(s) de boleta <b>sem execução no mesmo preço</b>${
+            nOcultos ? ` — ${nOcultos} que batem ficaram de fora` : ''}${notaCad}.`}${alt}</div>${notaSP}`;
+
+  if (!linhas.length) return `<div style="margin-bottom:10px">${head}${resumo}
+      <div style="font-size:11.5px;color:var(--text-muted)">
+        Todo bloco de boleta tem execução no mesmo preço${nCad ? ' (contando os já cadastrados como fora do tradebook)' : ''}
+        — a diferença não está no preço. Use "mostrar todos" para olhar bloco a bloco.</div></div>`;
+
+  let tC = 0, tV = 0;
+  linhas.forEach(l => { if (q.sel.has(l.k)) { if (l.lado === 'C') tC += l.qty; else tV += l.qty; } });
+
+  const execs = data.executores_cadastraveis || [];
+  const optExec = ['<option value="">— quem operou —</option>'].concat(
+    execs.map(e => `<option value="${e.uuid}"${String(q.uuid) === String(e.uuid) ? ' selected' : ''}>${
+      _emEsc(e.quem)}${e.grupo ? ' · ' + _emEsc(e.grupo) : ''}</option>`)).join('');
+  const livros = [...new Set(linhas.map(l => l.trader))].sort();
+  const optLivro = ['<option value="">pra quem: o livro de cada bloco</option>'].concat(
+    livros.map(t => `<option value="${_emEsc(t)}"${q.livro === t ? ' selected' : ''}>pra ${_emEsc(t)}</option>`)).join('');
+
+  const corpo = linhas.map(l => {
+    const on = q.sel.has(l.k);
+    return `<tr style="${on ? 'background:var(--bg-row-alt)' : ''}">
+      <td style="text-align:center"><input type="checkbox" ${on ? 'checked' : ''}
+          onclick="toggleQuebraLinha('${_emEsc(l.k)}')" style="cursor:pointer"></td>
+      <td>${l.lado}</td>
+      <td>${_qbPx(l.price)}</td>
+      <td class="left">${_emEsc(l.broker)}</td>
+      <td class="left">${_emEsc(l.trader)}${l.noPar ? '' : ' <span style="color:var(--text-muted)" title="Livro FORA do par em cena — o Δ desta linha não é dele">·fora</span>'}${
+        l.cadPx > 0 ? ` <span style="color:var(--green)" title="Já cadastrado como fora do tradebook neste preço (${fmtQty(l.cadPx)})">·cadastrado</span>` : ''}</td>
+      <td>${fmtQty(l.qty)}</td>
+      <td>${l.n}</td>
+      <td class="sep">${l.noPar ? fmtQty(l.bolPx) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td>${l.noPar ? fmtQty(l.exePx) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="font-weight:700;color:${l.faltaPx > 1e-9 ? 'var(--red)' : 'inherit'}">${
+        l.noPar ? fmtQty(l.faltaPx) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const falta = c => Math.abs(c) < 1e-9 ? '<span style="color:var(--green)">0</span>'
+                                        : `<span style="color:var(--red)">${fmtQty(Math.abs(c))}</span>`;
+
+  return `<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+    ${head}${resumo}
+    <div style="overflow-x:auto">
+      <table class="jgp-tbl" style="width:auto">
+        <thead><tr><th>&nbsp;</th><th>Lado</th><th>Preço</th><th class="left">Corretora</th>
+          <th class="left">Livro</th><th>Qtd</th><th>Boletas</th>
+          <th class="sep" title="Total boletado NESTE preço, somando os livros do par">Bol. no preço</th>
+          <th title="Total executado no tradebook NESTE preço, somando os executores do par">Exec. no preço</th>
+          <th title="Bol. − Exec. no mesmo preço: é o que falta de execução ali">Falta</th></tr></thead>
+        <tbody>${corpo}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+      <span style="font-size:11.5px;color:var(--text-muted)">
+        Ticado: <b>${fmtQty(tC)} C</b> / <b>${fmtQty(tV)} V</b> &nbsp;·&nbsp;
+        falta p/ fechar o Δ: ${falta(q.dBuy - tC)} C / ${falta(q.dSell - tV)} V</span>
+      <select style="padding:3px 6px;font-size:12px"
+              onchange="setQuebraCampo('uuid', this.value)">${optExec}</select>
+      <select style="padding:3px 6px;font-size:12px"
+              onchange="setQuebraCampo('livro', this.value)">${optLivro}</select>
+      <button class="btn" style="padding:3px 12px;font-size:12px"
+              ${q.sel.size ? '' : 'disabled'} onclick="marcarQuebra(this)">
+        Marcar ${q.sel.size || ''} bloco(s) como fora do tradebook</button>
+      <span style="font-size:11.5px;color:var(--red)">${_emEsc(q.msg || '')}</span>
+    </div>
+  </div>`;
+}
+
+/* ── A LISTA do que está cadastrado como feito fora do tradebook ────────────────────────────
+ * Bloco PRÓPRIO e sempre visível quando há lançamento na data (pedido do JLeon): o que foi
+ * "cadastrado" tem de se ver sem abrir nada. Dentro do `<details>` ele ficava escondido
+ * justamente para quem queria conferir o que já tinha dado por resolvido.
+ * ⚠️ Vive FORA do `.section-copy-target`, como o resto dos controles — o "⎘ Copiar" da seção
+ * leva a tabela da conferência, não o painel de edição. */
+function _boletasCadastradasPanel(data) {
+  const ms = data.manuais || [];
+  if (!ms.length) return '';
+  const execs = data.executores_cadastraveis || [];
+  const linhas = ms.map(m => {
+    const quem = (execs.find(e => e.uuid === m.uuid) || {}).quem || `UUID ${m.uuid}`;
+    const lado = m.buy_qty ? 'C' : 'V';
+    const qtd  = m.buy_qty || m.sell_qty;
+    return `<tr>
+      <td class="left">${_emEsc(m.symbol)}</td>
+      <td>${lado}</td>
+      <td>${fmtQty(qtd)}</td>
+      <td>${m.price != null ? _qbPx(m.price) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="left">${_emEsc(m.broker) || '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="left">${_emEsc(m.livro) || '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="left">${_emEsc(quem)}</td>
+      <td class="left" style="color:var(--text-muted)">${_emEsc(m.obs) || '—'}</td>
+      <td style="text-align:center"><span style="cursor:pointer;color:var(--red)"
+          title="Remover este lançamento"
+          onclick="excluirExecManual('${_emEsc(m.id)}', '${_emEsc(m.symbol + ' · ' + quem)}')">✕</span></td>
+    </tr>`;
+  }).join('');
+  return `<div style="margin-top:10px;border:1px solid var(--border);border-radius:6px;padding:8px 10px">
+    <div style="font-size:12px;font-weight:600;margin-bottom:2px">
+      Cadastrado como feito fora do tradebook
+      <span style="font-weight:400;color:var(--text-muted)">— ${ms.length} lançamento(s) em ${fmtDate(data.ref_date)}</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">
+      Já somados no lado executado da conferência (as células marcadas <b>man.</b>).
+      Vale só para esta data — a conferência é do dia.
+    </div>
+    <div style="overflow-x:auto">
+      <table class="jgp-tbl" style="width:auto">
+        <thead><tr><th class="left">Ativo</th><th>Lado</th><th>Qtd</th><th>Preço</th>
+          <th class="left">Corretora</th><th class="left">Livro</th><th class="left">Executor</th>
+          <th class="left">Observação</th><th>&nbsp;</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* O painel: a ferramenta de quebra (quando aberta) + um formulário livre + a lista do dia.
+   Fica DENTRO do card da conferência, abaixo dos controles de pareamento — é ali que a
+   divergência aparece e é ali que ela se resolve. Fechado por padrão (é ação, não leitura).
+   ⚠️ O caminho NORMAL é o `＋` da linha divergente, que abre a quebra por preço × corretora;
+   o formulário livre fica para o caso que a quebra não cobre (ativo que não tem boleta na
+   data, ajuste de uma entrada anterior). */
+function _boletasManuaisPanel(data) {
+  const ms    = data.manuais || [];
+  const execs = data.executores_cadastraveis || [];
+  const d     = _execManualDraft;
+  const opts  = ['<option value="">— quem executou —</option>'].concat(
+    execs.map(e => `<option value="${e.uuid}"${String(d.uuid) === String(e.uuid) ? ' selected' : ''}>${
+      _emEsc(e.quem)}${e.grupo ? ' · ' + _emEsc(e.grupo) : ''}</option>`)).join('');
+
+  const inp = (id, campo, ph, val, w, extra) =>
+    `<input id="${id}" ${extra || ''} placeholder="${ph}" value="${_emEsc(val || '')}"
+            style="width:${w};padding:3px 6px;font-size:12px"
+            oninput="_emDraft('${campo}', this.value)">`;
+
+  return `<details id="execManuaisBox"${boletasManuaisOpen ? ' open' : ''}
+      ontoggle="boletasManuaisOpen = this.open"
+      style="margin-top:10px;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--bg-row-alt)">
+    <summary style="cursor:pointer;user-select:none;font-size:12px;font-weight:600">
+      Execuções fora do tradebook${ms.length ? ` <span style="font-weight:400;color:var(--text-muted)">— ${ms.length} nesta data</span>` : ''}
+    </summary>
+    <div style="font-size:11.5px;color:var(--text-muted);margin:6px 0 8px">
+      Negócio executado na <b>voz</b>, por <b>corretora</b> ou em <b>outro EMS</b> não gera fill no
+      tradebook da Bloomberg — a boleta existe no JDS e a conferência acusa &Delta;. Lance aqui a
+      execução que ficou de fora: ela <b>soma no lado executado</b> e o &Delta; fecha.
+      As células de execução que recebem lançamento manual ficam marcadas com <b>man.</b>
+    </div>
+    ${_boletasQuebraPanel(data)}
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      ${inp('emSym', 'sym', 'Ativo (ODF31)', d.sym, '130px')}
+      <select id="emUuid" style="padding:3px 6px;font-size:12px"
+              onchange="_emDraft('uuid', this.value)">${opts}</select>
+      ${inp('emBuy',  'buy',  'Compra', d.buy,  '90px', 'type="number" step="any" min="0"')}
+      ${inp('emSell', 'sell', 'Venda',  d.sell, '90px', 'type="number" step="any" min="0"')}
+      ${inp('emObs',  'obs',  'Observação (ex.: voz — corretora X)', d.obs, '260px')}
+      <button class="btn" style="padding:3px 12px;font-size:12px" onclick="salvarExecManual(this)">Adicionar</button>
+      <span id="emMsg" style="font-size:11.5px"></span>
+    </div>
+  </details>
+  ${_boletasCadastradasPanel(data)}`;
+}
+
 function renderBoletasCheck(data, sel) {
   const el = document.getElementById('boletasCheck');
   if (!el) return;
@@ -501,6 +968,7 @@ function renderBoletasCheck(data, sel) {
   const vazio = msg => { el.innerHTML = `<div class="card">
       <div class="section-title" style="padding:8px 0 10px 0">Boleta × execução em ${fmtDate(data.ref_date)}</div>
       ${ctrls}
+      ${_boletasManuaisPanel(data)}
       <div class="no-data" style="margin-top:10px">${msg}</div></div>`; };
 
   if (!pairs.length) {
@@ -517,7 +985,8 @@ function renderBoletasCheck(data, sel) {
   const slot = (g, sym) => {
     const k = g + '|' + sym;
     let a = K.get(k);
-    if (!a) { a = { g, sym, eBuy: 0, eSell: 0, bBuy: 0, bSell: 0, fills: 0, deals: 0, src: new Set(), fora: [] }; K.set(k, a); }
+    if (!a) { a = { g, sym, eBuy: 0, eSell: 0, bBuy: 0, bSell: 0, fills: 0, deals: 0, src: new Set(), fora: [],
+                    mBuy: 0, mSell: 0, nMan: 0 }; K.set(k, a); }
     return a;
   };
   // Refs comparáveis boletados no dia, em QUALQUER livro. Serve a dois usos: decidir se
@@ -534,6 +1003,9 @@ function renderBoletasCheck(data, sel) {
       if (r.spread_b3 && !jdsSyms.has(r.symbol)) { semSpread.push(r); continue; }
       const a = slot(p.nome, r.symbol);
       a.eBuy += r.buy_qty || 0; a.eSell += r.sell_qty || 0; a.fills += r.n_fills || 0;
+      // Parcela DIGITADA (execução fora do tradebook) — guardada à parte só para a tela
+      // declarar; na soma ela é execução como qualquer outra, que é o ponto.
+      if (r.manual) { a.mBuy += r.buy_qty || 0; a.mSell += r.sell_qty || 0; a.nMan += 1; }
       if (r.symbol_src) a.src.add(r.symbol_src);
     }
     // Lado JDS: só o que o tradebook poderia ter executado — `comparable` = futuro/opção
@@ -607,12 +1079,30 @@ function renderBoletasCheck(data, sel) {
     ? `<td style="font-weight:700;color:var(--red)">${fmtTradedQty(d)}</td>`
     : `<td style="color:var(--text-muted)">—</td>`;
 
+  // "man." = parte desta execução foi DIGITADA (fora do tradebook). O número já está somado; a
+  // marca existe para um Δ fechado por lançamento manual não se confundir com um Δ que
+  // fechou sozinho — ver o painel "Execuções fora do tradebook".
+  const eCell = (v, man, cls) => man
+    ? `<td class="${cls || ''}" title="Inclui ${fmtQty(man)} lançado(s) à mão como execução fora do tradebook">${
+        fmtQty(v)} <span style="color:var(--text-muted);font-size:10px">man.</span></td>`
+    : `<td class="${cls || ''}">${fmtQty(v)}</td>`;
+
   // A 1ª coluna só existe quando há MAIS DE UM balde. No modo manual o balde é um só e
   // repetir "Seleção" em toda linha seria ruído; o pareamento já está dito no cabeçalho.
   const foraCell = a => a.fora.length
     ? `<td class="left" style="font-weight:700;color:var(--red);white-space:nowrap">${a.fora.map(f =>
         `${f.trader} ${f.buy ? fmtQty(f.buy) + ' C' : ''}${f.buy && f.sell ? ' / ' : ''}${f.sell ? fmtQty(f.sell) + ' V' : ''}`).join(' · ')}</td>`
     : `<td class="left" style="color:var(--text-muted)">—</td>`;
+  // Δ > 0 = boletado SEM execução, que é exatamente o caso do negócio fora do tradebook:
+  // o ＋ abre o painel já preenchido com o ativo, o executor do par e a quantidade que falta.
+  // Δ < 0 (executado sem boleta) NÃO ganha o botão — ali o que falta é boleta, e lançar
+  // execução a mais só esconderia o problema.
+  const okCell = a => ((a.dBuy > 0 || a.dSell > 0)
+    ? `<td style="text-align:center;white-space:nowrap">⚠ <span style="cursor:pointer"
+         title="Quebrar esta divergência por preço e corretora e ticar o bloco que foi fora do tradebook"
+         onclick="abrirQuebra('${a.sym}', '${String(a.g).replace(/'/g, "\'")}', ${a.dBuy}, ${a.dSell})">＋</span></td>`
+    : `<td style="text-align:center">${(a.dBuy || a.dSell) ? '⚠' : '✓'}</td>`);
+
   const symCell = a => a.src.size
     ? `${a.sym} <span style="color:var(--text-muted);font-weight:400" title="Símbolo do pai multi-leg no tradebook; o JDS boleta o spread da B3 com o ticker de spread">← ${[...a.src].join(', ')}</span>`
     : a.sym;
@@ -620,14 +1110,14 @@ function renderBoletasCheck(data, sel) {
   const body = all.map(a => `<tr>
       ${livre ? '' : `<td class="lbl">${a.g}</td>`}
       <td class="left">${symCell(a)}</td>
-      <td class="sep">${fmtQty(a.eBuy)}</td>
+      ${eCell(a.eBuy, a.mBuy, 'sep')}
       <td>${fmtQty(a.bBuy)}</td>
       ${dCell(a.dBuy)}
-      <td class="sep">${fmtQty(a.eSell)}</td>
+      ${eCell(a.eSell, a.mSell, 'sep')}
       <td>${fmtQty(a.bSell)}</td>
       ${dCell(a.dSell)}
       ${foraCell(a)}
-      <td style="text-align:center">${(a.dBuy || a.dSell) ? '⚠' : '✓'}</td>
+      ${okCell(a)}
     </tr>`).join('');
 
   // Rodapé: o que a conferência NÃO cobre, dito na cara em vez de sumir.
@@ -679,6 +1169,13 @@ function renderBoletasCheck(data, sel) {
            a.fora.map(f => `${f.trader} ${f.buy ? fmtQty(f.buy) + ' C' : ''}${f.buy && f.sell ? ' / ' : ''}${f.sell ? fmtQty(f.sell) + ' V' : ''}`).join(' · ')}`
        ).join('; ')}. Ou a boleta caiu no livro errado, ou o executor operou para outro trader —
        a conferência não sabe qual; quem sabe é quem executou.`);
+  const comMan = all.filter(a => a.nMan);
+  if (comMan.length)
+    extras.push(`<b>Execuções fora do tradebook</b> (lançadas à mão nesta data) já somadas no lado
+       executado: ${comMan.map(a => `<b>${a.sym}</b> (${a.g}: ${
+         a.mBuy ? fmtQty(a.mBuy) + ' C' : ''}${a.mBuy && a.mSell ? ' / ' : ''}${
+         a.mSell ? fmtQty(a.mSell) + ' V' : ''})`).join('; ')}. São voz/corretora/outro EMS —
+       <b>não</b> saem de base nenhuma; o painel acima lista e permite remover.`);
   const ss = semSpread.filter(r => uuidsEmCena.has(r.uuid));
   if (ss.length)
     extras.push(`<b>Spread da B3</b> executado como estrutura, sem boleta de spread em livro nenhum
@@ -702,6 +1199,7 @@ function renderBoletasCheck(data, sel) {
               style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="copyCardImage(this)">⎘ Copiar</button>
     </div>
     ${ctrls}
+    ${_boletasManuaisPanel(data)}
     <div class="section-copy-target" style="max-width:100%;margin-top:10px">
       <div style="overflow-x:auto">
         <table class="jgp-tbl">

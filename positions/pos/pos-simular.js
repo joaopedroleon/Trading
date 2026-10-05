@@ -113,6 +113,9 @@ async function _simFetchRow(tabId, spec) {
   const nav = data?.traders?.[cfg.trader];
   if (nav) p.set('nav', nav);
   if (spec.entry_price != null) p.set('entry_price', spec.entry_price);
+  // Mesma régua de câmbio das linhas REAIS da tabela (travada em D-1 por padrão) — ver
+  // `usdbrlLive` em pos-state.js. Sem isto a simulada converteria por outro dólar.
+  applyUsdbrlParam(p);
 
   const res = await fetch(`${API_BASE}/api/positions/simulate-row?${p}`);
   const j   = await res.json().catch(() => ({}));

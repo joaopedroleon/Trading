@@ -76,7 +76,33 @@ const _tabFetchSig = {};
 function _currentDateSig() {
   const d = document.getElementById('refDate');
   const f = document.getElementById('forceOpening');
-  return `${d ? d.value : ''}|${f ? f.value : ''}`;
+  // ⚠️ O modo do USD/BRL entra na assinatura: ele muda a CONVERSÃO de toda linha em reais
+  // (nocional em USD, #PL, DV01), então um cache buscado no outro modo é dado de outra
+  // régua — reusá-lo deixaria metade da tela convertida por um dólar e metade por outro.
+  return `${d ? d.value : ''}|${f ? f.value : ''}|${usdbrlLive ? 'live' : 'lock'}`;
+}
+
+/* ── USD/BRL da CONVERSÃO das exposições: TRAVADO por padrão ────────────────────────
+   `false` (default) = o backend converte com o dólar interno do JRS de D-1; `true` = com o
+   spot da BBG ao vivo. Vale só para as abas de TRADER (o /reference) — as abas de dólar/
+   enquadramento têm régua própria.
+
+   ☠️ **Por que travado é o default** (pedido da mesa, out/2026): com o USDBRL vivo no
+   conversor, o nocional em USD e o #PL de um livro 100 % em BRL mudavam durante o pregão
+   sem nenhuma boleta e sem o papel andar — e o NAV contra o qual eles são medidos já vem
+   do JRS, convertido pelo dólar de D-1. Numerador vivo contra denominador de ontem.
+   ⚠️ **Não trava PREÇO.** A marcação (PX_MID/PX_LAST, prêmio de opção, curva de forward de
+   FX) é sempre ao vivo nos dois modos — ver `_jrs_usdbrl_locked` em positions/router.py.
+   ⚠️ **Sem localStorage, de propósito:** o default é travado a cada abertura da página. A
+   escolha "live" é uma conferência pontual, não um estado que deva sobreviver ao F5 e
+   virar a régua silenciosa de amanhã. */
+let usdbrlLive = false;
+
+/* Põe (ou não) o `usdbrl_live` na query do /reference. Fonte única — as TRÊS chamadas do
+   endpoint passam por aqui, senão uma aba converteria por um dólar e a outra por outro. */
+function applyUsdbrlParam(params) {
+  if (usdbrlLive) params.set('usdbrl_live', 'true');
+  return params;
 }
 function _noteFetchSig(key) { _tabFetchSig[key] = _currentDateSig(); _tabFetchedAt[key] = Date.now(); }
 

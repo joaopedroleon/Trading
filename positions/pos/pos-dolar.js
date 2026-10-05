@@ -198,6 +198,9 @@ async function loadDolarConsol(trader, opts = {}) {
     if (fresh) params.set('fresh', 'true');
     // Só EMota/ECotrim usam grupos MM/MM Prev; demais traders trazem tudo ('Todos').
     if (trader !== 'EMota' && trader !== 'ECotrim') params.set('use_groups', 'false');
+    // A Análise de Opções sai do MESMO /reference da aba do trader — e reusa o cache dela
+    // (`_cacheIsFresh`). Se não passasse o mesmo modo, as duas discordariam no nocional.
+    applyUsdbrlParam(params);
     const data = await (await fetch(`${API_BASE}/api/positions/reference?${params}`)).json();
     if (data.error) {
       status.textContent = 'Erro: ' + data.error;
@@ -207,6 +210,8 @@ async function loadDolarConsol(trader, opts = {}) {
     }
     dolarConsolData[trader] = data;
     _noteFetchSig(`dc:${trader}`);
+    if (typeof renderUsdbrlChip === 'function' && activeTraderTab === DOLAR_CONSOL_TAB_ID)
+      renderUsdbrlChip(data);
     status.textContent = '';
     document.getElementById('srcLabel').textContent =
       `Abertura: ${fmtDate(data.opening_date)}  |  Boletas: ${fmtDate(data.ref_date)}`;

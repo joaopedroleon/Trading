@@ -19,6 +19,13 @@ function activateTab(key) {
     case 'boletas':     showBoletasTab();     break;
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
+  // Chip do USD/BRL: só nas abas que saem do /reference (trader + Análise de Opções).
+  // Nas demais ele some — o modo não toca os números daquelas telas.
+  if (typeof renderUsdbrlChip === 'function') {
+    if (TRADER_TABS.some(t => t.id === key))      renderUsdbrlChip(posDataByTab[key]);
+    else if (key === 'dolarconsol')               renderUsdbrlChip(dolarConsolData[dolarConsolTrader]);
+    else                                          renderUsdbrlChip(null);
+  }
   if (typeof simSync === 'function') simSync();   // abas de dólar/rolagem: inativa a simulação
 }
 
@@ -113,6 +120,51 @@ function _invalidateStaleTabs() {
   if (posDataByTab[DOLAR_TAB_ID]   && _tabFetchSig[DOLAR_TAB_ID]   !== sig) _dropTabCache(DOLAR_TAB_ID);
   if (posDataByTab[ROLAGEM_TAB_ID] && _tabFetchSig[ROLAGEM_TAB_ID] !== sig) _dropTabCache(ROLAGEM_TAB_ID);
   if (posDataByTab[BOLETAS_TAB_ID] && _tabFetchSig[BOLETAS_TAB_ID] !== sig) _dropTabCache(BOLETAS_TAB_ID);
+}
+
+/* ── USD/BRL da conversão das exposições: chip da toolbar ──────────────────────────
+   Mostra qual dólar está convertendo as exposições da aba de trader e deixa trocar.
+   Default TRAVADO no dólar interno do JRS de D-1 (ver `usdbrlLive` em pos-state.js).
+   ⚠️ O chip só aparece nas abas de TRADER: as abas de dólar/enquadramento/rolagem não
+   passam pelo /reference e seguem com a régua própria delas — anunciar o modo ali diria
+   que ele vale para números que ele não toca. */
+function renderUsdbrlChip(data) {
+  const el = document.getElementById('usdbrlChip');
+  if (!el) return;
+  if (!data) { el.style.display = 'none'; return; }
+  const n = v => (v == null ? '—'
+    : v.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
+  const locked = data.usdbrl_mode === 'locked';
+  el.style.display = '';
+  el.className = 'filter-chip ' + (locked ? 'on' : 'off');
+  el.textContent = locked
+    ? `🔒 USD/BRL ${n(data.usdbrl_used)} (JRS ${fmtDate(data.usdbrl_jrs_date)})`
+    : `⚡ USD/BRL ${n(data.usdbrl_used)} (live)`;
+  el.title = (locked
+    ? 'A CONVERSÃO das exposições está travada no dólar interno do JRS de D-1'
+      + (data.usdbrl_bbg != null ? ` (spot da BBG agora: ${n(data.usdbrl_bbg)}).` : '.')
+      + '\nClique para converter pelo USDBRL ao vivo.'
+    : 'A CONVERSÃO das exposições está usando o USDBRL ao vivo da BBG'
+      + (data.usdbrl_jrs != null ? ` (dólar do JRS em D-1: ${n(data.usdbrl_jrs)}).` : '.')
+      + '\nClique para travar no dólar de D-1.')
+    + '\n\nVale só para a CONVERSÃO (nocional em USD, #PL, DV01). Os PREÇOS — PX_MID/PX_LAST,'
+    + '\nprêmio de opção e a curva de forward de câmbio — são sempre ao vivo nos dois modos.';
+}
+
+/* Alterna travado ↔ live e recarrega. Não é "Atualizar tudo": as MARRETAS de preço/delta
+   são preservadas de propósito — mudou a régua de conversão, não o preço digitado. */
+function toggleUsdbrlMode() {
+  usdbrlLive = !usdbrlLive;
+  // Todo cache de aba foi convertido pelo OUTRO dólar → nenhum serve (a assinatura de
+  // `_currentDateSig` já os marcaria como velhos; aqui apagamos para não renderizar o antigo).
+  _invalidateAllTabs();
+  const el = document.getElementById('usdbrlChip');
+  if (el) el.textContent = usdbrlLive ? '⚡ USD/BRL …' : '🔒 USD/BRL …';
+  if (TRADER_TABS.some(t => t.id === activeTraderTab)) {
+    loadPositionsForTab(activeTraderTab, { prefetch: true });
+  } else if (activeTraderTab === DOLAR_CONSOL_TAB_ID) {
+    loadDolarConsol(dolarConsolTrader);
+  }
 }
 
 /* "Atualizar tudo" — a ação GLOBAL da toolbar, e a única que limpa as marretas.
@@ -240,6 +292,7 @@ async function loadPositionsForTab(tabId, opts = {}) {
     if (forceOpening) params.set('force_opening', forceOpening);
     if (!tab.useGroups) params.set('use_groups', 'false');
     if (fresh) params.set('fresh', 'true');
+    applyUsdbrlParam(params);   // USD/BRL da conversão: travado em D-1 (default) × live
     // ⚠️ `fx_from_deals` NÃO entra aqui de propósito — vai na 2ª onda (loadFxDealsForTab).
     // A query de boletas do Sophis custa ~1,5s contra 0,04s das duas do JRS/JDS juntas, e a
     // mesa pediu Posição e PnL na tela antes do câmbio.
@@ -269,6 +322,7 @@ async function loadPositionsForTab(tabId, opts = {}) {
       status.textContent = '';
       srcLabel.textContent =
         `Abertura: ${fmtDate(data.opening_date)}  |  Boletas: ${fmtDate(data.ref_date)}`;
+      renderUsdbrlChip(data);
     }
 
     delete hiddenRows[tabId];
@@ -347,6 +401,8 @@ async function loadFxDealsForTab(tabId) {
     const forceOpening = document.getElementById('forceOpening').value;
     if (forceOpening) params.set('force_opening', forceOpening);
     if (!tab.useGroups) params.set('use_groups', 'false');
+    // Mesmo modo de USD/BRL da 1ª onda — as pernas por moeda saem convertidas na mesma régua.
+    applyUsdbrlParam(params);
 
     const data = await (await fetch(`${API_BASE}/api/positions/reference?${params}`)).json();
     if (data.error || _currentDateSig() !== sigAtStart) return;
