@@ -351,7 +351,17 @@ function rerenderPnlValues() {
 
 // Grupos que ganham bloco de PnL. 'MM Allocation' é o grupo próprio do AJakurski
 // (funds.TRADER_FUND_GROUPS) — sem ele aqui a aba dele renderizaria PnL vazio.
-const _isPnlGroup = g => g === 'MM' || g === 'Todos' || g === 'MM Allocation';
+//
+// ⚠️ O sleeve de RF entra SÓ onde há split por fundo — isto é, só na aba do PortfolioRF
+// (`pnl_fund_tables` vem nula nas demais). Lá as linhas do sleeve pertencem à tabela
+// "Offshore", cujo NAV é o do `JGP RF Ativa Master-A`: é o fundo que detém o veículo, o
+// mesmo denominador do #PL delas, e o `includes` daquela tabela já lista o veículo.
+// ☠️ Na aba do PRÓPRIO trader do sleeve o PnL é consolidado contra o NAV de MM dele, e ali
+// as linhas do RF seriam resultado de OUTRO fundo somado ao dele — pelo mesmo motivo que
+// 'MM Prev' nunca entrou nesta lista. O resultado do sleeve se lê na aba do PortfolioRF.
+const _isPnlGroup = g => g === 'MM' || g === 'Todos' || g === 'MM Allocation'
+  || (!!pnlData?.pnl_fund_tables?.length
+      && g === (pnlData?.rf_sleeve?.group ?? 'RF Offshore'));
 
 function rerenderPnlSection(inputEl) {
   const tbodyId = inputEl.closest('tbody').id;
@@ -911,7 +921,11 @@ function renderPnlSections(data, tabId) {
     detailContainer.style.alignItems    = 'flex-start';
   }
   const detailCards = sections.map(s => {
-    const nav    = traders[s.trader];
+    // Card do sleeve de RF: NAV do fundo que detém o veículo, não o NAV de MM do trader
+    // (ver funds.RF_SLEEVE_* e o mesmo tratamento em pos-tabs.renderSectionsForTab).
+    const nav    = (pnlData?.rf_sleeve && s.group === pnlData.rf_sleeve.group)
+      ? pnlData.rf_sleeve.nav
+      : traders[s.trader];
     const navStr = nav
       ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}</span>`
       : '';

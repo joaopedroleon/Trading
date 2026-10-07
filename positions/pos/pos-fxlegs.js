@@ -121,12 +121,22 @@ function _fxOrphans(rows, bases) {
    ⚠️ É o ALVO, não o rateio realizado: é a mesma régua do check de alocação (e a que a mesa
    pediu). Se o alvo mudar em `ALLOC_TARGETS`, este número acompanha. */
 function _fxNavInfo(rows, trader, navSrc) {
-  const nav = (navSrc ?? posDataByTab[activeTraderTab] ?? positionsData)?.traders?.[trader]
-           ?? rows.find(r => r.nav != null)?.nav ?? null;
+  const src = navSrc ?? posDataByTab[activeTraderTab] ?? positionsData;
+  const nav = src?.traders?.[trader] ?? rows.find(r => r.nav != null)?.nav ?? null;
   const hasPrev = rows.some(r => r.group === 'MM Prev');
   const target  = (typeof ALLOC_TARGETS !== 'undefined' && ALLOC_TARGETS[trader]) || 0;
-  const factor  = (hasPrev && target) ? 1 + target : 1;
-  return { nav, factor, den: nav == null ? null : nav * factor, hasPrev, target };
+  /* ⚠️ O sleeve de RF (out/2026) entra pela MESMA porta que o Prev: estas tabelas somam
+     TODOS os grupos do livro, então um 3º veículo com ~4% do ticket tem de aparecer também
+     no denominador — senão o % NAV passa a sobrestimar em ~4%, calado. Mesma régua: é o
+     ALVO de alocação, não o rateio realizado. */
+  const rfCfg   = src?.rf_sleeve ?? null;
+  const rfGroup = rfCfg?.group ?? (typeof RF_SLEEVE_GROUP_FALLBACK !== 'undefined'
+                                   ? RF_SLEEVE_GROUP_FALLBACK : 'RF Offshore');
+  const hasRf   = rows.some(r => r.group === rfGroup);
+  const rfTarget = rfCfg?.alloc_target || 0;
+  const factor  = 1 + (hasPrev && target ? target : 0) + (hasRf && rfTarget ? rfTarget : 0);
+  return { nav, factor, den: nav == null ? null : nav * factor,
+           hasPrev, target, hasRf, rfTarget, rfGroup, rfCfg };
 }
 
 /* Painel do ⓘ: REGRA, não caso do dia (pedido da mesa — a nota de 8 linhas embaixo da
@@ -186,9 +196,19 @@ const _FX_FUT_HELP =
    Serve as DUAS seções da aba — câmbio (`bases` = fx + opt) e futuro de dólar
    (`bases` = fut) —, porque o modelo é o mesmo e duas cópias divergiriam na primeira
    correção. `cfg`: { bases:Set, titulo, chip:bool }. */
+/* Veículos que a tabela está somando — o rótulo acompanha o livro em vez de afirmar
+   "MM + MM Prev" fixo, que deixou de ser verdade quando o sleeve de RF entrou. */
+function _vehLabel(navInfo) {
+  return ['MM', navInfo?.hasPrev ? 'MM Prev' : null, navInfo?.hasRf ? 'RF' : null]
+    .filter(Boolean).join(' + ');
+}
+
 function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   const nav   = navInfo?.den ?? null;
   const bases = cfg.bases;
+  // Sleeve de RF: 3º veículo do livro, ao lado do MM e do MM Prev (out/2026).
+  const _rfCfg     = navInfo?.rfCfg ?? null;
+  const _rfGroupId = navInfo?.rfGroup ?? 'RF Offshore';
   const byVtx = fxCcyByVertex.has(tabId);   // chip "⤵ Por vencimento" (default: resumido)
 
   /* Chave: `(moeda, origem)` no resumo; `(moeda, VENCIMENTO, origem)` por vencimento.
@@ -214,7 +234,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       const key = `${l.ccy}||${mat}||${grp}`;
       if (!acc.has(key)) acc.set(key, { ccy: l.ccy, mat, grp, basis: l.basis,
         insts: new Map(),   // par/instrumento → perna final (na moeda), p/ o hover do vencimento
-        o: 0, t: 0, f: 0, fMM: 0, fPrev: 0, uo: 0, ut: 0, uf: 0, res: 0, hasRes: false,
+        o: 0, t: 0, f: 0, fMM: 0, fPrev: 0, fRf: 0, uo: 0, ut: 0, uf: 0, res: 0, hasRes: false,
         semUsd: [], nSemO: 0,
         // Procedência do "Result. dia": `xFrom` = o que ENTROU nesta moeda vindo de um par
         // cross; `xTo` = o resultado de um cross desta perna que foi para OUTRA moeda (a
@@ -229,6 +249,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       // principal soma os dois (é exposição do livro); o check é justamente sobre a divisão.
       if (r.group === 'MM Prev') a.fPrev += (l.final ?? 0) * k;
       else if (r.group === 'MM') a.fMM += (l.final ?? 0) * k;
+      else if (r.group === _rfGroupId) a.fRf += (l.final ?? 0) * k;
       if (l.open == null || l.traded == null) a.nSemO++;   // fut/opt sem `unit_pl`
       /* RESULTADO do dia: é do CONTRATO (não de cada perna), e entra na perna que o backend
          marca com `is_res` — **a moeda que se moveu contra o dólar** (MXN no USD/MXN, BRL no
@@ -273,11 +294,11 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   for (const a of acc.values()) {
     if (_flat(a)) continue;
     if (!byCcy.has(a.ccy)) byCcy.set(a.ccy, { ccy: a.ccy, legs: [], uf: 0, uo: 0, ut: 0, res: 0, nRes: 0,
-                                             fMM: 0, fPrev: 0, semUsd: [],
+                                             fMM: 0, fPrev: 0, fRf: 0, semUsd: [],
                                              xFrom: {}, xTo: {}, xToPara: {} });
     const g = byCcy.get(a.ccy);
     g.legs.push(a); g.uf += a.uf; g.uo += a.uo; g.ut += a.ut; g.res += a.res;
-    g.fMM += a.fMM; g.fPrev += a.fPrev;
+    g.fMM += a.fMM; g.fPrev += a.fPrev; g.fRf += a.fRf;
     if (a.hasRes) g.nRes++;
     g.semUsd.push(...a.semUsd);
     for (const pn in a.xFrom) g.xFrom[pn] = (g.xFrom[pn] ?? 0) + a.xFrom[pn];
@@ -331,14 +352,21 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
             + ` = USD ${(navInfo.den / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MM`
           : `USD ${(navInfo.den / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MM`))
     + (navInfo?.factor > 1
-        ? '\n\nA tabela soma MM + MM Prev, e o NAV do trader cobre só o MM — o equivalente'
-          + ' do Prev entra pelo alvo de alocação dele (ALLOC_TARGETS), o mesmo do check MM×Prev.'
-        : '\n\nSem linha de MM Prev na soma: denominador = NAV do trader, sem ajuste.');
+        ? '\n\nA tabela soma todos os veículos do livro e o NAV do trader cobre só o MM — '
+          + 'cada veículo extra entra pelo ALVO de alocação dele, o mesmo dos checks ao lado: '
+          + (navInfo.hasPrev && navInfo.target ? `MM Prev +${(navInfo.target * 100).toFixed(0)}%` : '')
+          + (navInfo.hasPrev && navInfo.target && navInfo.hasRf && navInfo.rfTarget ? ' · ' : '')
+          + (navInfo.hasRf && navInfo.rfTarget ? `sleeve de RF +${(navInfo.rfTarget * 100).toFixed(1)}%` : '')
+          + '.'
+        : '\n\nSó o MM na soma: denominador = NAV do trader, sem ajuste.');
 
   // Check de alocação ao lado: só com alvo cadastrado p/ o trader E com perna no MM Prev —
   // sem uma das duas a tabela seria uma coluna de traços.
-  const target    = (typeof ALLOC_TARGETS !== 'undefined' && ALLOC_TARGETS[cfg.trader]) ?? null;
-  const showAlloc = target != null && list.some(g => Math.abs(g.fPrev) > 1e-9);
+  const target     = (typeof ALLOC_TARGETS !== 'undefined' && ALLOC_TARGETS[cfg.trader]) ?? null;
+  // Colunas do sleeve de RF: só quando ele de fato tem perna nesta tabela.
+  const _showRfCol = !!_rfCfg && list.some(g => Math.abs(g.fRf) > 1e-9);
+  const showAlloc  = (target != null && list.some(g => Math.abs(g.fPrev) > 1e-9)) || _showRfCol;
+  const _auxNC     = 4 + (_showRfCol ? 3 : 0);
   // Altura do cabeçalho das DUAS tabelas é a mesma (mesma classe, 1 linha, nowrap), então o
   // alinhamento sai do próprio fluxo; este espaçador é 0 e existe como ponto único de ajuste
   // caso um dia o cabeçalho de uma delas passe a ter duas linhas.
@@ -468,7 +496,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
      MM×Prev não significa nada, e pintar aquilo de amarelo/vermelho todo dia treina a mesa a
      ignorar a coluna. O piso é o mesmo US$ 200 mil do filtro "Excluir FX < 200k"
      (`no_fx_small`), que é a régua que a casa já usa para "posição de câmbio pequena". */
-  const alcRow = (mmQ, prevQ, usdAbs) => {
+  const alcRow = (mmQ, prevQ, rfQ, usdAbs) => {
     const small = !(usdAbs == null || Math.abs(usdAbs) >= _ALLOC_MIN_USD);
     const pctv  = (mmQ && !small) ? prevQ / mmQ : null;
     const cls   = allocClass(pctv != null && target != null ? pctv - target : null);
@@ -477,18 +505,30 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
           ? 'Posição abaixo de US$ 200 mil — resíduo de rolagem. A proporção MM×Prev aqui não '
             + 'diz nada, então o check não é afirmado (mesmo corte do filtro "Excluir FX < 200k").'
           : 'Sem perna no MM para comparar.')}">—</span>`;
+    /* O mesmo piso de US$ 200 mil vale para o sleeve de RF, e por um motivo ainda mais forte:
+       o lado dele é ~4% do MM, então numa sobra de rolagem a razão é ruído puro. */
+    const rfCells = !_showRfCol ? ''
+      : (small
+          ? `<td class="num" style="color:var(--text-muted)">${fmtFinalQty(rfQ)}</td>`
+            + `<td class="num" style="color:var(--text-muted)" title="${_fxEsc(
+                'Posição abaixo de US$ 200 mil — resíduo de rolagem. O check do sleeve não é afirmado aqui.')}">—</td>`
+            + '<td class="num" style="color:var(--text-muted)">—</td>'
+          : rfAllocCells(mmQ, rfQ, _rfCfg)   /* sem #PL: a linha é por MOEDA, não por instrumento */);
     return `<td class="num">${fmtFinalQty(mmQ)}</td>
             <td class="num">${fmtFinalQty(prevQ)}</td>
-            <td class="num">${fmtFinalQty(mmQ + prevQ)}</td>
-            <td class="num ${cls}">${cell}</td>`;
+            <td class="num">${fmtFinalQty(mmQ + prevQ + (rfQ ?? 0))}</td>
+            <td class="num ${cls}">${cell}</td>
+            ${rfCells}`;
   };
   const auxBody = !showAlloc ? '' : list.map(g => {
-    const band = byVtx ? `<tr class="grp"><td colspan="4">&nbsp;</td></tr>` : '';
-    const trs  = g.legs.map(a => `<tr>${alcRow(a.fMM, a.fPrev, a.uf)}</tr>`).join('');
+    const band = byVtx ? `<tr class="grp"><td colspan="${_auxNC}">&nbsp;</td></tr>` : '';
+    const trs  = g.legs.map(a => `<tr>${alcRow(a.fMM, a.fPrev, a.fRf, a.uf)}</tr>`).join('');
     const tot  = `<tr class="tot tot-sub">${alcRow(
-      g.legs.reduce((s2, a) => s2 + a.fMM, 0), g.legs.reduce((s2, a) => s2 + a.fPrev, 0), g.uf)}</tr>`;
+      g.legs.reduce((s2, a) => s2 + a.fMM, 0),
+      g.legs.reduce((s2, a) => s2 + a.fPrev, 0),
+      g.legs.reduce((s2, a) => s2 + a.fRf, 0), g.uf)}</tr>`;
     return band + trs + (g.legs.length > 1 ? tot : '');
-  }).join(byVtx ? `<tr class="gap"><td colspan="4"></td></tr>` : '');
+  }).join(byVtx ? `<tr class="gap"><td colspan="${_auxNC}"></td></tr>` : '');
 
   const aux = !showAlloc ? '' : `<div data-html2canvas-ignore="true">
     <div style="height:${AUX_HEAD_GAP}px"></div>
@@ -496,14 +536,17 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       <thead><tr>
         <th title="Perna final desta moeda nos fundos do grupo MM.">Qtd MM</th>
         <th title="Perna final desta moeda nos fundos do grupo MM Prev.">Qtd MM Prev</th>
-        <th title="MM + MM Prev — o mesmo número da coluna Final da tabela ao lado.">Qtd total</th>
+        <th title="${_fxEsc('Soma dos veículos do livro — o mesmo número da coluna Final da tabela ao lado.'
+          + (_showRfCol ? ' Inclui o sleeve de RF.' : ''))}">Qtd total</th>
         <th title="${_fxEsc('MM Prev ÷ MM, contra o alvo de alocação do trader (' + fmtPct(target)
           + '). Mesma razão e mesma régua do check da tabela de Posição: verde dentro de '
           + fmtPct(ALLOC_TOL) + ', amarelo até o dobro, vermelho além.\n\n'
           + 'Linha abaixo de US$ 200 mil não é afirmada: ali o net é resíduo de rolagem e a proporção não diz nada.')
           }">Check ${fmtPct(target)}</th>
+        ${_showRfCol ? rfAllocHeadCells(_rfCfg) : ''}
       </tr></thead>
-      <tbody>${auxBody}<tr class="tot"><td colspan="4"></td></tr></tbody>
+      <tbody>${auxBody}<tr class="tot"><td colspan="${_auxNC}"></td></tr>${
+        _showRfCol ? `<tr><td colspan="${_auxNC}" style="white-space:normal;font-size:11px;color:var(--text-muted)">${rfTargetNote(_rfCfg)}</td></tr>` : ''}</tbody>
     </table>
   </div>`;
 
@@ -516,7 +559,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   return `<div class="card">
     <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:center;gap:16px">
       <span>${cfg.titulo}
-        <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${list.length} moeda(s)${byVtx ? ` · ${nLegs} linha(s)` : ''} · MM + MM Prev</span>
+        <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${list.length} moeda(s)${byVtx ? ` · ${nLegs} linha(s)` : ''} · ${_vehLabel(navInfo)}</span>
       </span>
       ${chip}
       <button class="btn btn-secondary" data-html2canvas-ignore="true"

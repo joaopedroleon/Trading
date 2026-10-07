@@ -286,11 +286,87 @@ function renderRestoreBtn() {
 }
 
 /* ── Group order ─────────────────────────────────────────────────────────── */
-const GROUP_ORDER = ['MM', 'MM Prev', 'MM Allocation'];
+// ⚠️ 'Todos' passou a ser LISTADO (out/2026). Ele sempre caiu no 99 do `getSections` e
+// por isso ficava no fim — o que era o certo enquanto ele era o único grupo da aba.
+// Com o sleeve de RF há um 2º card na aba do PortfolioRF, e sem 'Todos' aqui o livro
+// do PRÓPRIO PortfolioRF era empurrado para baixo do card do outro trader.
+const GROUP_ORDER = ['MM', 'MM Prev', 'MM Allocation', 'Todos', 'RF Offshore'];
 
 /* ── Allocation targets ──────────────────────────────────────────────────── */
 const ALLOC_TARGETS = { EMota: 0.70, ECotrim: 0.60, PAbinader: 0.30, LAguiar: 0.30 };
 const ALLOC_TOL     = 0.02;
+
+/* ── Sleeve de RF: o book de um trader de MM espelhado no veículo do RF ───────────────
+   O PAbinader boleta ~4% do ticket dele de MM também no `JGP Offshore Segregated
+   Portfolio-N`, o veículo offshore do RF Ativa — ao lado dos 30% do Prev. Na aba do
+   PortfolioRF essas linhas aparecem em CARD PRÓPRIO, nunca somadas às dele.
+
+   Toda a config vem do BACKEND (`rf_sleeve` no /reference — funds.RF_SLEEVE_*): grupo,
+   fundo, NAVs, e os dois alvos. O nome do grupo abaixo é só o fallback do snapshot
+   estático antigo, que não tem o campo no payload.
+
+   ⭐ **Os dois checks são a MESMA afirmação em duas unidades**, e é por isso que a tela
+   mostra os dois: a regra da mesa é de EXPOSIÇÃO (o RF carrega 1/10 do %NAV do MM), mas o
+   que a boleta executa é uma proporção de QUANTIDADE (~4%). Como é o mesmo instrumento dos
+   dois lados, preço e tamanho de contrato cancelam e a ponte é só a razão dos NAVs:
+
+       exp_RF / exp_MM  =  (q_RF / q_MM) × (NAV_MM / NAV_RF)
+
+   Logo o 1º check pergunta "a boleta saiu nos 4%?" e o 2º, "os 4% ainda SÃO 1/10?" — este
+   acusa quando um dos dois NAVs andou e o número fixo deixou de valer. */
+const RF_SLEEVE_GROUP_FALLBACK = 'RF Offshore';
+
+/* ⚠️ **Tolerância RELATIVA ao alvo, não os ±2pp do check MM×Prev.** Os 2pp do `ALLOC_TOL`
+   foram calibrados para alvos de 30-70%; num alvo de 4% eles pintariam de verde qualquer
+   coisa entre 2% e 6% — metade e uma vez e meia a alocação pedida. Aqui verde é ±15% do
+   alvo (±0,6pp sobre 4%), amarelo até ±30%, vermelho além. A tela imprime o desvio em pp,
+   que é como a mesa lê, e só a FAIXA é relativa. */
+const RF_ALLOC_REL_TOL = 0.15;
+
+/* Config do sleeve na aba (ou null). Uma porta só: todo consumidor passa por aqui. */
+function rfSleeveCfg(tabId) {
+  const d = posDataByTab[tabId ?? activeTraderTab] ?? positionsData;
+  return d?.rf_sleeve ?? null;
+}
+function rfSleeveGroup(tabId) {
+  return rfSleeveCfg(tabId)?.group ?? RF_SLEEVE_GROUP_FALLBACK;
+}
+
+/* Classe CSS pela faixa RELATIVA (ver RF_ALLOC_REL_TOL). `v` e `target` na mesma unidade. */
+function rfAllocClass(v, target) {
+  if (v == null || !target) return '';
+  const rel = Math.abs(v / target - 1);
+  if (rel <= RF_ALLOC_REL_TOL)     return 'alloc-ok';
+  if (rel <= 2 * RF_ALLOC_REL_TOL) return 'alloc-warn';
+  return 'alloc-bad';
+}
+
+/* ── Conta única dos dois checks ──────────────────────────────────────────────────────
+   Devolve tudo o que as duas abas imprimem, para que a matemática não exista em dois
+   lugares (a aba do PAbinader mostra os checks ao lado da tabela de MM dele; a do
+   PortfolioRF, ao lado do card do sleeve — layouts diferentes, mesma conta).
+     allocPct    razão de QUANTIDADE realizada (q_RF / q_MM)
+     expRatio    razão de EXPOSIÇÃO realizada (%NAV do RF ÷ %NAV do MM)
+     allocTarget alvo fixo que a mesa boleta (4%)
+     navTarget   alvo que os NAVs de HOJE pedem p/ dar 1/10 — é o 2º check no agregado
+   `null` em qualquer um = não afirmado (a tela imprime "—", nunca um número inventado). */
+function rfAllocEval(mmQty, rfQty, cfg) {
+  const allocTarget = cfg?.alloc_target ?? null;
+  const expTarget   = cfg?.exposure_ratio ?? null;
+  const navRf       = cfg?.nav ?? null;
+  const navMm       = cfg?.mm_nav?.[cfg?.traders?.[0]] ?? null;
+  const navRatio    = (navRf && navMm) ? navMm / navRf : null;   // NAV_MM / NAV_RF
+  const allocPct    = (mmQty && Math.abs(mmQty) > 1e-9) ? rfQty / mmQty : null;
+  return {
+    allocPct,
+    allocTarget,
+    expTarget,
+    navRatio,
+    expRatio:  (allocPct != null && navRatio != null) ? allocPct * navRatio : null,
+    // Alvo de quantidade que os NAVs de hoje pedem para a exposição dar 1/10.
+    navTarget: (expTarget != null && navRatio) ? expTarget / navRatio : null,
+  };
+}
 
 /* ── Short de bolsa BR: target reduzido no grupo Prev ─────────────────────
    Um fundo do grupo Prev (Sulamérica) não pode ficar vendido em bolsa brasileira, então

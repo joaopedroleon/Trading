@@ -457,6 +457,15 @@ function renderSectionsForTab(tabId, allRows) {
   const navMap     = data?.traders ?? {};
 
   const hasFundBreak  = tabId === 'portfoliorf' && !!(data?.fund_rows?.length);
+  /* ── Sleeve de RF (out/2026) — o book de outro trader dentro do veículo do RF ──────
+     Card PRÓPRIO, nunca somado ao do trader da aba: é a `getSections` que já separa por
+     (group, trader), então basta o backend carimbar o grupo. Na aba do PortfolioRF o card
+     ganha ao lado a tabela dos dois checks (4% da boleta · 1/10 da exposição), que precisa
+     das quantidades de MM do outro trader — e essas vêm no payload (`rf_sleeve.mm_rows`),
+     porque elas NÃO estão na tela desta aba. */
+  const rfCfg         = data?.rf_sleeve ?? null;
+  const rfGroupId     = rfCfg?.group ?? (typeof RF_SLEEVE_GROUP_FALLBACK !== 'undefined'
+                                         ? RF_SLEEVE_GROUP_FALLBACK : 'RF Offshore');
   const navDate       = data?.nav_date;
   const pnlNavDate    = data?.portfoliorf_nav_date ?? navDate;
   const openingDate   = data?.opening_date;
@@ -481,8 +490,14 @@ function renderSectionsForTab(tabId, allRows) {
   // `typeof` porque o snapshot estático não carrega o pos-fxlegs.js.
   if (typeof renderFxSectionsForTab === 'function') renderFxSectionsForTab(tabId);
 
+  /* Painel de DERIVA DO ALVO do sleeve de RF — topo da aba, antes de tudo.
+     ⚠️ ANTES do early return de "sem posição" e sem depender de `rfCfg.n_rows`: ele é sobre
+     os NAVs, e o estado em que ele mais importa é justamente o de zero linha boletada (antes
+     da 1ª boleta, ou num dia parado), quando a mesa pergunta se a proporção ainda vale. */
+  const rfBanner = (typeof renderRfTargetBanner === 'function') ? renderRfTargetBanner(rfCfg) : '';
+
   if (!sections.length) {
-    container.innerHTML = '<div class="card no-data">Não há posição para este trader.</div>';
+    container.innerHTML = rfBanner + '<div class="card no-data">Não há posição para este trader.</div>';
     return;
   }
 
@@ -492,11 +507,18 @@ function renderSectionsForTab(tabId, allRows) {
   const prevCards = [];
   const mainCards = [];
   sections.forEach((s, _i) => {
-    const nav      = navMap[s.trader];
-    const effDate  = tabId === 'portfoliorf' ? pnlNavDate : navDate;
+    const isRfSleeve = s.group === rfGroupId;
+    // ☠️ O NAV do card do sleeve NÃO é o do trader (o `navMap` traria o NAV de MM dele, ~2×
+    // maior) nem o do veículo (US$ 0,39 MM, ~80× menor): é o do FUNDO que detém o veículo,
+    // o mesmo denominador que o backend usou no #PL daquelas linhas. Ver funds.RF_SLEEVE_*.
+    const nav      = isRfSleeve ? (rfCfg?.nav ?? null) : navMap[s.trader];
+    const effDate  = isRfSleeve ? (rfCfg?.nav_date ?? null)
+                                : (tabId === 'portfoliorf' ? pnlNavDate : navDate);
     const navStr   = fmtNav(nav, effDate, openingDate);
     const isMmPrev = s.group === 'MM Prev';
-    const hasAlloc = s.group === 'MM' && displayRows.some(r => r.group === 'MM Prev' && r.trader === s.trader);
+    const hasAlloc = s.group === 'MM' && displayRows.some(r =>
+      (r.group === 'MM Prev' || r.group === rfGroupId) && r.trader === s.trader);
+    const hasRfCheck = isRfSleeve && !!rfCfg?.mm_rows?.length;
     const titleId  = hasAlloc ? `id="sec_title_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}_MM"` : '';
     const bodyWrapId = `mmPrev_wrap_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}`;
     const hasFund  = hasFundBreak && s.group === 'Todos';
@@ -540,8 +562,10 @@ function renderSectionsForTab(tabId, allRows) {
       <div style="display:flex;gap:40px;align-items:flex-start">
         <div class="section-copy-target">
           <div class="section-title" ${titleId} style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:16px">
-            <span>${s.group} <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${s.trader}</span></span>
-            ${navStr ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr}</span>` : ''}
+            <span>${s.group} <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${s.trader}</span>${
+              isRfSleeve ? `<span style="font-weight:400;color:var(--text-muted);font-size:11px" title="Posição boletada pelo ${s.trader} dentro do veículo de RF. Linhas SEPARADAS das do ${tab?.trader ?? 'book da aba'} — não somam.">&nbsp;· via ${(rfCfg?.fund ?? '').replace(/^JGP /, '')}</span>` : ''}</span>
+            ${navStr ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr}${
+              isRfSleeve ? ` <span title="NAV do fundo que detém o veículo (${rfCfg?.nav_fund ?? '—'}) — é ele o denominador do #PL destas linhas, não o NAV do veículo.">ⓘ</span>` : ''}</span>` : ''}
             <!-- Ferramentas do card, SEMPRE encostadas à direita: o margin-left:auto fica no GRUPO,
                  não num botão — os dois primeiros alternam display:none, e com o auto num deles o
                  que sobrava ficava solto no meio do título (era o sintoma reportado pela mesa).
@@ -572,11 +596,15 @@ function renderSectionsForTab(tabId, allRows) {
           <div id="fund_break_spacer_portfoliorf"></div>
           <div id="fund_break_portfoliorf"></div>
         </div>` : ''}
+        ${hasRfCheck ? `<div id="rf_check_outer_${tabId}" data-html2canvas-ignore="true">
+          <div id="rf_check_spacer_${tabId}"></div>
+          <div id="rf_check_${tabId}"></div>
+        </div>` : ''}
       </div>
     </div>`);
   });
 
-  container.innerHTML = mainCards.join('');
+  container.innerHTML = rfBanner + mainCards.join('');
   if (prevContainer) prevContainer.innerHTML = prevCards.join('');
 
   for (const s of sections) {
@@ -584,9 +612,15 @@ function renderSectionsForTab(tabId, allRows) {
       displayRows.filter(r => r.group === s.group && r.trader === s.trader)
     ));
     renderTable(rows, sectionBodyId(s));
-    if (s.group === 'MM' && displayRows.some(r => r.group === 'MM Prev' && r.trader === s.trader)) {
+    if (s.group === 'MM' && displayRows.some(r =>
+        (r.group === 'MM Prev' || r.group === rfGroupId) && r.trader === s.trader)) {
       const el = document.getElementById(allocCheckId(s.trader));
       if (el) el.innerHTML = renderAllocTable(displayRows, s.trader, filterRows);
+    }
+    if (s.group === rfGroupId && rfCfg?.mm_rows?.length) {
+      const el = document.getElementById(`rf_check_${tabId}`);
+      if (el) el.innerHTML = renderRfSleeveCheck(
+        displayRows.filter(r => r.group === s.group && r.trader === s.trader), rfCfg, filterRows);
     }
     if (hasFundBreak && s.group === 'Todos') {
       const el = document.getElementById('fund_break_portfoliorf');
