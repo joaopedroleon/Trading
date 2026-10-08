@@ -130,13 +130,18 @@ function _fxNavInfo(rows, trader, navSrc) {
      no denominador — senão o % NAV passa a sobrestimar em ~4%, calado. Mesma régua: é o
      ALVO de alocação, não o rateio realizado. */
   const rfCfg   = src?.rf_sleeve ?? null;
-  const rfGroup = rfCfg?.group ?? (typeof RF_SLEEVE_GROUP_FALLBACK !== 'undefined'
-                                   ? RF_SLEEVE_GROUP_FALLBACK : 'RF Offshore');
+  const rfGroup = rfGroupIdFor(src);
   const hasRf   = rows.some(r => r.group === rfGroup);
+  /* ⚠️ **Duas perguntas diferentes, e não dá para usar a mesma resposta nas duas:**
+     `espelhaRf` = o trader manda parte do book para o RF (config) → manda no RÓTULO do card
+     e na existência das colunas; `hasRf` = tem perna de RF nesta tabela HOJE → manda no
+     DENOMINADOR. Inflar o NAV em 4,4 % num dia em que o sleeve está vazio subestimaria o
+     % NAV de todas as moedas, calado. */
+  const espelhaRf = !!(rfCfg?.traders ?? []).includes(trader);
   const rfTarget = rfCfg?.alloc_target || 0;
   const factor  = 1 + (hasPrev && target ? target : 0) + (hasRf && rfTarget ? rfTarget : 0);
   return { nav, factor, den: nav == null ? null : nav * factor,
-           hasPrev, target, hasRf, rfTarget, rfGroup, rfCfg };
+           hasPrev, target, hasRf, espelhaRf, rfTarget, rfGroup, rfCfg };
 }
 
 /* Painel do ⓘ: REGRA, não caso do dia (pedido da mesa — a nota de 8 linhas embaixo da
@@ -198,8 +203,13 @@ const _FX_FUT_HELP =
    correção. `cfg`: { bases:Set, titulo, chip:bool }. */
 /* Veículos que a tabela está somando — o rótulo acompanha o livro em vez de afirmar
    "MM + MM Prev" fixo, que deixou de ser verdade quando o sleeve de RF entrou. */
+/* Veículos que a tabela COBRE. ⚠️ O RF entra pela config (`espelhaRf`), não pela presença de
+   posição: a tabela tem coluna de RF e o total já o inclui, então dizer "MM + MM Prev" num
+   dia de sleeve vazio contradiz o que está logo abaixo. O denominador do % NAV é outra
+   conta e segue a presença — ver `_fxNavInfo`. */
 function _vehLabel(navInfo) {
-  return ['MM', navInfo?.hasPrev ? 'MM Prev' : null, navInfo?.hasRf ? 'RF' : null]
+  return ['MM', navInfo?.hasPrev ? 'MM Prev' : null,
+          (navInfo?.espelhaRf || navInfo?.hasRf) ? 'RF' : null]
     .filter(Boolean).join(' + ');
 }
 
@@ -208,7 +218,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   const bases = cfg.bases;
   // Sleeve de RF: 3º veículo do livro, ao lado do MM e do MM Prev (out/2026).
   const _rfCfg     = navInfo?.rfCfg ?? null;
-  const _rfGroupId = navInfo?.rfGroup ?? 'RF Offshore';
+  const _rfGroupId = navInfo?.rfGroup ?? rfGroupIdFor(null);   // pos-format.js
   const byVtx = fxCcyByVertex.has(tabId);   // chip "⤵ Por vencimento" (default: resumido)
 
   /* Chave: `(moeda, origem)` no resumo; `(moeda, VENCIMENTO, origem)` por vencimento.
@@ -358,15 +368,20 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
           + (navInfo.hasPrev && navInfo.target && navInfo.hasRf && navInfo.rfTarget ? ' · ' : '')
           + (navInfo.hasRf && navInfo.rfTarget ? `sleeve de RF +${(navInfo.rfTarget * 100).toFixed(1)}%` : '')
           + '.'
+          + (navInfo.espelhaRf && !navInfo.hasRf
+              ? '\nO sleeve de RF está SEM posição hoje, então não entra no denominador.' : '')
         : '\n\nSó o MM na soma: denominador = NAV do trader, sem ajuste.');
 
   // Check de alocação ao lado: só com alvo cadastrado p/ o trader E com perna no MM Prev —
   // sem uma das duas a tabela seria uma coluna de traços.
   const target     = (typeof ALLOC_TARGETS !== 'undefined' && ALLOC_TARGETS[cfg.trader]) ?? null;
-  // Colunas do sleeve de RF: só quando ele de fato tem perna nesta tabela.
-  const _showRfCol = !!_rfCfg && list.some(g => Math.abs(g.fRf) > 1e-9);
+  /* ☠️ Colunas do sleeve: existem quando o trader **ESPELHA**, não quando há perna hoje.
+     Era `list.some(... fRf ...)`, e no dia em que a mesa zerou as operações do RF as colunas
+     sumiam — justamente quando "não há nada no RF" é o veredito que interessa. Mesmo
+     conserto do `showRf` da tabela de alocação (pos-fundtables.js). */
+  const _showRfCol = !!(_rfCfg?.traders ?? []).includes(cfg.trader);
   const showAlloc  = (target != null && list.some(g => Math.abs(g.fPrev) > 1e-9)) || _showRfCol;
-  const _auxNC     = 4 + (_showRfCol ? 3 : 0);
+  const _auxNC     = 4 + (_showRfCol ? 2 : 0);   // + Qtd RF + Check RF
   // Altura do cabeçalho das DUAS tabelas é a mesma (mesma classe, 1 linha, nowrap), então o
   // alinhamento sai do próprio fluxo; este espaçador é 0 e existe como ponto único de ajuste
   // caso um dia o cabeçalho de uma delas passe a ter duas linhas.
@@ -501,24 +516,28 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
     const pctv  = (mmQ && !small) ? prevQ / mmQ : null;
     const cls   = allocClass(pctv != null && target != null ? pctv - target : null);
     const cell  = pctv != null ? fmtPct(pctv)
-      : `<span style="color:var(--text-muted)" title="${_fxEsc(small
+      : `<span title="${_fxEsc(small
           ? 'Posição abaixo de US$ 200 mil — resíduo de rolagem. A proporção MM×Prev aqui não '
             + 'diz nada, então o check não é afirmado (mesmo corte do filtro "Excluir FX < 200k").'
           : 'Sem perna no MM para comparar.')}">—</span>`;
     /* O mesmo piso de US$ 200 mil vale para o sleeve de RF, e por um motivo ainda mais forte:
        o lado dele é ~4% do MM, então numa sobra de rolagem a razão é ruído puro. */
-    const rfCells = !_showRfCol ? ''
+    /* ⭐ Aqui a linha JÁ é por MOEDA (as pernas do par somadas), então o check pela
+       quantidade é a régua certa — é a mesma conta do agregado, só que por vencimento. */
+    const rfCheck = !_showRfCol ? ''
       : (small
-          ? `<td class="num" style="color:var(--text-muted)">${fmtFinalQty(rfQ)}</td>`
-            + `<td class="num" style="color:var(--text-muted)" title="${_fxEsc(
-                'Posição abaixo de US$ 200 mil — resíduo de rolagem. O check do sleeve não é afirmado aqui.')}">—</td>`
-            + '<td class="num" style="color:var(--text-muted)">—</td>'
-          : rfAllocCells(mmQ, rfQ, _rfCfg)   /* sem #PL: a linha é por MOEDA, não por instrumento */);
+          ? _checkVazio('—', 'Posição abaixo de US$ 200 mil — resíduo de rolagem. '
+              + 'O check do sleeve não é afirmado aqui.')
+          : rfCheckCell(_rfCfg, { mmQty: mmQ, rfQty: rfQ }));
+    // As TRÊS posições lado a lado (MM · MM Prev · RF), e só depois o total e os dois checks.
+    const rfQtd = !_showRfCol ? ''
+      : `<td class="num">${fmtFinalQty(rfQ ?? 0)}</td>`;
     return `<td class="num">${fmtFinalQty(mmQ)}</td>
             <td class="num">${fmtFinalQty(prevQ)}</td>
+            ${rfQtd}
             <td class="num">${fmtFinalQty(mmQ + prevQ + (rfQ ?? 0))}</td>
-            <td class="num ${cls}">${cell}</td>
-            ${rfCells}`;
+            ${pctv != null ? `<td class="check-cell ${cls}">${cell}</td>` : _checkVazio(cell)}
+            ${rfCheck}`;
   };
   const auxBody = !showAlloc ? '' : list.map(g => {
     const band = byVtx ? `<tr class="grp"><td colspan="${_auxNC}">&nbsp;</td></tr>` : '';
@@ -536,17 +555,22 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       <thead><tr>
         <th title="Perna final desta moeda nos fundos do grupo MM.">Qtd MM</th>
         <th title="Perna final desta moeda nos fundos do grupo MM Prev.">Qtd MM Prev</th>
-        <th title="${_fxEsc('Soma dos veículos do livro — o mesmo número da coluna Final da tabela ao lado.'
-          + (_showRfCol ? ' Inclui o sleeve de RF.' : ''))}">Qtd total</th>
+        ${_showRfCol ? `<th title="${_fxEsc(
+          'Perna final desta moeda no sleeve de RF (' + (_rfCfg?.fund ?? 'veículo offshore') + ').')
+          }">Qtd RF</th>` : ''}
+        <th title="${_fxEsc('Soma dos TRÊS veículos do livro — o mesmo número da coluna Final da '
+          + 'tabela ao lado.' + (_showRfCol ? ' MM + MM Prev + RF.' : ''))}">Qtd total</th>
         <th title="${_fxEsc('MM Prev ÷ MM, contra o alvo de alocação do trader (' + fmtPct(target)
           + '). Mesma razão e mesma régua do check da tabela de Posição: verde dentro de '
           + fmtPct(ALLOC_TOL) + ', amarelo até o dobro, vermelho além.\n\n'
           + 'Linha abaixo de US$ 200 mil não é afirmada: ali o net é resíduo de rolagem e a proporção não diz nada.')
-          }">Check ${fmtPct(target)}</th>
-        ${_showRfCol ? rfAllocHeadCells(_rfCfg) : ''}
+          }">Check Prev ${fmtPct(target)}</th>
+        ${_showRfCol ? rfCheckHead(_rfCfg, false) : ''}
       </tr></thead>
-      <tbody>${auxBody}<tr class="tot"><td colspan="${_auxNC}"></td></tr>${
-        _showRfCol ? `<tr><td colspan="${_auxNC}" style="white-space:normal;font-size:11px;color:var(--text-muted)">${rfTargetNote(_rfCfg)}</td></tr>` : ''}</tbody>
+      <!-- ⚠️ SEM o rodapé do alvo do sleeve aqui: ele já é dito no painel de deriva do topo
+           da aba E no rodapé da auxiliar da tabela de Posição. Três vezes a mesma frase na
+           mesma tela treina a mesa a não ler nenhuma. -->
+      <tbody>${auxBody}<tr class="tot"><td colspan="${_auxNC}"></td></tr></tbody>
     </table>
   </div>`;
 

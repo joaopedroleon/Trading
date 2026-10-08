@@ -287,7 +287,8 @@ function buildPnlRowMap(rows) {
   for (const r of rows) pnlRowMap[pnlRowKey(r)] = r;
 }
 
-// Abertura EFETIVA (DV01) de um SWAP live p/ o PnL: aplica as marretas via swapEffQty
+// Quantidades EFETIVAS (DV01) de um SWAP live p/ o PnL: aplica as marretas via swapEffQty
+// (o estoque usa `.final`, o remanescente — ver `pnlFor`)
 // (abertura/operada/dv01). Fora de swap ou sem o helper → null (usa o backend).
 function _swapEff(r) {
   if (r.swap_trade_usd == null || typeof swapEffQty !== 'function') return null;
@@ -298,7 +299,7 @@ function _swapEff(r) {
 // Sem marreta e com preço == price_pnl, reproduz exatamente o breakdown que o backend mandou.
 function pnlFor(r) {
   const cf = r.calc_factor, nav = r.nav;
-  // SWAP da tela LIVE (consolidado): total = ESTOQUE por TAXA (DV01×Δtaxa) + resultado das
+  // SWAP da tela LIVE (consolidado): total = ESTOQUE por TAXA (DV01 REMANESCENTE × Δtaxa) + resultado das
   // BOLETAS (preço médio × marcação, já em USD no backend, campo swap_trade_usd). O estoque
   // escala pela marreta de DV01 (corrige o Oracle); as boletas NÃO escalam. Discrimina pelo
   // swap_trade_usd != null — o swap do SNAPSHOT não seta esse campo e cai no genérico abaixo.
@@ -309,8 +310,12 @@ function pnlFor(r) {
     }
     const sp1 = effectivePrice(r);              // taxa live (ou marreta de taxa)
     const sp0 = r.price != null ? r.price : null;   // taxa D-1
-    const eff = _swapEff(r);                    // abertura EFETIVA (marreta de abertura/dv01)
-    const oq = eff ? eff.opening : (r.opening_qty ?? 0);   // estoque = DV01_abertura × Δtaxa
+    const eff = _swapEff(r);                    // quantidades EFETIVAS (marreta de abertura/operada/dv01)
+    // ☠️ DV01 REMANESCENTE (final = abertura + operada), não o de abertura: as boletas já entram
+    // medidas contra a marcação de D-1 (`swap_trade_usd`), então marcar a abertura inteira
+    // D-1→live contaria o mesmo movimento 2× em todo swap que girou — num swap zerado, o dobro.
+    // Ver `swap_pnl._consolidate_swaps`; é também o DV01 que a coluna #PL já imprime.
+    const oq = eff ? eff.final : (r.final_qty ?? 0);
     const est = (sp0 != null && sp1 != null) ? oq * cf * (sp1 - sp0) : 0;
     const tot = est + (r.swap_trade_usd || 0);
     return { estoque: est, compra: r.compra_usd, venda: r.venda_usd, total: tot,
@@ -693,9 +698,9 @@ function _pnlForFund(r) {
     }
     const sp1 = effectivePrice(r);
     const sp0 = r.price != null ? r.price : null;
-    let oq = r.opening_qty ?? 0;
+    let oq = r.final_qty ?? 0;      // DV01 remanescente do fundo — ver o mesmo ponto no `pnlFor`
     const main = r._swapMain, eff = main ? _swapEff(main) : null;
-    if (eff && main.opening_qty) oq *= eff.opening / main.opening_qty;
+    if (eff && main.final_qty) oq *= eff.final / main.final_qty;
     const est = (sp0 != null && sp1 != null) ? oq * cf * (sp1 - sp0) : 0;
     const tot = est + (r.swap_trade_usd || 0);
     return { estoque: est, compra: r.compra_usd, venda: r.venda_usd, total: tot, bps: bpsOf(tot) };

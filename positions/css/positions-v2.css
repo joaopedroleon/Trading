@@ -56,6 +56,27 @@ html.theme-v2 .data-table th {
 html.theme-v2 .data-table tbody tr.group-even { background: var(--bg-row-alt); }
 html.theme-v2 .data-table tbody tr.group-odd  { background: var(--bg-card); }
 html.theme-v2 .data-table tbody tr:hover      { background: var(--green-tint); }
+
+/* ── Linha do SLEEVE DE RF dentro da tabela de outro trader (out/2026) ────────────────
+   Ela divide a tabela com as linhas do trader da aba e NÃO se soma a elas, então precisa
+   se distinguir a olho. A mesa pediu **tom de fundo**, não um selo de texto ao lado do
+   nome: o selo repetia o mesmo nome em toda linha e competia com o instrumento.
+   ⚠️ Vem DEPOIS da zebra para sobrescrevê-la, e ANTES do `:hover` continuar valendo (o
+   hover está acima e tem a mesma especificidade — a ordem é que decide). O azul é o
+   `--accent` da casa a 6%: suficiente para separar os blocos, fraco o bastante para não
+   competir com o verde/vermelho dos números. A barrinha à esquerda é o que sobrevive à
+   impressão em P&B e ao daltonismo. */
+html.theme-v2 .data-table tbody tr.sleeve-row {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+html.theme-v2 .data-table tbody tr.sleeve-row:hover { background: var(--green-tint); }
+
+/* Chip da tira NET que é do sleeve — mesmo tom da linha na tabela, para o olho ligar os dois. */
+html.theme-v2 .net-chip.net-chip-sleeve {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
 html.theme-v2 .data-table td { border-bottom: 1px solid var(--border); }
 
 /* resultado/total em destaque — ajuda a bater o olho */
@@ -464,3 +485,63 @@ html.theme-v2 .net-summary .net-warn { color: var(--yellow); cursor: help; }
 /* Sem chip nenhum (seção vazia / todos os grupos achatados) a faixa some inteira — inclusive
    a margem, que senão deixaria um vão entre o título e a tabela sem nada dentro. */
 html.theme-v2 .net-summary:empty { display: none; }
+
+
+/* ═══ Célula de CHECK — o veredito tem de saltar à vista (08/10/2026) ════════════════════
+   Os checks eram um ✓ de 13px na cor do texto, perdido numa tabela de 12 colunas de números.
+   A mesa pediu destaque: aqui eles viram **bloco de cor** — fundo tingido na célula inteira,
+   glifo maior e em negrito. Vale para TODOS (`Check Prev`, `Check Boleta`, `% Alloc Final`,
+   `Check RF`), nas duas famílias de tabela: `.data-table` e `.jgp-tbl`.
+
+   ☠️ **FICA NO FIM DO ARQUIVO, e com 4 classes no seletor — é briga de ESPECIFICIDADE.**
+   A zebra da `.jgp-tbl` pinta o `td`, não o `tr`:
+       html.theme-v2 .jgp-tbl tbody tr:nth-child(even):not(.grp) td   → (0,3,4)
+   e a 1ª versão daqui era `html.theme-v2 .jgp-tbl td.check-cell` → (0,3,2): mesmo nº de
+   classes, menos elementos ⇒ **a zebra vencia**. Sintoma medido na "Posição por moeda" do
+   PAbinader: EUR e USD (linhas ímpares) saíam verdes e o **AUD, par, saía sem fundo** —
+   `backgroundColor` do `<td>` = `rgb(250,250,247)`, a cor da zebra. Lido na tela parecia
+   check de outro tipo. Hoje são 4 classes (0,4,4) e o bloco é o ÚLTIMO do arquivo, então
+   também vence o `tr.tot.tot-sub td` (0,4,4) no desempate por ordem.
+   ⚠️ Mexer na ordem deste bloco, ou tirar uma classe do seletor, traz o bug de volta — e ele
+   volta CALADO, numa linha sim e noutra não.
+
+   ⚠️ O fundo é `color-mix(… , transparent)`, não cor chapada: assim ele se compõe com a
+   zebra e com o tom da linha do sleeve, em vez de apagá-los.
+   ⚠️ Cor do TEXTO separada da do fundo (`--green-dark` no claro): verde de série sobre 16 %
+   de verde não dá contraste para um glifo pequeno.
+   ⚠️ `box-shadow: inset` no lugar de `border`: borda muda a altura da célula e desalinharia
+   a auxiliar, que casa com a tabela principal linha a linha por altura.
+   ⚠️ Alinhadas à DIREITA, como o cabeçalho e as colunas de quantidade ao lado. */
+html.theme-v2 .data-table tbody tr td.check-cell,
+html.theme-v2 .jgp-tbl    tbody tr td.check-cell {
+  text-align: right;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+html.theme-v2 .data-table tbody tr td.check-cell.alloc-ok,
+html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-ok {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  color: var(--green-dark);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 32%, transparent);
+}
+html.theme-v2 .data-table tbody tr td.check-cell.alloc-warn,
+html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-warn {
+  background: color-mix(in srgb, var(--yellow) 24%, transparent);
+  color: #8A5A00;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow) 45%, transparent);
+}
+html.theme-v2 .data-table tbody tr td.check-cell.alloc-bad,
+html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-bad {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  color: var(--red);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 35%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  /* No escuro o texto escuro do amarelo some; verde e vermelho já são claros o bastante. */
+  html.theme-v2 .data-table tbody tr td.check-cell.alloc-warn,
+  html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-warn { color: var(--yellow); }
+  html.theme-v2 .data-table tbody tr td.check-cell.alloc-ok,
+  html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-ok   { color: var(--green); }
+}

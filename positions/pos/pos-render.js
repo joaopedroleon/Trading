@@ -6,19 +6,23 @@ function rerenderTables(onlyKey) {
   const filterRows = rows => rows.filter(keep);
   const hasFundBreak = activeTraderTab === 'portfoliorf' && !!(data?.fund_rows?.length);
   const displayRows  = tabDisplayRows(activeTraderTab);
-  for (const s of getSections(displayRows)) {
+  // ⚠️ `sectionsFor`/`sectionRowsFor` (pos-format.js) — a MESMA fonte do `renderSectionsForTab`.
+  // Uma cópia da regra aqui foi o que apagou as linhas do sleeve no 1º filtro (ver a nota lá).
+  const rfGroupId = rfGroupIdFor(data);
+  for (const s of sectionsFor(activeTraderTab, displayRows)) {
     const isTarget = !onlySection || (s.group === onlySection[0] && s.trader === onlySection[1]);
-    const rows = filterRows(sortRows(
-      displayRows.filter(r => r.group === s.group && r.trader === s.trader)
-    ));
+    const rows = filterRows(sortRows(sectionRowsFor(activeTraderTab, s, displayRows)));
     if (isTarget) renderTable(rows, sectionBodyId(s));
-    if (s.group === 'MM' && displayRows.some(r => r.group === 'MM Prev' && r.trader === s.trader)) {
+    if (s.group === 'MM' && displayRows.some(r =>
+        (r.group === 'MM Prev' || r.group === rfGroupId) && r.trader === s.trader)) {
       const el = document.getElementById(allocCheckId(s.trader));
       if (el) el.innerHTML = renderAllocTable(displayRows, s.trader, filterRows);
     }
     if (hasFundBreak && s.group === 'Todos') {
       const el = document.getElementById('fund_break_portfoliorf');
-      if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows, data.portfoliorf_offshore_fund);
+      if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs,
+                                                  filterRows, data.portfoliorf_offshore_fund,
+                                                  data.rf_sleeve);
     }
   }
   // Câmbio da aba do PAbinader: soma as MESMAS linhas exibidas, então tem de refazer junto
@@ -720,9 +724,15 @@ function netByAssetGroup(rows) {
     const legs = g.legs ? g.legs(r) : [{ sub: g.sub(r), w: 1 }];
     const { pl, type } = effectiveRowPl(r);
     const name = r.instrument_name ?? '—';
+    /* ⭐ Linha de SLEEVE ganha BALDE PRÓPRIO (o dono entra na chave), não some da tira
+       (08/10/2026, pedido da mesa: "pode sim mostrar o resumo das posições do Abinader").
+       ☠️ Própria, e não somada ao balde do trader da aba, porque o #PL dela é fração de OUTRO
+       NAV — o do fundo que detém o veículo offshore. O chip diz de quem é e o hover diz sobre
+       que patrimônio. */
+    const owner = (typeof isMergedSleeveRow === 'function' && isMergedSleeveRow(r)) ? r.trader : null;
     for (const { sub, w } of legs) {
-      const k = `${g.id}||${sub}`;
-      if (!acc.has(k)) acc.set(k, { g, sub, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
+      const k = `${g.id}||${sub}||${owner ?? ''}`;
+      if (!acc.has(k)) acc.set(k, { g, sub, owner, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
       const a = acc.get(k);
       a.insts.push(legs.length > 1 ? `${name} (perna ${legs.find(l => l.sub === sub)?.ccy ?? sub}, ${w > 0 ? '+' : '−'}#PL)` : name);
       if (pl == null || !isFinite(pl)) { a.missing.push(name); continue; }
@@ -768,6 +778,13 @@ const _netFlat = a =>
    competir com o número. Não é o mesmo que somar as duas: a soma segue separada por unidade, e
    um balde que tenha as duas mostra as duas, agora só com o `·` entre elas. */
 function renderNetSummary(rows) {
+  /* ☠️ **#PL só soma com #PL do MESMO denominador** — e é só por isso que o sleeve tem balde
+     próprio (ver `netByAssetGroup`), NÃO porque ele deva sumir da tira. A exposição dele é
+     fração do NAV do fundo que detém o veículo offshore (US$ 32,5 MM) e a do trader da aba,
+     do NAV dela (US$ 43,0 MM): jogar os dois no mesmo chip somaria frações de denominadores
+     diferentes. Em chips separados, cada número é verdadeiro sobre o seu patrimônio — e o
+     chip diz de quem é. */
+  const rfc = (posDataByTab[currentRenderTab()] ?? positionsData)?.rf_sleeve ?? null;
   const chips = netByAssetGroup(rows).filter(a => !_netFlat(a)).map(a => {
     const parts = [], unid = [];
     if (a.nPct) { parts.push(_netNum(a.pct, 'pct'));     unid.push('% do NAV (exposição)'); }
@@ -778,12 +795,22 @@ function renderNetSummary(rows) {
           `${a.missing.length} linha(s) sem #PL calculável — FORA desta soma:\n· ` +
           a.missing.join('\n· '))}">⚠</span>`
       : '';
-    const tip = `${a.g.tip}\n\nUnidade: ${unid.join(' · ')}`
+    const navTxt = a.owner
+      ? `\n\n⚠ Posição do ${a.owner} no sleeve de RF. O % é fração do NAV do `
+        + `${rfc?.nav_fund ?? 'fundo que detém o veículo offshore'}`
+        + (rfc?.nav != null ? ` (USD ${Number(rfc.nav).toLocaleString('en-US', {maximumFractionDigits: 0})})` : '')
+        + ` — NÃO do NAV desta aba. Por isso o chip é separado: os dois não se somam.`
+      : '';
+    const tip = `${a.g.tip}\n\nUnidade: ${unid.join(' · ')}${navTxt}`
               + `\n\nSoma ${a.insts.length} linha(s):\n· ${a.insts.join('\n· ')}`;
-    return `<span class="net-chip" title="${_netEsc(tip)}"><span class="net-chip-lbl">${a.sub}</span> ${parts.join(' <span class="net-sep">·</span> ')}${warn}</span>`;
+    // Sem o nome do trader no rótulo (a mesa pediu): o TOM do chip já é o mesmo das linhas
+    // dele na tabela, e repetir o nome em todo chip só encompridava a tira. Quem é fica no
+    // hover, junto com o NAV sobre o qual aquele % foi medido.
+    const lbl = a.sub;
+    return `<span class="net-chip${a.owner ? ' net-chip-sleeve' : ''}" title="${_netEsc(tip)}"><span class="net-chip-lbl">${lbl}</span> ${parts.join(' <span class="net-sep">·</span> ')}${warn}</span>`;
   });
   if (!chips.length) return '';
-  return `<span class="net-lbl" title="Soma da coluna #PL das linhas EXIBIDAS acima, por grupo de ativo, na mesma ordem de área da tabela (juros → bolsa → moedas → commodities). Moedas em pares CONTRA O DÓLAR (USDBRL, USDMXN, EURUSD…): um cross vira dois pares (EURBRL = EURUSD + USDBRL). Com % = exposição sobre o NAV; sem % = PL por 100bp. Balde zerado não aparece.">Net</span>${chips.join('')}`;
+  return `<span class="net-lbl" title="Soma da coluna #PL das linhas EXIBIDAS acima, por grupo de ativo, na mesma ordem de área da tabela (juros → bolsa → moedas → commodities). Moedas em pares CONTRA O DÓLAR (USDBRL, USDMXN, EURUSD…): um cross vira dois pares (EURBRL = EURUSD + USDBRL). Com % = exposição sobre o NAV; sem % = PL por 100bp. Balde zerado não aparece.&#10;&#10;Chip com nome de trader é do SLEEVE DE RF: o % dele é fração do NAV do fundo que detém o veículo offshore, não do NAV desta aba — por isso vem separado, não somado.">Net</span>${chips.join('')}`;
 }
 
 /* ── Render single tbody ─────────────────────────────────────────────────────── */
@@ -805,7 +832,7 @@ function renderTable(rows, tbodyId) {
   const d = detailVisible ? '' : 'style="display:none"';
 
   // filtrar linhas ocultas manualmente (não afeta contagem de área)
-  const visibleRows = rows.filter(r => !_hiddenForTab(activeTraderTab).has(rowKey(r)));
+  const visibleRows = rows.filter(r => !_hiddenForTab(currentRenderTab()).has(rowKey(r)));
   // Botão "✕ Ocultar zeradas" do título desta seção: conta sobre as MESMAS linhas que vão
   // para a tela (pos-helpers.js). `typeof` p/ o snapshot estático antigo.
   if (typeof syncHideZeroBtn === 'function') syncHideZeroBtn(tbodyId, visibleRows);
@@ -872,7 +899,9 @@ function renderTable(rows, tbodyId) {
            ['Linha SIMULADA — não está na carteira', ...(r.sim_avisos ?? []).map(a => '⚠ ' + a)]
              .join('\n').replace(/"/g, '&quot;')}">⚡ </span>`
       : '';
-    return `<tr class="${rowClass} ${areaClass} ${tradedClass}" data-ref="${refCopy}" style="cursor:pointer" title="Clique para copiar a referência" onclick="copyRowRef(this)">
+    const slvCls = typeof sleeveRowClass === 'function' ? sleeveRowClass(r) : '';
+    const slvTtl = slvCls ? ` — ${r.trader} (sleeve de RF)` : '';
+    return `<tr class="${rowClass} ${areaClass} ${tradedClass}${slvCls}" data-ref="${refCopy}" style="cursor:pointer" title="Clique para copiar a referência${slvTtl}" onclick="copyRowRef(this)">
       ${killCell}
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>

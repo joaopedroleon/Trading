@@ -314,7 +314,7 @@ const ALLOC_TOL     = 0.02;
 
    Logo o 1º check pergunta "a boleta saiu nos 4%?" e o 2º, "os 4% ainda SÃO 1/10?" — este
    acusa quando um dos dois NAVs andou e o número fixo deixou de valer. */
-const RF_SLEEVE_GROUP_FALLBACK = 'RF Offshore';
+/* O nome do grupo vem de `rfGroupIdFor` (pos-format.js) — fonte única. */
 
 /* ⚠️ **Tolerância RELATIVA ao alvo, não os ±2pp do check MM×Prev.** Os 2pp do `ALLOC_TOL`
    foram calibrados para alvos de 30-70%; num alvo de 4% eles pintariam de verde qualquer
@@ -323,16 +323,60 @@ const RF_SLEEVE_GROUP_FALLBACK = 'RF Offshore';
    que é como a mesa lê, e só a FAIXA é relativa. */
 const RF_ALLOC_REL_TOL = 0.15;
 
+/* ── ☠️ A aba que está sendo DESENHADA ≠ a aba ATIVA ──────────────────────────────────
+   O `prefetchOtherTabs` monta o DOM das outras abas **em background**, com
+   `activeTraderTab` ainda apontando para a aba aberta — e o resultado fica no DOM, porque
+   abrir uma aba já carregada não re-renderiza. Quem ler `activeTraderTab` lá dentro lê a
+   aba ERRADA, e o que ele decidir fica errado para sempre naquela aba.
+
+   Medido em 08/10/2026: a coluna `Check RF` sumia da aba do PAbinader porque o
+   `renderAllocTable` perguntava `rfSleeveCfg(activeTraderTab)` enquanto desenhava a aba
+   dele com o EMota ativo — e o EMota não tem sleeve. Mesma família do id duplicado do card
+   por moeda: função que desenha uma aba qualquer não pode consultar o estado global de
+   "qual está aberta".
+
+   `renderSectionsForTab` carimba a aba que está desenhando; todo o resto pergunta aqui. */
+let _renderingTab = null;
+function setRenderingTab(t) { _renderingTab = t; }
+function currentRenderTab() { return _renderingTab ?? activeTraderTab; }
+
 /* Config do sleeve na aba (ou null). Uma porta só: todo consumidor passa por aqui. */
 function rfSleeveCfg(tabId) {
-  const d = posDataByTab[tabId ?? activeTraderTab] ?? positionsData;
+  const d = posDataByTab[tabId ?? currentRenderTab()] ?? positionsData;
   return d?.rf_sleeve ?? null;
 }
-function rfSleeveGroup(tabId) {
-  return rfSleeveCfg(tabId)?.group ?? RF_SLEEVE_GROUP_FALLBACK;
+/* Selo do DONO numa linha de sleeve — só quando ela está na tabela de OUTRO trader
+   (08/10/2026). Com as linhas do Abinader dentro da tabela do PortfolioRF, a coluna
+   Instrumento passou a ter duas procedências e o selo é o que as separa a olho: sem ele a
+   mesa veria dois USD/MXN seguidos sem saber de quem é cada um. Na aba do próprio dono o
+   card já leva o nome dele no título, então o selo não sai (seria ruído em toda linha). */
+function isMergedSleeveRow(r) {
+  if (!r?.is_rf_sleeve) return false;
+  const tabTrader = (typeof TRADER_TABS !== 'undefined'
+    ? TRADER_TABS.find(t => t.id === currentRenderTab())?.trader : null);
+  return !tabTrader || tabTrader !== r.trader;
 }
 
+/* Classe da LINHA do sleeve na tabela de outro trader. ⭐ A mesa pediu **tom de fundo** em
+   vez do selo de texto que havia aqui (08/10/2026): o selo repetia o mesmo nome em todas as
+   linhas e competia com o nome do instrumento. O tom + a barrinha à esquerda separam os dois
+   blocos de relance; o dono fica no `title` da linha, para quem precisar confirmar.
+   Ver `.sleeve-row` em positions-v2.css. */
+function sleeveRowClass(r) {
+  // ⛔ Fora do escopo do veículo (não é juros nem moeda) → marcação PRÓPRIA, vermelha: a
+  // faixa do topo nomeia, e aqui a linha se identifica no meio das outras.
+  return (isMergedSleeveRow(r) ? ' sleeve-row' : '')
+       + (r?.rf_fora_escopo && (r.final_qty || r.traded_qty) ? ' sleeve-fora-escopo' : '');
+}
+
+
 /* Classe CSS pela faixa RELATIVA (ver RF_ALLOC_REL_TOL). `v` e `target` na mesma unidade. */
+/* `-0` existe em JS (`0 / -0.0083`) e o `toLocaleString` imprime "-0.0%", que lido na tabela
+   parece posição vendida minúscula em vez de zero. Normaliza antes de formatar. */
+function _semZeroNegativo(v) {
+  return (v != null && Math.abs(v) < 5e-5) ? 0 : v;
+}
+
 function rfAllocClass(v, target) {
   if (v == null || !target) return '';
   const rel = Math.abs(v / target - 1);
@@ -434,6 +478,29 @@ const FILTERS = [
     label: 'Excluir FX < 200k',
     // exclui somente posições FX pequenas SEM atividade no dia
     fn:    r => !(r.is_fx && Math.abs(r.final_qty ?? 0) < 200_000 && (r.gross_traded_qty ?? 0) < 200_000),
+  },
+  {
+    /* ⭐ Irmão RELATIVO do `no_fx_small` (pedido da mesa, 08/10/2026). O corte de 200k é
+       absoluto e foi calibrado para os livros grandes; num veículo de US$ 32 MM ele deixa
+       passar resíduo de rolagem que ali já é material, e num livro maior esconderia posição
+       que não é. 0,10% do NAV é a mesma régua em qualquer fundo.
+       ⚠️ Mede o **#PL** (exposição, fração do NAV), não a quantidade — é o que torna o corte
+       comparável entre moedas: 50 AUD e 50 JPY não são a mesma coisa.
+       ⚠️ Linha SEM #PL calculável não é cortada: "não sei" não é "é pequeno" (seria sumir com
+       a posição que a tela deveria estar denunciando). E linha com giro no dia fica, como no
+       irmão: o que foi operado hoje é o que a mesa quer ver, por menor que tenha ficado. */
+    id:    'no_fx_tiny',
+    label: 'Excluir FX < 0,10%',
+    fn:    r => {
+      if (!r.is_fx) return true;
+      // ⚠️ Abriu e ZEROU hoje: o #PL é 0 por construção e a linha é sobre ATIVIDADE, não
+      // saldo — some-la esconderia justamente o day-trade. Mas a linha que SOBROU pequena
+      // (o resíduo de rolagem, 50 AUD de um contrato de 1,1 MM) é saldo, e sai.
+      if ((r.final_qty ?? 0) === 0 && (r.gross_traded_qty ?? 0) !== 0) return true;
+      const pl = (typeof effectiveRowPl === 'function') ? effectiveRowPl(r).pl : r.pl;
+      if (pl == null || !isFinite(pl) || r.pl_type !== 'pct') return true;
+      return Math.abs(pl) >= 0.001;
+    },
   },
   {
     id:    'no_cash',

@@ -163,6 +163,46 @@ function getSections(rows) {
   });
 }
 
+/* ── Sleeve de RF: a regra de ONDE as linhas dele são desenhadas ─────────────────────
+   ☠️ **Fonte ÚNICA de propósito.** A 1ª versão tinha a regra copiada no `renderSectionsForTab`
+   (pos-tabs.js) e o `rerenderTables` (pos-render.js) ficou com a antiga — resultado: montava
+   certo, mas qualquer filtro, ✕ de linha ou marreta re-renderizava a seção SEM as linhas do
+   sleeve, e elas não voltavam (a seção própria delas não existe mais depois da mescla).
+   Aferido: ligar/desligar "Excluir FX < 0,10%" apagava os 3 FX do Abinader para sempre.
+   Quem precisar da lista de linhas de uma seção chama `sectionRowsFor` — não refaz o filtro. */
+/* ⚠️ **Única dona do nome do grupo.** O literal 'RF Offshore' só aparece aqui: ele estava
+   repetido em 4 arquivos, cada um com o seu `typeof … !== 'undefined' ? … : 'RF Offshore'` —
+   4 lugares para errar a mesma string. O fallback existe para o snapshot estático antigo,
+   cujo payload não tem `rf_sleeve`. */
+function rfGroupIdFor(data) {
+  return data?.rf_sleeve?.group ?? 'RF Offshore';
+}
+
+/* Trader da aba que RECEBE as linhas do sleeve na própria tabela, ou null.
+   Mescla quando o sleeve é de OUTRO trader; na aba do dono elas seguem em card próprio. */
+function rfMergeTraderFor(tabId) {
+  const d   = posDataByTab[tabId];
+  const cfg = d?.rf_sleeve;
+  const tab = (typeof TRADER_TABS !== 'undefined') ? TRADER_TABS.find(t => t.id === tabId) : null;
+  return (cfg && tab && !(cfg.traders ?? []).includes(tab.trader)) ? tab.trader : null;
+}
+
+/* Seções da aba — a do sleeve some quando mesclada (as linhas entram na do trader da aba). */
+function sectionsFor(tabId, rows) {
+  const merged = rfMergeTraderFor(tabId);
+  const g      = rfGroupIdFor(posDataByTab[tabId]);
+  return getSections(rows).filter(s => !(merged && s.group === g));
+}
+
+/* Linhas de UMA seção, já com o sleeve dentro quando é ela que recebe a mescla. */
+function sectionRowsFor(tabId, s, rows) {
+  const merged = rfMergeTraderFor(tabId);
+  const g      = rfGroupIdFor(posDataByTab[tabId]);
+  return rows.filter(r =>
+    (r.group === s.group && r.trader === s.trader) ||
+    (merged && s.trader === merged && s.group !== g && r.group === g));
+}
+
 function sectionBodyId(s) {
   return `body_${s.group}_${s.trader}`.replace(/[^a-zA-Z0-9]/g, '_');
 }

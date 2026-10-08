@@ -15,10 +15,11 @@ const API_BASE = location.protocol === 'file:' ? 'http://localhost:8083' : '';
 const TRADER_TABS = [
   { id: 'emota',       trader: 'EMota',      filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
   { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
-  { id: 'portfoliorf', trader: 'PortfolioRF',filters: ['no_cash'],                         useGroups: false },
-  { id: 'other',       trader: 'PAlves',     filters: ['no_hedge_cambial'],               useGroups: false },
-  // ⚠️ SEM o `no_fx_small`, a pedido da mesa: no livro de câmbio a posição pequena é o
-  // resíduo de rolagem a liquidar, e ele é para ser visto. As outras abas mantêm o filtro.
+  { id: 'portfoliorf', trader: 'PortfolioRF',filters: ['no_cash','no_fx_tiny'],            useGroups: false },
+  { id: 'other',       trader: 'PAlves',     filters: ['no_hedge_cambial','no_fx_tiny'],  useGroups: false },
+  // ⚠️ SEM o `no_fx_small` NEM o `no_fx_tiny`, a pedido da mesa: no livro de câmbio a posição
+  // pequena é o resíduo de rolagem a liquidar, e ele é para ser visto. As outras abas mantêm
+  // os dois cortes.
   { id: 'pabinader',   trader: 'PAbinader',  filters: ['no_hedge_cambial'], useGroups: false,
     fxFromDeals: true },
 ];
