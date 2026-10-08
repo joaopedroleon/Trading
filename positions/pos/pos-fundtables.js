@@ -115,8 +115,8 @@ const HIDE_SO_PREV_TRADERS = new Set(['EMota']);
    sempre; quem quiser a composição abre o hover. O nome do mecanismo não é informação para
    quem está conferindo alocação.
 
-   ⚠️ A soma é do livro INTEIRO, não o que está visível: a proporção alocada é
-   propriedade da carteira, e um filtro de exibição não pode mudar o veredito.
+   ⚠️ A soma usa as linhas que a ABA MOSTRA (ver o ☠️ em `renderAllocTable`): o
+   `no_hedge_cambial` é corte de ESCOPO, não de exibição, e incluí-lo invertia o veredito.
    ⚠️ Reusa `netByAssetGroup`/`posNetGroup` (pos-render.js) — a MESMA máquina da tira NET,
    que já decompõe cross em pares contra o dólar e já sabe somar futuro com termo. */
 
@@ -220,7 +220,7 @@ function _bucketCell(bk, target) {
     + `  Prev ÷ MM = ${fmtPct(bk.pct)}` + (target != null ? `  ·  alvo ${fmtPct(target)}` : '')
     + `\n\nSó ${bk.sub}, e só futuro + NDF. Opção, DI, bolsa e as demais moedas seguem linha `
     + `a linha — ali o instrumento, o vértice e o nome não são substituíveis. `
-    + `Soma o livro INTEIRO (um filtro de exibição não muda o veredito).`;
+    + `Soma as linhas que a aba mostra — os filtros dela valem: Hedge Cambial é hedge de caixa, não posição do trader, e não tem contraparte no Prev.`;
   return _checkCell(bk.pct, target != null ? bk.pct - target : null, tip);
 }
 
@@ -234,10 +234,21 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
 
   /* ── Sleeve de RF (out/2026) — a coluna `Check RF`, no mesmo espelho do Prev ──────
      O trader boleta ~4,4 % do ticket TAMBÉM no veículo do RF. */
-  /* Baldes de ativo p/ o check de CÂMBIO — livro INTEIRO dos dois lados (ver `_allocBuckets`). */
+  /* Baldes de ativo p/ o check do DÓLAR (ver `_allocBuckets`).
+     ☠️ **Com os MESMOS filtros da aba, não com o livro cru.** A 1ª versão somava tudo, com o
+     argumento de que "um filtro de exibição não pode mudar o veredito" — e estava errada: o
+     `no_hedge_cambial` não é exibição, é ESCOPO. O Hedge Cambial é o hedge de caixa da
+     tesouraria, não posição direcional do trader, e **não tem contraparte no Prev por
+     desenho**. Medido no EMota em 08/10/2026: as 4 linhas de mini dólar de Hedge_Cambial
+     (−4, +16, −13, +7) inflavam o lado do MM e puxavam o check de **74,1 % para 70,3 %** —
+     transformavam um desvio real de 4pp contra o alvo de 70 % num verde. Erro na direção
+     pior. Com o filtro, `% Alloc Final` e `Check Boleta` dão o mesmo **74,1 %**, que é o que
+     a mesa lê na tabela ao lado (ali a abertura é zero: operada = final).
+     ⚠️ O ✕ de linha (esconder à mão) continua FORA do corte — é ação de exibição do usuário,
+     e esconder uma linha não pode mudar a proporção alocada da carteira. */
   const buckets  = _allocBuckets(
-    allRows.filter(r => r.group === 'MM' && r.trader === trader && !r.is_simulated),
-    prevRows);
+    filterFn(allRows.filter(r => r.group === 'MM' && r.trader === trader && !r.is_simulated)),
+    filterFn(prevRows));
 
   const rfGroup  = rfGroupIdFor(posDataByTab[currentRenderTab()]);
   const rfCfg    = rfSleeveCfg(currentRenderTab());
