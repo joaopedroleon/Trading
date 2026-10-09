@@ -445,13 +445,20 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
 
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead><tr>
+      <!-- ⚠️ Cabeçalhos longos em DUAS LINHAS (br), e não por estética: numa tabela
+           width:auto a coluna nasce do MAIOR conteúdo dela, e aqui o maior conteúdo era o
+           rótulo. "Total MM+Prev+RF" sozinho pedia 145px para números de 3 dígitos.
+           O br quebra mesmo com o white-space:nowrap da tabela — e o espaçador de
+           alinhamento da auxiliar mede thead.offsetHeight ao vivo, então um cabeçalho mais
+           alto continua casando linha a linha com a tabela da esquerda.
+           (Sem crase neste comentário: ele vive dentro de um template literal.) -->
       <th>Instrumento</th>
-      <th>Abert. MM Prev</th>
-      <th>Qtd Operada</th>
-      <th>${showRf ? 'Total MM+Prev+RF' : 'Total MM+Prev'}</th>
-      <th>Check Boleta</th>
-      <th>% Alloc Final</th>
-      ${showRf ? rfCheckHead(rfCfg, false) : ''}
+      <th>Abert.<br>MM Prev</th>
+      <th>Qtd<br>Operada</th>
+      <th>${showRf ? 'Total<br>MM+Prev+RF' : 'Total<br>MM+Prev'}</th>
+      <th>Check<br>Boleta</th>
+      <th>% Alloc<br>Final</th>
+      ${showRf ? rfCheckHead(rfCfg, false, true) : ''}
     </tr></thead>
     <tbody>${rows}${orphanSection}${footTr}${rfFootTr}</tbody>
   </table>`;
@@ -566,14 +573,27 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
 }
 
 /* Cabeçalho da coluna. `merged` = as linhas são de OUTRO trader (aba de quem recebe), e aí
-   o rótulo é o apelido dele ("Check Abi"); na aba do próprio dono é "Check RF". */
-function rfCheckHead(cfg, merged) {
+   o rótulo é o apelido dele ("Check Abi"); na aba do próprio dono é "Check RF".
+
+   ☠️ `quebra` (rótulo em DUAS linhas) é **opt-in, e tem de ser** (09/10/2026). Ela encolhe a
+   coluna — o rótulo é o conteúdo mais largo dela —, mas deixa o `<thead>` uma linha mais alto,
+   e **nem toda auxiliar desta tela sabe lidar com isso**:
+     · auxiliar da seção 1 (`alloc-table`) → `_alignAuxTables` mede `thead.offsetHeight` AO VIVO
+       e reposiciona o espaçador: pode quebrar, e é lá que a largura doía;
+     · auxiliar da seção 2 (`pos-fxlegs`)  → alinha por um espaçador de altura FIXA
+       (`AUX_HEAD_GAP`), que pressupõe os dois cabeçalhos da mesma altura. Quebrar ali
+       desalinhou as duas tabelas linha a linha — foi o que a mesa reportou.
+   Quem passar `quebra` numa auxiliar nova tem de garantir o alinhamento medido. */
+function rfCheckHead(cfg, merged, quebra) {
   const tr  = cfg?.traders?.[0];
   /* ⭐ O ALVO vai no rótulo (pedido da mesa, 08/10/2026): é o número fixo que a mesa troca
      de tempos em tempos, e tê-lo no cabeçalho poupa abrir o hover para lembrar contra o quê
      a coluna está medindo — do mesmo jeito que o check do Prev já mostra os 30 %. */
   const alvo = cfg?.alloc_target != null ? ' ' + fmtPct(cfg.alloc_target) : '';
-  const lbl = (merged ? (cfg?.labels?.[tr] ?? tr ?? 'sleeve') : 'RF') + alvo;
+  // Duas linhas: "Check RF" em cima, o alvo embaixo — ver o comentário do cabeçalho da
+  // auxiliar. O rótulo é o mais largo da coluna (as células são ✓ ou "⚠ 9,9%").
+  const nome = merged ? (cfg?.labels?.[tr] ?? tr ?? 'sleeve') : 'RF';
+  const lbl  = nome + (quebra && alvo ? '<br>' + alvo.trim() : alvo);
   const tip = 'Veredito do sleeve de RF nesta linha — o detalhe está no hover de cada célula.\n\n'
     + 'Câmbio LINEAR (spot · NDF · forward): vem do agregado por MOEDA, contra o alvo de '
     + fmtPct(cfg?.exposure_ratio) + ' da exposição do MM.\n'

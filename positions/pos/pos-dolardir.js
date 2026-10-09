@@ -149,6 +149,194 @@ const _DD_COLS = [
 ];
 const _DD_GROUP_START = new Set(['prev_local', 'fim_local', 'off_usdbrl']);   // 1ª coluna de cada grupo
 
+/* ── Calculadora de contratos — "X contratos são quantos % do Prev?" ──────────────────────
+ * Ferramenta da seção (sem endpoint novo): o lote de contratos de dólar que a mesa vai boletar
+ * ⇄ % do NAV, e a FOLGA de cada fundo contra um alvo de exposição (default 20%).
+ *
+ * ⭐ O lote é UM só e entra RATEADO PRO-RATA DO NAV (out/2026, pedido da mesa) — é como a boleta
+ * é distribuída. Não são X contratos em cada fundo: são X no conjunto, repartidos. Por isso o
+ * % do NAV sai praticamente IGUAL em todos (a diferença é só o arredondamento) — e é esse o
+ * número que a mesa quer ler. O rateio usa MAIOR RESTO para a soma dos inteiros fechar em X
+ * exato: `floor` em todos e o resto distribuído pelas maiores frações. Arredondar cada fundo
+ * por si deixaria a boleta sobrando ou faltando contrato, sem avisar.
+ *
+ * ⚠️ O valor do contrato sai do MESMO preço da seção 01: `market.uca_px` (UCA Curncy, cotado em
+ * BRL por MIL dólares) → cheio (UC) = 50 × px, mini (WDO) = 10 × px. Sem `uca_px` cai no spot
+ * (50.000 / 10.000 × USDBRL), que é APROXIMAÇÃO (o futuro carrega cupom cambial) — por isso a
+ * procedência vai escrita no rodapé do card, não implícita no número.
+ *
+ * ⚠️ O ALVO É EM MÓDULO, como o limite da seção 01 (`_reframeCell`): "20%" quer dizer
+ * |exposição| ≤ 20%, não +20%. Os Prev vivem VENDIDOS em dólar (−20,9% em 09/10/2026) — ler o
+ * alvo com sinal mandaria comprar 2.000 contratos para sair de −20,9% e chegar a +20%, que não
+ * é pergunta que alguém faz. A folga é na direção em que a posição já está.
+ *
+ * ⚠️ A base é o dólar DIRECIONAL desta seção (cota do Class H como ativo em USD) — a coluna
+ * "Final · % NAV" da tabela acima —, não a tabela de enquadramento da seção 01, que conta a cota
+ * do FIM IE inteira. O contrato entra com peso 1: boletado DENTRO do Prev. Dentro do FIM IE
+ * valeria × s_p, que é outra conta.
+ *
+ * Estado em módulo (sobrevive ao re-render da seção, como o `enqDiTarget` da seção 03) e o
+ * re-render é SÓ da tabela: refazer a seção inteira a cada tecla tiraria o foco do input.
+ */
+const _DD_CONTRACTS = {
+  cheio: { label: 'Cheio (UC)', short: 'cheio', lots: 50, usd: 50_000 },
+  mini:  { label: 'Mini (WDO)', short: 'mini',  lots: 10, usd: 10_000 },
+};
+const _DD_TARGET_DEFAULT = 0.20;                           // limite de exposição a USDBRL dos Prev
+let _ddCalc = { qty: 100, kind: 'cheio', target: _DD_TARGET_DEFAULT };   // target em FRAÇÃO
+let _ddCalcCtx = null;                                     // {rows, total, uca_px, fx}
+
+// Valor de 1 contrato em BRL + a procedência do preço, que o rodapé declara.
+function _ddContractBrl(kind, ctx) {
+  const c = _DD_CONTRACTS[kind];
+  if (!c || !ctx) return { v: null, src: null };
+  if (ctx.uca_px) return { v: c.lots * ctx.uca_px, src: 'fut' };
+  if (ctx.fx)     return { v: c.usd * ctx.fx,      src: 'spot' };
+  return { v: null, src: null };
+}
+
+/* Rateio pro-rata do NAV, em contratos INTEIROS, com Σ = qty exato (maior resto).
+   Devolve { n: [inteiros com sinal], exact: [fracionários], navTot }. */
+function _ddAllocate(qty, rows) {
+  const navTot = rows.reduce((s, r) => s + (r.nav || 0), 0);
+  const exact  = rows.map(r => (navTot && r.nav) ? Math.abs(qty) * r.nav / navTot : 0);
+  const n      = rows.map(() => 0);
+  if (!navTot || !isFinite(qty) || !qty) return { n, exact: exact.map(() => 0), navTot };
+
+  const sign = qty < 0 ? -1 : 1;
+  const tot  = Math.round(Math.abs(qty));
+  const base = exact.map(v => Math.floor(v));
+  let rest   = tot - base.reduce((a, b) => a + b, 0);
+  // Maior resto: o que sobra vai para os fundos de maior fração — a soma fecha em `tot`.
+  exact.map((v, i) => [v - Math.floor(v), i])
+    .sort((a, b) => b[0] - a[0])
+    .forEach(([, i]) => { if (rest > 0) { base[i]++; rest--; } });
+  return { n: base.map(v => sign * v), exact: exact.map(v => sign * v), navTot };
+}
+
+function ddCalcSetQty(v) {
+  const n = parseFloat(String(v).replace(',', '.'));
+  _ddCalc.qty = isFinite(n) ? n : 0;
+  _ddRenderCalc();
+}
+function ddCalcSetKind(v) { if (_DD_CONTRACTS[v]) { _ddCalc.kind = v; _ddRenderCalc(); } }
+function ddCalcSetTarget(v) {
+  const s = String(v).trim().replace(',', '.');
+  const n = parseFloat(s);
+  // Digita em % (20 = 20% do NAV, em módulo); guarda em fração. Vazio = sem coluna de folga.
+  _ddCalc.target = (s === '' || !isFinite(n)) ? null : Math.abs(n) / 100;
+  _ddRenderCalc();
+}
+
+/* Folga contra o alvo, em MÓDULO e na direção em que a posição já está (mesma leitura do
+   `_reframeCell` da seção 01). `exp` é o direcional final em BRL; `extra` é o que o lote
+   rateado soma nesta linha (a folga é medida DEPOIS do lote, que é o ponto de "ajustar"). */
+function _ddSlackCell(exp, nav, val, tgt) {
+  if (tgt == null) return '<td class="num" style="border-left:1px solid var(--border);color:var(--text-muted)">—</td>';
+  if (exp == null || !nav || !val)
+    return '<td class="num" style="border-left:1px solid var(--border);color:var(--text-muted)">—</td>';
+  const slackBrl = tgt * nav - Math.abs(exp);     // >0 ainda cabe · <0 estourou
+  const n = Math.abs(slackBrl) / val;
+  const long = exp > 0;                            // direção atual: comprado ou vendido
+  const tip = `BRL ${_brlPlain(slackBrl)} · exato ${n.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}`;
+  if (slackBrl >= 0) {
+    // Folga = quanto ainda cabe AUMENTAR na direção em que o fundo já está.
+    const verb = exp === 0 ? 'em qualquer direção' : (long ? 'pode comprar' : 'pode vender');
+    return `<td class="num" style="border-left:1px solid var(--border);color:var(--green)" title="${tip}">
+      folga ${Math.floor(n).toLocaleString('pt-BR')}<br><span style="font-size:10px;color:var(--text-muted)">${verb}</span></td>`;
+  }
+  const verb = long ? 'vendendo' : 'comprando';    // reduzir o módulo = operar contra a posição
+  return `<td class="num" style="border-left:1px solid var(--border);color:var(--red);font-weight:600" title="${tip}">
+    reduzir ${Math.ceil(n).toLocaleString('pt-BR')}<br><span style="font-size:10px;font-weight:400">${verb}, p/ reenquadrar</span></td>`;
+}
+
+function _ddCalcRow(r, val, cts, tgt, isTotal) {
+  const nav = r.nav, exp = r.exp;
+  const lbl = isTotal ? `<b>${r.label}</b>` : r.label;
+  if (!nav) return `<tr${isTotal ? ' class="area-divider"' : ''}><td>${lbl}</td>
+    <td class="num" colspan="6" style="color:var(--text-muted)">sem NAV</td></tr>`;
+
+  const pctCur = exp != null ? exp / nav : null;
+  const addBrl = val != null ? cts * val : null;
+  const pctAdd = addBrl != null ? addBrl / nav : null;
+  const expNew = (exp != null && addBrl != null) ? exp + addBrl : null;
+  const pctNew = expNew != null ? expNew / nav : null;
+  // A resultante é lida contra o alvo (módulo): vermelho se o lote estoura o limite.
+  const newColor = (pctNew == null || tgt == null) ? 'var(--text)'
+                 : Math.abs(pctNew) > tgt ? 'var(--red)' : 'var(--green)';
+
+  return `<tr${isTotal ? ' class="area-divider" style="font-weight:600"' : ''}>
+    <td>${lbl}</td>
+    <td class="num">${nav.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</td>
+    <td class="num">${_fmtBrl(exp)}<br><span style="font-size:11px;color:var(--text-muted)">${pctCur != null ? fmtPct(pctCur) : '—'}</span></td>
+    <td class="num" style="border-left:1px solid var(--border)">${cts != null ? cts.toLocaleString('pt-BR') : '—'}<br>
+      <span style="font-size:11px;color:var(--text-muted)">${addBrl != null ? _brlPlain(addBrl) : '—'}</span></td>
+    <td class="num" style="background:var(--green-tint);font-weight:700;font-size:15px">${pctAdd != null ? fmtPct(pctAdd) : '—'}</td>
+    <td class="num" style="color:${newColor};font-weight:600">${pctNew != null ? fmtPct(pctNew) : '—'}</td>
+    ${_ddSlackCell(expNew, nav, val, tgt)}
+  </tr>`;
+}
+
+function _ddRenderCalc() {
+  const host = document.getElementById('ddCalcTable');
+  const ctx  = _ddCalcCtx;
+  if (!host || !ctx) return;
+  const { v: val, src } = _ddContractBrl(_ddCalc.kind, ctx);
+  const qty  = _ddCalc.qty || 0;
+  const tgt  = _ddCalc.target;
+  const kind = _DD_CONTRACTS[_ddCalc.kind];
+
+  const alloc  = _ddAllocate(qty, ctx.rows);
+  const sumCts = alloc.n.reduce((a, b) => a + b, 0);
+  const qtyStr = sumCts.toLocaleString('pt-BR');
+  const tgtHdr = tgt != null ? `alvo ${fmtPct(tgt)}` : 'sem alvo';
+  const rows = ctx.rows.map((r, i) => _ddCalcRow(r, val, alloc.n[i], tgt, false)).join('')
+             + _ddCalcRow(ctx.total, val, sumCts, tgt, true);
+
+  host.innerHTML = `<table class="data-table" style="white-space:nowrap;width:auto">
+    <thead><tr>
+      <th>Fundo</th>
+      <th class="num">NAV (BRL)</th>
+      <th class="num">Final · % NAV<br><span style="font-weight:400;font-size:10px">direcional de hoje</span></th>
+      <th class="num" style="border-left:1px solid var(--border)">Rateio do lote<br><span style="font-weight:400;font-size:10px">${kind.short} · BRL</span></th>
+      <th class="num">${qtyStr} ${kind.short}<br><span style="font-weight:400;font-size:10px">% NAV</span></th>
+      <th class="num">Resultante<br><span style="font-weight:400;font-size:10px">% NAV</span></th>
+      <th class="num" style="border-left:1px solid var(--border)">Folga · ${tgtHdr}<br><span style="font-weight:400;font-size:10px">${kind.short}, já com o lote</span></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5">
+    O lote é <b>um só e entra rateado pro-rata do NAV</b> (como a boleta é distribuída), em contratos inteiros,
+    com a soma fechando em <b>${qtyStr}</b> exatos — por isso o % do NAV sai igual em todos os fundos, a menos do arredondamento.
+    <b>+</b> compra dólar (vende BRL); lote negativo vende. 1 ${kind.short} = US$ ${(kind.usd / 1000).toLocaleString('pt-BR')} mil =
+    <b>BRL ${val != null ? _brlPlain(val) : '—'}</b>${src === 'fut' ? ' (preço do futuro, UCA Curncy)' : src === 'spot' ? ' <span style="color:var(--yellow)">(sem preço do futuro — aproximado pelo spot, sem cupom cambial)</span>' : ''}.
+    <b>Alvo em módulo</b> (|exposição| ≤ ${tgt != null ? fmtPct(tgt) : '—'}), como o limite da seção 01: a folga é quanto ainda cabe aumentar na direção em que o fundo já está,
+    medida <b>depois</b> do lote; vermelho = estourou e o nº é o que reduzir. A folga do <b>Total</b> é medida no agregado — não é a soma dos
+    arredondamentos por fundo. Base: o <b>direcional</b> desta seção (cota do Class H),
+    não o % da tabela dos 20% da seção 01. O contrato entra com peso 1 — boletado <b>dentro do Prev</b>.
+  </div>`;
+}
+
+// Card da calculadora. Os inputs ficam FORA de `#ddCalcTable`: só a tabela se redesenha a cada
+// tecla, senão o campo perderia o foco no meio da digitação.
+function _ddCalcCard() {
+  const css = 'padding:4px 8px;font-size:13px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px';
+  const opt = k => `<option value="${k}"${_ddCalc.kind === k ? ' selected' : ''}>${_DD_CONTRACTS[k].label}</option>`;
+  return `<div class="card">
+    <div class="section-title" style="padding:8px 0 10px 0">Calculadora — lote de dólar rateado pelo NAV ⇄ % do NAV do Prev</div>
+    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <label style="font-size:13px;color:var(--text-muted)" title="lote TOTAL a boletar; é repartido entre os fundos pro-rata do NAV">Lote (contratos)
+        <input type="number" step="1" value="${_ddCalc.qty}" oninput="ddCalcSetQty(this.value)" style="${css};width:90px;margin-left:6px"></label>
+      <label style="font-size:13px;color:var(--text-muted)">Tipo
+        <select onchange="ddCalcSetKind(this.value)" style="${css};margin-left:6px">${opt('cheio')}${opt('mini')}</select></label>
+      <label style="font-size:13px;color:var(--text-muted)" title="limite de exposição a USD/BRL, em módulo, sobre o Final · % NAV desta seção. Default 20%; vazio tira a coluna de folga">Alvo
+        <input type="number" step="0.5" placeholder="—" value="${_ddCalc.target != null ? Math.round(_ddCalc.target * 1000) / 10 : ''}"
+          oninput="ddCalcSetTarget(this.value)" style="${css};width:80px;margin-left:6px"> % do NAV (módulo)</label>
+    </div>
+    <div id="ddCalcTable" style="overflow-x:auto;max-width:100%"></div>
+  </div>`;
+}
+
 function renderDolarDirecional(data) {
   const container = document.getElementById('dolarDirContainer');
   if (!container) return;
@@ -172,6 +360,7 @@ function renderDolarDirecional(data) {
   // ── 1. Tabela por fundo (BRL) ─────────────────────────────────────────────
   const zero = () => Object.fromEntries(_DD_COLS.map(c => [c.key, 0]));
   const grand = { cols: zero(), o: 0, t: 0, f: 0, nav: 0, anyNav: false };
+  const calcRows = [];   // {label, nav, exp} por fundo — insumo da calculadora de contratos
   const fundRows = (data.prev_funds || []).map(fund => {
     const nav = fund.nav_brl;
     const cols = zero();
@@ -190,6 +379,7 @@ function renderDolarDirecional(data) {
     grand.o += o; grand.t += t; grand.f += f;
     if (nav) { grand.nav += nav; grand.anyNav = true; }
 
+    calcRows.push({ label: fund.fund_label, nav, exp: f });
     const cell = (v, lb) => `<td class="num"${lb ? ' style="border-left:1px solid var(--border)"' : ''}>${_fmtBrl(v)}<br><span style="font-size:11px;color:var(--text-muted)">${nav ? fmtPct(v / nav) : '—'}</span></td>`;
     const pctF = nav ? f / nav : null;
     return `<tr>
@@ -366,5 +556,10 @@ function renderDolarDirecional(data) {
     ? `<div class="card" style="border-left:3px solid var(--yellow)"><div style="font-size:12px;color:var(--text-muted);font-weight:600;margin-bottom:4px">⚠ Avisos (${data.warnings.length})</div>
        <ul style="margin:0;padding-left:18px;font-size:12px">${data.warnings.map(w => `<li>${w}</li>`).join('')}</ul></div>` : '';
 
-  container.innerHTML = fundTable + linesTable + warn;
+  // Calculadora de contratos: mesma base da tabela por fundo (NAV + direcional final em BRL).
+  _ddCalcCtx = { rows: calcRows, total: { label: 'Total Prev', nav: gnav, exp: grand.f },
+                 uca_px: data.market?.uca_px || null, fx };
+
+  container.innerHTML = fundTable + _ddCalcCard() + linesTable + warn;
+  _ddRenderCalc();
 }

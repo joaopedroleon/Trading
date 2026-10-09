@@ -17,10 +17,11 @@ const TRADER_TABS = [
   { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
   { id: 'portfoliorf', trader: 'PortfolioRF',filters: ['no_cash','no_fx_tiny'],            useGroups: false },
   { id: 'other',       trader: 'PAlves',     filters: ['no_hedge_cambial','no_fx_tiny'],  useGroups: false },
-  // ⚠️ SEM o `no_fx_small` NEM o `no_fx_tiny`, a pedido da mesa: no livro de câmbio a posição
-  // pequena é o resíduo de rolagem a liquidar, e ele é para ser visto. As outras abas mantêm
-  // os dois cortes.
-  { id: 'pabinader',   trader: 'PAbinader',  filters: ['no_hedge_cambial'], useGroups: false,
+  // ⚠️ SEM o `no_fx_small` (corte ABSOLUTO de 200k): no livro de câmbio a posição pequena é o
+  // resíduo de rolagem a liquidar, e ele é para ser visto. ⭐ Mas COM o `no_fx_tiny` desde
+  // 09/10/2026 (a mesa pediu): o corte RELATIVO de 0,20 % do NAV tira o ruído sem esconder
+  // resíduo que já é material — e, como todo chip, se desliga.
+  { id: 'pabinader',   trader: 'PAbinader',  filters: ['no_hedge_cambial','no_fx_tiny'], useGroups: false,
     fxFromDeals: true },
 ];
 
@@ -57,6 +58,10 @@ const fxDealsByTab = {};             // tabId → payload da 2ª onda (só as se
    quebra por vencimento sob demanda. Estado por aba, não global: é escolha de exibição de uma
    tela só, e sobrevive ao re-render porque o card é remontado a partir deste Set. */
 const fxCcyByVertex = new Set();
+/* Abas onde a "Posição por moeda" MOSTRA as moedas pequenas. Default VAZIO = escondidas
+   (pedido da mesa, 09/10/2026: ocultar quem tem menos de 0,40 % de exposição, podendo
+   desocultar). Estado por aba, como o `fxCcyByVertex` — é escolha de exibição de uma tela. */
+const fxCcyShowSmall = new Set();
 
 // ── FONTE ÚNICA de marreta de preço/delta, por INSTRUMENTO (instKey), não por aba/trader.
 //    Mesmo ticker → mesmo valor em todas as abas. Live vem do backend (price_live/option_delta).

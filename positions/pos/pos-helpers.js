@@ -466,6 +466,25 @@ function prevShortBrEquityFactor() {
   return typeof f === 'number' && f > 0 && f <= 1 ? f : null;
 }
 
+/* ☠️ **Os filtros SÓ DE TAMANHO, e por que eles têm de ser nomeados num lugar só.**
+   `no_fx_small` (200 mil absolutos) e `no_fx_tiny` (0,20 % do NAV) escondem LINHA PEQUENA na
+   tabela de Posição — são corte de EXIBIÇÃO. Os demais filtros da aba (`no_hedge_cambial`,
+   `no_cash`) são corte de ESCOPO: ali a linha não é pequena, é de outra natureza, e tirá-la
+   muda legitimamente o que a aba mede.
+   A distinção não é estética: um filtro de tamanho aplicado onde se SOMA apaga número.
+   Medido na aba do PAbinader em 09/10/2026, o `no_fx_tiny` tirava **+30.168 USD** do total
+   do PnL — uma linha de USD/MXN de **+37.457** entre elas. Exposição pequena e resultado
+   grande convivem o tempo todo: é o perfil de quem zerou a posição hoje, ou do resíduo de
+   rolagem que girou. Por isso:
+     · tabela de Posição  → aplica (é para o que ele existe);
+     · PnL                → NÃO aplica (`_pnlTabFilterRows`, pnl.js);
+     · Posição por moeda  → NÃO aplica (ela tem corte próprio, no AGREGADO por moeda).
+   Irmão do achado dos baldes de alocação: filtro de escopo entra na conta, filtro de
+   exibição não. */
+const FILTROS_SO_TAMANHO = new Set(['no_fx_small', 'no_fx_tiny']);
+
+const _FX_TINY_PL = 0.002;   // 0,20 % do NAV — piso do filtro `no_fx_tiny`
+
 /* ── Filters ─────────────────────────────────────────────────────────────── */
 const FILTERS = [
   {
@@ -489,8 +508,10 @@ const FILTERS = [
        ⚠️ Linha SEM #PL calculável não é cortada: "não sei" não é "é pequeno" (seria sumir com
        a posição que a tela deveria estar denunciando). E linha com giro no dia fica, como no
        irmão: o que foi operado hoje é o que a mesa quer ver, por menor que tenha ficado. */
+    // ⚠️ Subiu de 0,10 % para 0,20 % em 09/10/2026, a pedido da mesa. Uma constante, não o
+    // literal espalhado: o número é calibração da mesa e muda de tempos em tempos.
     id:    'no_fx_tiny',
-    label: 'Excluir FX < 0,10%',
+    label: 'Excluir FX < 0,20%',
     fn:    r => {
       if (!r.is_fx) return true;
       // ⚠️ Abriu e ZEROU hoje: o #PL é 0 por construção e a linha é sobre ATIVIDADE, não
@@ -499,7 +520,7 @@ const FILTERS = [
       if ((r.final_qty ?? 0) === 0 && (r.gross_traded_qty ?? 0) !== 0) return true;
       const pl = (typeof effectiveRowPl === 'function') ? effectiveRowPl(r).pl : r.pl;
       if (pl == null || !isFinite(pl) || r.pl_type !== 'pct') return true;
-      return Math.abs(pl) >= 0.001;
+      return Math.abs(pl) >= _FX_TINY_PL;
     },
   },
   {

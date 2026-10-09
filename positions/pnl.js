@@ -272,7 +272,17 @@ function _pnlTabFilterRows(rows) {
   if (!activePnlTabId) return rows;
   const tab = (typeof TRADER_TABS !== 'undefined') && TRADER_TABS.find(t => t.id === activePnlTabId);
   if (!tab?.filters?.length) return rows;
-  const tabFs = FILTERS.filter(f => tab.filters.includes(f.id) && activeFilters.has(f.id));
+  /* ⚠️ **Os filtros de TAMANHO ficam de fora daqui** (09/10/2026). Eles escondem linha
+     pequena na tabela de Posição; aplicá-los ao PnL APAGA RESULTADO — exposição pequena e
+     resultado grande convivem (linha zerada no dia, resíduo de rolagem que girou). Medido na
+     aba do PAbinader: o `no_fx_tiny` tirava +30.168 USD do total, com um USD/MXN de +37.457
+     entre as linhas descartadas. Os filtros de ESCOPO (`no_hedge_cambial`, `no_cash`)
+     continuam valendo: ali a linha não é pequena, é de outra natureza.
+     A lista mora no `pos-helpers.js` (`FILTROS_SO_TAMANHO`) para não driftar das outras duas
+     seções que fazem a mesma distinção. */
+  const soTam = (typeof FILTROS_SO_TAMANHO !== 'undefined') ? FILTROS_SO_TAMANHO : new Set();
+  const tabFs = FILTERS.filter(f => tab.filters.includes(f.id) && activeFilters.has(f.id)
+                                 && !soTam.has(f.id));
   return rows.filter(r => tabFs.every(f => f.fn(r)));
 }
 
@@ -651,10 +661,28 @@ function renderPnlSummary(rows) {
 
   const { restoreBtn, settleBtn } = _pnlSummaryTools();
 
+  /* ⭐ **Quanto ficou FORA deste bloco** (09/10/2026). O título já dizia "MM", mas a mesa
+     comparou o resultado por moeda da seção 02 (que soma MM + MM Prev + RF) com este e achou
+     que não batia "nem aproximado" — a razão era exatamente **1,30**, o alvo do Prev.
+     Medido no PAbinader em 09/10: FX de MM +214.909 contra +278.608 na seção 02, e
+     214.909 × 1,296 = 278.608. Não era erro de conta, era escopo — e escopo que a tela
+     dizia só de relance. Agora ela diz o NÚMERO: com ele, a conta fecha à vista. */
+  const _foraPnl = (pnlData?.rows ?? []).filter(r => !_isPnlGroup(r.group));
+  const _foraTot = _foraPnl.reduce((a, r) => a + (pnlFor(r).total ?? 0), 0);
+  const _foraGrp = [...new Set(_foraPnl.map(r => r.group))];
+  const foraChip = _foraPnl.length
+    ? `<span style="font-weight:400;color:var(--text-muted);font-size:11px" title="${
+        ('Este bloco é só do grupo MM. ' + _foraGrp.join(' e ') + ' não entra aqui — '
+         + 'o NAV do trader cobre só o MM, e somar os dois misturaria denominadores.\n\n'
+         + 'É por isso que o resultado por moeda da seção "Posição por moeda" (que soma todos '
+         + 'os veículos do livro) é maior que o daqui: a diferença é este número.')
+        .replace(/"/g, '&quot;')}">· ${_foraGrp.join(' + ')} fora: ${fmtUSD(_foraTot)}</span>`
+    : '';
+
   return `<div class="card">
     <div class="section-copy-target" style="background:var(--bg-card)">
       <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
-        <span>MM ${traderBadges}</span>
+        <span>MM ${traderBadges} ${foraChip}</span>
         ${restoreBtn}
         ${settleBtn}
         ${_pxSettleMsg}

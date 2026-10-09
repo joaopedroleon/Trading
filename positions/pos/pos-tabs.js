@@ -493,6 +493,17 @@ function _renderSectionsForTab(tabId, allRows) {
 
   container.style.display       = 'inline-flex';
   container.style.flexDirection = 'column';
+  /* ☠️ **A TRAVA DE LARGURA DA ABA** (09/10/2026). `inline-flex` é shrink-to-fit: a largura
+     do container é a do card MAIS LARGO, sem teto — então qualquer tabela que cresça empurra
+     a PÁGINA INTEIRA para a direita e a mesa passa a rolar de lado para ler o fim da linha.
+     Foi o que aconteceu quando as colunas do sleeve de RF entraram (medido na aba do
+     PAbinader a 1920px: 1.893px de conteúdo para 1.782px de área útil).
+     ⚠️ O teto é `max-width`, não `width`: o shrink-to-fit continua valendo abaixo dele (é
+     dele que a tabela `width:auto` e o alvo `fit-content` do "⎘ Copiar" dependem — ver o
+     comentário do `.jgp-tbl` em positions-v2.css). E é ELE que faz o par de tabelas da seção
+     saber que não cabe: sem teto, a linha flex é tão larga quanto quiser e `flex-wrap`
+     nunca dispara. */
+  container.style.maxWidth      = '100%';
   // ⚠️ `flex` + `align-items:flex-start`, NÃO o `inline-flex` do container principal: os dois
   // blocos do fim da aba são IRMÃOS adjacentes, e dois inline-flex caem na MESMA linha —
   // medido, o card de detalhe do PnL e o de MM Prev nasciam lado a lado. Block-level dá uma
@@ -589,8 +600,20 @@ function _renderSectionsForTab(tabId, allRows) {
        quebraria de linha. É a mesma trava do `.jgp-tbl-note`, pelo mesmo motivo. */
     mainCards.push(`
     <div class="card">
-      <div style="display:flex;gap:40px;align-items:flex-start">
-        <div class="section-copy-target">
+      <!-- Par principal + auxiliar. ⭐ flex-wrap:wrap + flex-shrink:0 nos dois:
+           quando não couberem lado a lado, a auxiliar DESCE INTEIRA para baixo da principal
+           em vez de a página rolar de lado. O flex-shrink:0 é o que garante isso — sem ele
+           o flex ESPREME as duas antes de quebrar, e a tabela principal (cujas células
+           podem quebrar linha) viraria um acordeão de nomes de instrumento picotados.
+           ⛔ Nada de overflow-x:auto aqui: virar container de rolagem CLIPA os tooltips
+           (td[data-bbg]:hover::after sobe por cima da célula) — a tela inteira depende
+           deles. O alinhamento linha a linha da auxiliar se desfaz sozinho quando ela
+           quebra: o _alignAuxTables mede (topo da 1a linha − topo do outer), que fica
+           negativo, e o Math.max(0, ...) zera o espaçador.
+           Gap 40px → 24px: 16px a menos de estouro de graça.
+           (Sem crase neste comentário: ele vive dentro de um template literal.) -->
+      <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+        <div class="section-copy-target" style="flex-shrink:0">
           <div class="section-title" ${titleId} style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:16px">
             <span>${s.group} <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${s.trader}</span>${
               isRfSleeve ? `<span style="font-weight:400;color:var(--text-muted);font-size:11px" title="Posição boletada pelo ${s.trader} dentro do veículo de RF. Linhas SEPARADAS das do ${tab?.trader ?? 'book da aba'} — não somam.">&nbsp;· via ${(rfCfg?.fund ?? '').replace(/^JGP /, '')}</span>` : ''}</span>
@@ -618,7 +641,7 @@ function _renderSectionsForTab(tabId, allRows) {
             <tbody id="${sectionBodyId(s)}"></tbody>
           </table>
         </div>
-        ${hasAlloc ? `<div id="alloc_outer_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}" data-html2canvas-ignore="true">
+        ${hasAlloc ? `<div id="alloc_outer_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}" data-html2canvas-ignore="true" style="flex-shrink:0">
           <div id="alloc_spacer_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}"></div>
           <div id="${allocCheckId(s.trader)}"></div>
         </div>` : ''}

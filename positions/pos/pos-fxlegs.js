@@ -59,14 +59,27 @@ function _fxLegScale(r, basis) {
    O motivo de fundo é o mesmo que separa as colunas: nocional CONTRATADO de forward e
    nocional DERIVADO de futuro não são a mesma afirmação, e somados numa tabela só o leitor
    não sabe qual metade se move com o mercado. */
+/* Piso de EXIBIÇÃO da "Posição por moeda": moeda com menos que isto de exposição sai da
+   tabela por padrão (pedido da mesa, 09/10/2026). ⚠️ É % do MESMO denominador da coluna
+   % NAV — não um valor absoluto —, para a régua valer igual em qualquer livro.
+   ⛔ **Esconde, não descarta:** o chip devolve as linhas, e o rodapé nomeia as que saíram.
+   A linha "Exposição USD" não muda com isto: ela é a linha do USD, não a soma da tabela. */
+const _FX_CCY_MIN_PCT = 0.004;   // 0,40 % do NAV
+
 const _FX_GROUPS = [
-  { id: 'fx',  lbl: 'FX linear', tip: 'Forward, NDF e spot: as DUAS pernas de cada contrato, na TAXA CONTRATADA de cada boleta (JDS.VW_SOPHIS_DEALS). Número contratual — não muda com o mercado.' },
-  { id: 'fut', lbl: 'Futuro',    tip: 'Futuro de dólar (WDO/UC): nocional do contrato, derivado da coluna #PL. DERIVADO — move com o preço.' },
-  { id: 'opt', lbl: 'Opção (Δ)', tip: 'Opção de FX/DOL: nocional × DELTA, avaliado no spot. DERIVADO — move a cada tick e desaparece quando a Bloomberg não devolve delta.' },
+  { id: 'fx',  lbl: 'FX linear', tip: 'Forward, NDF, spot e futuro de dólar: as DUAS pernas de cada contrato, pelo NOCIONAL. Uma linha só por moeda — é tudo exposição linear à mesma moeda.' },
+  { id: 'opt', lbl: 'Opção (Δ)', tip: 'Opção de FX/DOL: nocional × DELTA, avaliado no spot. DERIVADO — move a cada tick e desaparece quando a Bloomberg não devolve delta. Fica SEPARADA do linear a pedido da mesa.' },
 ];
-// A ORIGEM exibida é o próprio `basis` da perna — ver `_FX_GROUPS`. (Houve uma versão em que
-// `fx` e `fut` eram um grupo só, "FX linear"; caiu quando o futuro ganhou tabela própria.)
-const _fxGroupOf = basis => basis;
+/* ⭐ **Futuro conta como FX linear — uma linha só por moeda** (09/10/2026, pedido da mesa:
+   "não é pra quebrar o USD de FX linear e futuro, é tudo USD, uma coisa só"). É a volta de
+   um estado anterior: os dois já foram um grupo e separaram quando o futuro ganhou tabela
+   própria; agora que ele voltou para esta tabela, voltam a ser um.
+   ⛔ **A OPÇÃO continua separada** — aquilo a mesa pediu explicitamente, e com razão:
+   nocional × delta não é nocional.
+   ⚠️ Efeito colateral bom: sem duas origens por moeda, a coluna "Origem" e o SUBTOTAL por
+   moeda (que só nascem quando a moeda tem mais de uma linha) somem de novo num livro sem
+   opção — era disso que vinham as duas linhas de USD e o "USD · total". */
+const _fxGroupOf = basis => (basis === 'fut' ? 'fx' : basis);
 
 /* ── SINAL do equivalente em USD: o MESMO da perna na moeda ──────────────────────────
    ⚠️ **É a perna CONVERTIDA (`perna ÷ spot`), no sinal da própria moeda** — vendido 4 MM de
@@ -148,15 +161,22 @@ function _fxNavInfo(rows, trader, navSrc) {
    tabela competia com ela). `white-space: pre` no CSS → as quebras são estas. */
 const _FX_CCY_HELP =
   'POSIÇÃO POR MOEDA — as duas pernas de cada contrato de câmbio\n' +
-  '(comprar USD/MXN é +USD e −MXN), somando MM + MM Prev.\n' +
+  '(comprar USD/MXN é +USD e −MXN), somando todos os veículos do livro.\n' +
   '\n' +
   'FONTE       abertura = boletas do Sophis acumuladas (só elas têm a taxa\n' +
   '            contratada de cada negócio); operada = boletas do dia (JDS).\n' +
   '            A tabela de Posição acima segue sendo JRS D-1 × JDS, e o\n' +
   '            painel abaixo confere uma contra a outra.\n' +
-  'ESCOPO      forward, NDF, spot e opção de FX. O futuro de dólar tem\n' +
-  '            tabela PRÓPRIA: nocional contratado e nocional derivado do\n' +
-  '            #PL não são a mesma afirmação.\n' +
+  'ESCOPO      forward, NDF, spot, opção de FX E o futuro de dólar — tudo\n' +
+  '            o que o livro carrega de moeda. O futuro entra com as DUAS\n' +
+  '            pernas (+USD −BRL), convertido a nocional; sem ele o BRL\n' +
+  '            não apareceria aqui.\n' +
+  'ORIGEM      forward, NDF, spot e futuro contam JUNTOS: é tudo exposição\n' +
+  '            linear à mesma moeda, UMA linha por moeda. A OPÇÃO fica\n' +
+  '            separada (nocional × delta não é nocional), e só aí a\n' +
+  '            coluna Origem aparece — para distinguir as duas.\n' +
+  '            A tabela "Futuro de dólar" abaixo é o DETALHE de uma\n' +
+  '            parcela que JÁ está aqui — as duas NÃO se somam.\n' +
   'RESULT.DIA  o P&L é do CONTRATO: entra na moeda que se moveu contra o\n' +
   '            dólar, então a linha do USD fica vazia e a soma da coluna é\n' +
   '            o resultado do dia. Em cross (par sem perna em dólar) vai\n' +
@@ -184,8 +204,11 @@ const _FX_CCY_HELP =
   '            em dólar, sem exposição a ele.\n';
 
 const _FX_FUT_HELP =
-  'FUTURO DE DÓLAR — a mesma leitura por moeda, para WDO/UC, somando\n' +
-  'MM + MM Prev. Separado do câmbio a pedido da mesa.\n' +
+  'FUTURO DE DÓLAR — a mesma leitura por moeda, só para WDO/UC.\n' +
+  '⚠️ É o DETALHE de uma parcela que JÁ ESTÁ na tabela acima (desde\n' +
+  '09/10/2026 o futuro entra lá com as duas pernas). As duas NÃO se\n' +
+  'somam: esta existe porque nocional contratado e nocional derivado\n' +
+  'do #PL não são a mesma afirmação, e a mesa quer o futuro isolado.\n' +
   '\n' +
   'ORIGEM      aqui o nocional é DERIVADO da coluna #PL (contratos ×\n' +
   '            valor do ponto × preço), então move com o mercado — ao\n' +
@@ -203,13 +226,14 @@ const _FX_FUT_HELP =
    correção. `cfg`: { bases:Set, titulo, chip:bool }. */
 /* Veículos que a tabela está somando — o rótulo acompanha o livro em vez de afirmar
    "MM + MM Prev" fixo, que deixou de ser verdade quando o sleeve de RF entrou. */
-/* Veículos que a tabela COBRE. ⚠️ O RF entra pela config (`espelhaRf`), não pela presença de
-   posição: a tabela tem coluna de RF e o total já o inclui, então dizer "MM + MM Prev" num
-   dia de sleeve vazio contradiz o que está logo abaixo. O denominador do % NAV é outra
-   conta e segue a presença — ver `_fxNavInfo`. */
+/* Veículos que a tabela está SOMANDO — segue a presença de posição, igual ao denominador do
+   % NAV (`_fxNavInfo`). ⚠️ Houve uma versão em que o RF entrava pela config: o card dizia
+   "MM + MM Prev + RF" num dia de sleeve vazio enquanto o denominador usava 1,30, ou seja o
+   rótulo prometia três veículos e a conta usava dois (a mesa pegou, 09/10/2026). As COLUNAS
+   de check seguem a config — aquilo é sobre a regra, não sobre a posição —, mas o rótulo e o
+   denominador falam da mesma soma e têm de concordar. */
 function _vehLabel(navInfo) {
-  return ['MM', navInfo?.hasPrev ? 'MM Prev' : null,
-          (navInfo?.espelhaRf || navInfo?.hasRf) ? 'RF' : null]
+  return ['MM', navInfo?.hasPrev ? 'MM Prev' : null, navInfo?.hasRf ? 'RF' : null]
     .filter(Boolean).join(' + ');
 }
 
@@ -245,12 +269,16 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       if (!acc.has(key)) acc.set(key, { ccy: l.ccy, mat, grp, basis: l.basis,
         insts: new Map(),   // par/instrumento → perna final (na moeda), p/ o hover do vencimento
         o: 0, t: 0, f: 0, fMM: 0, fPrev: 0, fRf: 0, uo: 0, ut: 0, uf: 0, res: 0, hasRes: false,
+        giro: false,        // alguma linha desta moeda teve BOLETA hoje (giro BRUTO)
         semUsd: [], nSemO: 0,
         // Procedência do "Result. dia": `xFrom` = o que ENTROU nesta moeda vindo de um par
         // cross; `xTo` = o resultado de um cross desta perna que foi para OUTRA moeda (a
         // base do par), com `xToPara` dizendo qual. Ver `resInfo`.
         xFrom: {}, xTo: {}, xToPara: {} });
       const a = acc.get(key);
+      /* ⚠️ Giro BRUTO, não o líquido: um daytrade que abre e zera tem `traded` líquido 0 e
+         pareceria "não teve trade". `gross_traded_qty` é o que distingue os dois. */
+      if ((r.gross_traded_qty ?? 0) > 0) a.giro = true;
       a.o += (l.open   ?? 0) * k;
       a.t += (l.traded ?? 0) * k;
       a.f += (l.final  ?? 0) * k;
@@ -304,10 +332,11 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   for (const a of acc.values()) {
     if (_flat(a)) continue;
     if (!byCcy.has(a.ccy)) byCcy.set(a.ccy, { ccy: a.ccy, legs: [], uf: 0, uo: 0, ut: 0, res: 0, nRes: 0,
-                                             fMM: 0, fPrev: 0, fRf: 0, semUsd: [],
+                                             fMM: 0, fPrev: 0, fRf: 0, giro: false, semUsd: [],
                                              xFrom: {}, xTo: {}, xToPara: {} });
     const g = byCcy.get(a.ccy);
     g.legs.push(a); g.uf += a.uf; g.uo += a.uo; g.ut += a.ut; g.res += a.res;
+    g.giro = g.giro || a.giro;
     g.fMM += a.fMM; g.fPrev += a.fPrev; g.fRf += a.fRf;
     if (a.hasRes) g.nRes++;
     g.semUsd.push(...a.semUsd);
@@ -322,8 +351,25 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
     g.legs.sort((x, y) => (x.mat || '').localeCompare(y.mat || '')
                        || _grank(x.grp) - _grank(y.grp));
   }
-  const list = [...byCcy.values()].sort((x, y) => Math.abs(y.uf) - Math.abs(x.uf));
-  if (!list.length) return '';
+  const listAll = [...byCcy.values()].sort((x, y) => Math.abs(y.uf) - Math.abs(x.uf));
+  /* Corte de moeda pequena. `nav` é o denominador do % NAV (mesma régua da coluna). Sem
+     denominador não há como medir "0,40 %", e aí nada é escondido — melhor mostrar demais
+     que esconder por um critério que não se pôde aplicar. */
+  const mostraPeq = fxCcyShowSmall.has(tabId) || !nav;
+  /* ⭐ **Esconde só o que JÁ COMEÇOU o dia pequeno E não girou** (pedido da mesa,
+     09/10/2026): "o que teve giro é preciso mostrar, mesmo que termine o dia < 0,40 %".
+     Três condições, e cada uma tem um motivo:
+       · fechou pequeno  — é o corte que a mesa pediu;
+       · ABRIU pequeno   — moeda que tinha posição e foi zerada hoje é notícia, não ruído;
+       · sem GIRO        — e aqui é o giro BRUTO: um daytrade que abre e zera tem `traded`
+                           líquido 0 e, pelo líquido, passaria por "não teve trade". */
+  const peq = mostraPeq ? []
+    : listAll.filter(g => Math.abs(g.uf / nav) < _FX_CCY_MIN_PCT
+                       && Math.abs(g.uo / nav) < _FX_CCY_MIN_PCT
+                       && !g.giro
+                       && !g.semUsd.length);
+  const list = mostraPeq ? listAll : listAll.filter(g => !peq.includes(g));
+  if (!list.length && !peq.length) return '';
   /* ⭐ **O total É a linha do USD** (pedido da mesa, set/2026) — o dólar de fato, e não a
      soma do Equiv. USD das outras moedas. Somar tudo zeraria o número: no sinal da moeda (ver
      `_fxUsdSign`), a perna de USD de cada contrato e a perna estrangeira dele têm sinais
@@ -338,7 +384,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
   // "Origem" só com mais de um grupo NESTA tabela (linear × opção) — com um grupo só ela
   // repetiria o mesmo rótulo em toda linha. Vale nos dois modos.
   const showG = new Set(list.flatMap(g => g.legs.map(a => a.grp))).size > 1;
-  const NC    = 7 + (showG ? 1 : 0);   // colspan das faixas por moeda (só no modo por vencimento)
+  const NC    = 8 + (showG ? 1 : 0);   // colspan das faixas por moeda (só no modo por vencimento)
 
   /* Tie-out do total contra a linha do USD — ver `_fxUsdSign`. Montado aqui, e não dentro
      do template, porque `fmtMoney` devolve HTML e o título precisa do número cru. */
@@ -484,6 +530,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
         <td class="sep">${fmtMoney(a.uf)}</td>
         <td>${pct(a.uf)}</td>
         <td class="sep-wide">${resInfo(a.ccy, a.res, a.hasRes, a)}</td>
+        <td>${a.hasRes ? _resBps(a.res, nav) : ''}</td>
       </tr>`;
     }).join('');
     const tot = `<tr class="tot tot-sub">
@@ -494,6 +541,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
       <td class="sep">${fmtMoney(g.uf)}</td>
       <td>${pct(g.uf)}</td>
       <td class="sep-wide">${g.nRes ? resInfo(g.ccy, g.res, true, g) : ''}</td>
+      <td>${g.nRes ? _resBps(g.res, nav) : ''}</td>
     </tr>`;
     return band + trs + (g.legs.length > 1 ? tot : '');
   }).join(byVtx ? `<tr class="gap"><td colspan="${NC}"></td></tr>` : '');
@@ -579,13 +627,31 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
             style="font-weight:400" onclick="toggleFxCcyVertex('${tabId}')"
             title="${byVtx ? 'Voltar ao resumo — uma linha por moeda.' : 'Quebrar cada moeda por VENCIMENTO: quanto da moeda vence em cada data, somando todos os pares que a originaram (os pares ficam no hover da data). Vale para as duas tabelas.'}">${byVtx ? '⤵ Por vencimento ✕' : '⤵ Por vencimento'}</span>`
     : '';
+  /* Chip do corte de moeda pequena. Só aparece quando há o que esconder (ou quando já está
+     desligado) — um chip permanente para um corte que não corta nada é ruído. */
+  const chipPeq = (peq.length || mostraPeq)
+    ? `<span class="filter-chip ${mostraPeq ? 'off' : 'on'}" data-html2canvas-ignore="true"
+            style="font-weight:400" onclick="toggleFxCcySmall('${tabId}')"
+            title="${_fxEsc(mostraPeq
+              ? `Voltar a esconder as moedas com menos de ${(_FX_CCY_MIN_PCT * 100).toFixed(2)}% de exposição.`
+              : `${peq.length} moeda(s) escondida(s): abriram E fecharam o dia com menos de `
+                + `${(_FX_CCY_MIN_PCT * 100).toFixed(2)}% de exposição (sobre o mesmo denominador da `
+                + `coluna % NAV) e NÃO tiveram giro no dia — `
+                + peq.map(g => g.ccy).join(' · ')
+                + '.\n\nMoeda que girou hoje FICA, mesmo terminando abaixo do corte — inclusive '
+                + 'daytrade que zerou. E moeda que começou o dia com posição e foi zerada também.'
+                + '\n\nClique para mostrar. A linha "Exposição USD" não muda — ela é a linha do USD, '
+                + 'não a soma da tabela.')}">${mostraPeq
+              ? `✕ Moedas < ${(_FX_CCY_MIN_PCT * 100).toFixed(2)}%`
+              : `✕ ${peq.length} moeda(s) < ${(_FX_CCY_MIN_PCT * 100).toFixed(2)}%`}</span>`
+    : '';
 
   return `<div class="card">
     <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:center;gap:16px">
       <span>${cfg.titulo}
         <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${list.length} moeda(s)${byVtx ? ` · ${nLegs} linha(s)` : ''} · ${_vehLabel(navInfo)}</span>
       </span>
-      ${chip}
+      ${chip}${chipPeq}
       <button class="btn btn-secondary" data-html2canvas-ignore="true"
               style="padding:3px 12px;font-size:12px;margin-left:auto" onclick="copyCardImage(this)">⎘ Copiar</button>
     </div>
@@ -612,6 +678,14 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
               + '(MXN no USD/MXN, BRL no futuro de dólar). A linha do USD fica vazia por construção, e a soma '
               + 'da coluna é o resultado do dia desta tabela.\n\n'
               + 'Mesma função da aba PnL (`pnlFor`), então segue as marretas de preço.')}">Result. dia</th>
+            <th title="${_fxEsc(
+              'O resultado do dia em BPS, sobre o MESMO denominador da coluna % NAV '
+              + (navInfo?.den != null
+                  ? '(USD ' + Math.round(navInfo.den).toLocaleString('en-US') + ')'
+                  : '')
+              + '.\n\nÉ o NAV do trader inflado pelos ALVOS dos veículos que estão na soma — '
+              + 'dividir pelo NAV cru daria bps ~30% maiores que o % NAV ao lado, duas réguas '
+              + 'na mesma linha. Ver o ⓘ da coluna % NAV.')}">bps</th>
           </tr></thead>
           <tbody>
             ${body}
@@ -621,6 +695,7 @@ function renderFxCcyTable(rows, navInfo, tabId, cfg) {
               <td class="sep">${totUsd == null ? _dash('Sem linha de USD nesta tabela.') : fmtMoney(totUsd)}</td>
               <td>${nav && totUsd != null ? fmtPL(totUsd / nav, 'pct') : ''}</td>
               <td class="sep-wide">${fmtMoney(totRes)}</td>
+              <td>${_resBps(totRes, nav)}</td>
             </tr>
           </tbody>
         </table>
@@ -663,9 +738,33 @@ function navHelpText(navInfo) {
    ⚠️ O chip é UM só (mora na tabela de câmbio) e vale para as DUAS tabelas: são a mesma
    pergunta feita a duas famílias de instrumento, e dois chips fora de sincronia seriam pior
    que um. */
+/* Chip "moedas pequenas". Estado por ABA (`fxCcyShowSmall`, pos-state.js), como o do
+   vencimento: é escolha de exibição de uma tela, não config de carteira. */
+function toggleFxCcySmall(tabId) {
+  fxCcyShowSmall.has(tabId) ? fxCcyShowSmall.delete(tabId) : fxCcyShowSmall.add(tabId);
+  renderFxSectionsForTab(tabId);
+}
+
 function toggleFxCcyVertex(tabId) {
   fxCcyByVertex.has(tabId) ? fxCcyByVertex.delete(tabId) : fxCcyByVertex.add(tabId);
   renderFxSectionsForTab(tabId);
+}
+
+/* Resultado do dia em BPS do MESMO denominador do % NAV (pedido da mesa, 09/10/2026) —
+   `navInfo.den`, ou seja o NAV do trader já inflado pelos alvos dos veículos que estão na
+   soma (×1,30 com Prev, ×1,344 com Prev + RF).
+   ⚠️ **Tem de ser o MESMO denominador da coluna ao lado**, não o NAV cru: a tabela soma mais
+   de um veículo e o NAV de trader cobre só o MM — dividir por ele daria bps ~30 % maiores
+   que o % NAV da coluna vizinha, duas réguas na mesma linha.
+   Vazio (não zero) quando não há resultado ou não há denominador: `0,0 bps` afirmaria que o
+   dia foi neutro onde, na verdade, não se sabe. */
+function _resBps(res, den) {
+  if (res == null || !den) return '';
+  const bps = res / den * 10000;
+  if (Math.abs(bps) < 0.05) return '<span style="color:var(--text-muted)">0.0</span>';
+  const t = Math.abs(bps).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return bps > 0 ? `<span style="color:var(--green)">+${t}</span>`
+                 : `<span style="color:var(--red)">(${t})</span>`;
 }
 
 const _fxEsc = t => String(t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -756,7 +855,17 @@ function renderFxSectionsForTab(tabId) {
   if (!data?.rows) return;
 
   const tab        = TRADER_TABS.find(t => t.id === tabId);
-  const tabFilters = FILTERS.filter(f => (tab?.filters ?? []).includes(f.id) && activeFilters.has(f.id));
+  /* ☠️ **Os cortes de TAMANHO de linha não entram aqui.** `no_fx_small` (200k) e
+     `no_fx_tiny` (0,20 % do NAV) medem a LINHA; esta tabela agrega por MOEDA e tem o seu
+     próprio corte, no agregado (`_FX_CCY_MIN_PCT`, 0,40 %). Aplicar os dois em série poda
+     antes de somar: cinco linhas de 0,15 % na mesma moeda somam 0,75 % — material — e seriam
+     todas descartadas sem nunca se encontrarem. Medido em 09/10/2026: com o corte de linha
+     ligado na aba, CHF, COP e JPY sumiam da tabela por moeda em vez de serem julgados pelo
+     agregado. Os cortes de ESCOPO (`no_hedge_cambial`, `no_cash`) continuam valendo — ali a
+     linha não é pequena, é de outra natureza. */
+  const _soTamanho = FILTROS_SO_TAMANHO;   // pos-helpers.js — lista única (ver lá o porquê)
+  const tabFilters = FILTERS.filter(f => (tab?.filters ?? []).includes(f.id)
+                                      && activeFilters.has(f.id) && !_soTamanho.has(f.id));
   const hid        = _hiddenForTab(tabId);
   const rows = data.rows.filter(r => tabFilters.every(f => f.fn(r)) && !hid.has(rowKey(r)));
 
@@ -764,11 +873,23 @@ function renderFxSectionsForTab(tabId) {
   // ainda quando o usuário mexe num filtro, e `traders` é o mesmo dicionário.
   const navSrc = posDataByTab[tabId] ?? data;
   const navInfo = _fxNavInfo(rows, tab?.trader, navSrc);
+  /* ⭐ O FUTURO DE DÓLAR entra aqui também, com as DUAS pernas (pedido da mesa, 09/10/2026:
+     "entra como todo o resto, ambas pernas, só converter a exposição do futuro para como se
+     fosse notional"). Sem ele o **BRL não aparecia** nesta tabela — a maior exposição em
+     real do livro vivia só na tabela de baixo. O `fut` já chega convertido a nocional (do
+     `#PL` × valor do ponto), então soma como qualquer perna.
+     ⚠️ A coluna **Origem** nasce sozinha quando há mais de uma procedência (`showG`) e é ela
+     que diz, linha a linha, o que veio do futuro — contratual (`FX linear`) e derivado
+     (`Futuro`, `Opção (Δ)`) não são a mesma afirmação e não podem se confundir.
+     ⚠️ A tabela "Futuro de dólar" CONTINUA: ela não é a mesma coisa somada de novo, é o
+     detalhe daquela parcela. As duas NÃO se somam. */
   if (elC) elC.innerHTML = renderFxCcyTable(rows, navInfo, tabId,
-    { bases: new Set(['fx', 'opt']), titulo: 'Posição por moeda', chip: true,
+    { bases: new Set(['fx', 'opt', 'fut']), titulo: 'Posição por moeda', chip: true,
       help: _FX_CCY_HELP, trader: tab?.trader });
-  if (elF) elF.innerHTML = renderFxCcyTable(rows, navInfo, tabId,
-    { bases: new Set(['fut']), titulo: 'Futuro de dólar', chip: false,
-      help: _FX_FUT_HELP, trader: tab?.trader });
+  /* ⚰️ **A tabela "Futuro de dólar" SAIU** (09/10/2026). Ela existia porque o futuro ficava
+     de fora da "Posição por moeda"; desde que ele entrou lá com as duas pernas, esta era a
+     mesma coisa mostrada de novo — e duas tabelas que não se somam, lado a lado, convidam a
+     somá-las. O container fica no HTML (contrato de DOM) e é esvaziado. */
+  if (elF) elF.innerHTML = '';
   if (elT) elT.innerHTML = renderFxTieout(data);
 }
