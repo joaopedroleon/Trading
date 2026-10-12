@@ -20,7 +20,9 @@ const TRADER_TABS = [
   // ⚠️ SEM o `no_fx_small` (corte ABSOLUTO de 200k): no livro de câmbio a posição pequena é o
   // resíduo de rolagem a liquidar, e ele é para ser visto. ⭐ Mas COM o `no_fx_tiny` desde
   // 09/10/2026 (a mesa pediu): o corte RELATIVO de 0,20 % do NAV tira o ruído sem esconder
-  // resíduo que já é material — e, como todo chip, se desliga.
+  // resíduo que já é material — e, como todo chip, se desliga. ⭐ E desde 12/10/2026 ele mede
+  // o dia INTEIRO (abertura, giro e saldo final), não só o que sobrou: a rolagem de EUR/USD
+  // deste livro gira 10 MM e deixa 7 mil de resto, e sumia inteira do fim do dia.
   { id: 'pabinader',   trader: 'PAbinader',  filters: ['no_hedge_cambial','no_fx_tiny'], useGroups: false,
     fxFromDeals: true },
 ];

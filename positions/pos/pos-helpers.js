@@ -495,6 +495,8 @@ const FILTERS = [
   {
     id:    'no_fx_small',
     label: 'Excluir FX < 200k',
+    title: 'Esconde a linha de FX que ficou pequena E não girou hoje: saldo final < 200k '
+         + 'e giro do dia < 200k. Corte ABSOLUTO (o irmão relativo é o de 0,20% do NAV).',
     // exclui somente posições FX pequenas SEM atividade no dia
     fn:    r => !(r.is_fx && Math.abs(r.final_qty ?? 0) < 200_000 && (r.gross_traded_qty ?? 0) < 200_000),
   },
@@ -510,17 +512,37 @@ const FILTERS = [
        irmão: o que foi operado hoje é o que a mesa quer ver, por menor que tenha ficado. */
     // ⚠️ Subiu de 0,10 % para 0,20 % em 09/10/2026, a pedido da mesa. Uma constante, não o
     // literal espalhado: o número é calibração da mesa e muda de tempos em tempos.
+    /* ☠️ **O corte é sobre o MAIOR dos três estados do dia — abertura, giro e final — não só
+       sobre o saldo que sobrou** (12/10/2026, a mesa pegou). Medir só o final esconde a linha
+       que ABRIU relevante e foi reduzida (0,25 % de abertura virando 0,19 % de saldo: o giro
+       foi de 0,06 % e nenhuma das duas pontas passava sozinha no teste antigo) e a que GIROU
+       relevante e voltou a quase zero sem zerar exatamente — justamente o que a mesa precisa
+       conferir no fim do dia. O que se quer esconder é o irrelevante nas TRÊS pontas: o
+       resíduo de rolagem que nasceu pequeno, ficou pequeno e não foi tocado.
+       ⭐ Dá para medir as três na mesma régua porque **o #PL de FX é LINEAR na quantidade**
+       (`pnl.compute_pl`: `final_qty/nav`, ou `final_qty × preço × fator/nav` no cross): o
+       mesmo #PL por unidade converte abertura e giro em fração do NAV, sem refazer preço. */
     id:    'no_fx_tiny',
     label: 'Excluir FX < 0,20%',
+    title: 'Esconde só o que foi irrelevante no dia INTEIRO: abertura, giro e saldo final '
+         + 'todos abaixo de 0,20% do NAV. Linha que abriu grande ou girou grande aparece, '
+         + 'mesmo que tenha sobrado quase nada. Corte RELATIVO (o irmão absoluto é o de 200k).',
     fn:    r => {
       if (!r.is_fx) return true;
       // ⚠️ Abriu e ZEROU hoje: o #PL é 0 por construção e a linha é sobre ATIVIDADE, não
-      // saldo — some-la esconderia justamente o day-trade. Mas a linha que SOBROU pequena
-      // (o resíduo de rolagem, 50 AUD de um contrato de 1,1 MM) é saldo, e sai.
-      if ((r.final_qty ?? 0) === 0 && (r.gross_traded_qty ?? 0) !== 0) return true;
-      const pl = (typeof effectiveRowPl === 'function') ? effectiveRowPl(r).pl : r.pl;
+      // saldo — some-la esconderia justamente o day-trade.
+      const eff = (typeof effectiveRowValues === 'function') ? effectiveRowValues(r) : null;
+      const fin = eff ? eff.final : r.final_qty;
+      if ((fin ?? 0) === 0 && (r.gross_traded_qty ?? 0) !== 0) return true;
+      const pl = (typeof effectiveRowPl === 'function') ? effectiveRowPl(r, eff).pl : r.pl;
       if (pl == null || !isFinite(pl) || r.pl_type !== 'pct') return true;
-      return Math.abs(pl) >= _FX_TINY_PL;
+      if (Math.abs(pl) >= _FX_TINY_PL) return true;             // saldo final já é relevante
+      // #PL por unidade → abertura e giro do dia na mesma unidade (fração do NAV).
+      if (!fin) return true;                                    // sem régua: "não sei" ≠ "é pequeno"
+      const unit = Math.abs(pl / fin);
+      const plOpen   = Math.abs((eff ? eff.opening : r.opening_qty) ?? 0) * unit;
+      const plTraded = Math.abs(r.gross_traded_qty ?? 0) * unit;
+      return Math.max(plOpen, plTraded) >= _FX_TINY_PL;
     },
   },
   {
@@ -560,7 +582,9 @@ function renderFilterBars() {
       .filter(f => tab.filters.includes(f.id))
       .map(f => {
         const on = activeFilters.has(f.id);
-        return `<span class="filter-chip ${on ? 'on' : 'off'}" data-fid="${f.id}" onclick="toggleFilter('${f.id}')">
+        // `title` opcional: o rótulo do chip é curto, e os filtros de TAMANHO precisam dizer
+        // sobre o que medem (saldo final? giro do dia?) — senão o que some parece arbitrário.
+        return `<span class="filter-chip ${on ? 'on' : 'off'}" data-fid="${f.id}"${f.title ? ` title="${f.title}"` : ''} onclick="toggleFilter('${f.id}')">
           <span class="chip-mark">${on ? '✕' : '+'}</span> ${f.label}
         </span>`;
       }).join('');
