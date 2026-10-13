@@ -293,8 +293,11 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   // Short de bolsa BR ONSHORE (BRL): o Sulamérica não entra → target proporcional ao NAV do
   // resto do grupo. Risco Brasil comprado lá fora (EWZ, ADR, XP) não conta — ver isBrEquity.
   const shortFactor  = prevShortBrEquityFactor();
-  let   usedReduced  = false;   // alguma linha usou o target reduzido
   let   missingFactor = false;  // linha de short de bolsa BR sem o NAV do grupo (target cheio)
+  // Nome dos fundos que ficam fora do trade — usado no tooltip de CADA linha marcada
+  // (antes só existia dentro do bloco da nota de rodapé, que deixou de existir).
+  const blocked0 = (posDataByTab[currentRenderTab()]?.prev_no_br_equity_short_funds ?? [])
+    .map(fl => fl.replace(/-A$/, '')).join(', ') || 'Sulamérica';
 
   const rows = visRows.map((mm, i) => {
     const newArea    = mm.area    !== prevArea;
@@ -310,12 +313,46 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
 
     // Target da linha: reduzido quando é short de bolsa BR (Sulamérica fora do trade)
     const isShortBr = target != null && isBrEquityShort(mm);
+    // Daytrade de bolsa BR que fecha zerado: direção indeterminável — ver
+    // `isBrEquityDaytradeFlat`. Aqui o alvo vira FAIXA, não ponto.
+    const isAmbBr = target != null && !isShortBr && shortFactor != null
+                    && isBrEquityDaytradeFlat(mm);
     if (isShortBr && shortFactor == null) missingFactor = true;
     const rowTarget = isShortBr && shortFactor != null ? target * shortFactor : target;
-    if (isShortBr && shortFactor != null) usedReduced = true;
+    // Faixa aceita [reduzido, cheio] só no caso ambíguo; `null` = alvo é ponto.
+    const banda = isAmbBr ? [target * shortFactor, target] : null;
+
+    /* Desvio contra o alvo. Com `banda`, o que vale é a distância à BORDA mais próxima
+       (zero dentro dela) — é o que faz a faixa ser aceita sem afrouxar o resto da
+       coluna, que continua medindo contra um ponto. */
+    const dAlvo = (pct) => {
+      if (pct == null || rowTarget == null) return null;
+      if (!banda) return pct - rowTarget;
+      const [lo, hi] = banda;
+      return pct < lo ? pct - lo : (pct > hi ? pct - hi : 0);
+    };
+
+    const _notaCurta = blocked0 + ' não pode ficar vendido em bolsa BR e fica fora do trade, '
+      + 'então a boleta do Prev sai proporcionalmente menor.\n\n'
+      + 'Alvo cheio ' + fmtPct(target) + '  ×  fator '
+      + (shortFactor != null ? fmtPct(shortFactor) : '—')
+      + ' (NAV do grupo ex-bloqueados ÷ NAV do grupo)\n'
+      + 'Alvo desta linha: ' + (shortFactor != null ? fmtPct(target * shortFactor) : '—')
+      + '\n\nPosição de risco Brasil negociada FORA (EWZ, ADR, XP, MELI) não entra na '
+      + 'regra — a restrição é de bolsa ONSHORE.';
+
     const shortMark = isShortBr
-      ? ` <span class="alloc-short-br" title="Short de bolsa BR onshore — Sulamérica não entra. Target ${
-          shortFactor != null ? fmtPct(rowTarget) : fmtPct(target) + ' (NAV do grupo Prev indisponível)'}">↓</span>`
+      ? ` <span class="alloc-short-br" title="${_rfEsc('SHORT DE BOLSA BR ONSHORE — alvo reduzido.\n\n'
+          + (shortFactor != null ? _notaCurta
+             : 'NAV do grupo Prev indisponível: o check está usando o alvo CHEIO de '
+               + fmtPct(target) + ', que é mais exigente do que deveria.'))}">↓</span>`
+      : isAmbBr
+      ? ` <span class="alloc-short-br" title="${_rfEsc('DAYTRADE DE BOLSA BR QUE FECHOU ZERADO — '
+          + 'direção indeterminável.\n\nComprou-e-vendeu e vendeu-e-recomprou produzem os MESMOS '
+          + 'campos no payload (quantidade e preço médio de cada lado, sem ordem nem horário), '
+          + 'então não dá para saber se houve short.\n\nPor isso esta linha aceita a FAIXA entre '
+          + 'o alvo reduzido (' + fmtPct(target * shortFactor) + ', se foi short) e o alvo cheio ('
+          + fmtPct(target) + ', se foi long). Fora dela continua acusando.\n\n' + _notaCurta)}">↕</span>`
       : '';
 
     /* ☠️ Declarado AQUI, antes do primeiro uso: o `Check Boleta` (logo abaixo) consulta o
@@ -344,8 +381,8 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
         if (buyPct === null && sellPct === null) {
           dealCell = _checkVazio('0 líq.', 'Compra e venda se anularam no dia.');
         } else {
-          const buyDelta  = rowTarget != null && buyPct  != null ? buyPct  - rowTarget : null;
-          const sellDelta = rowTarget != null && sellPct != null ? sellPct - rowTarget : null;
+          const buyDelta  = dAlvo(buyPct);
+          const sellDelta = dAlvo(sellPct);
           const bStr = buyPct  != null ? `C:${fmtPct(buyPct)}`  : '';
           const sStr = sellPct != null ? `V:${fmtPct(sellPct)}` : '';
           /* ⚠️ Daytrade traz DOIS números numa célula só. Com o fundo tingido, a cor é da
@@ -358,7 +395,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
         }
       } else {
         const dealPct   = (prev?.traded_qty ?? 0) / mm.traded_qty;
-        const dealDelta = rowTarget != null ? dealPct - rowTarget : null;
+        const dealDelta = dAlvo(dealPct);
         /* ⚠️ No dólar a boleta do Prev pode sair em OUTRO instrumento (mini dólar no MM, NDF
            no Prev) — comparar instrumento com instrumento acusaria um desvio que não existe.
            Aqui as duas também contam juntas, convertidas a USD pelo nocional por unidade.
@@ -366,7 +403,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
         // ⚠️ PASSA pelo `_checkCell` como todos os outros: este ramo nascera com um `<td>`
         // próprio e era o único check da tela sem o fundo tingido — a mesa pegou no print.
         dealCell = (bk && bk.opPct != null)
-          ? _checkCell(bk.opPct, rowTarget != null ? bk.opPct - rowTarget : null,
+          ? _checkCell(bk.opPct, dAlvo(bk.opPct),
               'DÓLAR — boleta do dia com futuro e NDF JUNTOS, em USD:\n'
               + '  MM   ' + fmtMoney(bk.opMm) + '\n  Prev ' + fmtMoney(bk.opPv) + '\n'
               + '  Prev ÷ MM = ' + fmtPct(bk.opPct)
@@ -379,10 +416,10 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     const mmFinal   = mm.final_qty ?? 0;
     const prevFinal = prev?.final_qty ?? null;
     const finalPct  = mmFinal !== 0 && prevFinal != null ? prevFinal / mmFinal : null;
-    const finalCls  = allocClass(finalPct != null && rowTarget != null ? finalPct - rowTarget : null);
+    const finalCls  = allocClass(dAlvo(finalPct));
     const finalCell = bk
       ? _bucketCell(bk, rowTarget)
-      : _checkCell(finalPct, finalPct != null && rowTarget != null ? finalPct - rowTarget : null);
+      : _checkCell(finalPct, dAlvo(finalPct));
 
     // Total dos veículos do livro. ⚠️ Com o sleeve de RF na aba ele entra aqui também —
     // senão a coluna diria "total" somando dois dos três veículos, e o número não bateria
@@ -424,19 +461,18 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     ? `<tr class="area-divider"><td colspan="${NCOL}" style="font-weight:600;color:var(--text-muted)">Somente MM Prev</td></tr>${orphanTr}`
     : '';
 
-  // Nota de rodapé: qual target valeu para as linhas marcadas com ↓ (e aviso se faltou o NAV).
+  /* Rodapé do short de bolsa BR.
+     ⚠️ O caso NORMAL (alvo reduzido aplicado) deixou de ter nota fixa — pedido da mesa em
+     13/10/2026: era um parágrafo de duas linhas ocupando a largura da tabela todo dia em
+     que houvesse short de Ibov, para explicar uma regra que a mesa já conhece. O texto
+     inteiro passou para o `title` do marcador ↓ / ↕ da linha, que é onde a dúvida nasce.
+     ⛔ O caso de FALHA continua FIXO e vermelho: ali o número exibido está medindo contra
+     o alvo errado, e isso não pode depender de alguém passar o mouse. */
   let footTr = '';
-  if (usedReduced || missingFactor) {
-    const blocked = (posDataByTab[currentRenderTab()]?.prev_no_br_equity_short_funds ?? [])
-      .map(fl => fl.replace(/-A$/, '')).join(', ') || 'Sulamérica';
-    const note = usedReduced
-      ? `↓ short de bolsa BR onshore: target ${fmtPct(target * shortFactor)} (= ${fmtPct(target)} × ${
-          fmtPct(shortFactor)}) — ${blocked} não pode ficar vendido em bolsa BR e fica fora do trade. `
-        + `Posição de risco Brasil negociada fora (EWZ, ADR) não entra na regra.`
-      : `↓ short de bolsa BR onshore: target deveria ser reduzido (${blocked} fica fora), mas o NAV do grupo Prev `
-        + `não veio — check usando o target cheio de ${fmtPct(target)}.`;
-    const color = usedReduced ? 'var(--text-muted)' : 'var(--red)';
-    footTr = `<tr><td colspan="${NCOL}" style="white-space:normal;font-size:11px;color:${color}">${note}</td></tr>`;
+  if (missingFactor) {
+    const note = `↓ short de bolsa BR onshore: o target deveria ser reduzido (${blocked0} fica fora), `
+      + `mas o NAV do grupo Prev não veio — check usando o target cheio de ${fmtPct(target)}.`;
+    footTr = `<tr><td colspan="${NCOL}" style="white-space:normal;font-size:11px;color:var(--red)">${note}</td></tr>`;
   }
 
   // Rodapé do sleeve: o 2º check NO AGREGADO — o alvo fixo contra o que os NAVs de hoje

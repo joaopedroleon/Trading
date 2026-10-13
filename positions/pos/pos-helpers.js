@@ -460,6 +460,31 @@ function isBrEquityShort(r) {
   return isBrEquity(r) && brEquityDirection(r) < 0;
 }
 
+/* ☠️ DAYTRADE DE BOLSA BR QUE FECHA ZERADO — a direção é INDETERMINÁVEL, e tratá-la
+   como "não é short" acusava a boleta certa (13/10/2026, reportado pela mesa).
+
+   O `brEquityDirection` ancora na posição (`final || abertura`). Num daytrade puro as
+   duas são 0, a direção sai 0, a regra do Sulamérica não aplica e o alvo volta ao cheio
+   — a boleta correta de ~49,3 % do Prev aparecia VERMELHA contra 70 %. Medido no MINI
+   BOVESPA do EMota: MM compra 1.000 / vende 1.000, Prev 500 / 500, final 0 dos dois
+   lados; o Prev fez 50 % de cada perna, que é o alvo reduzido, e a célula saía
+   `alloc-bad`.
+
+   ⛔ E NÃO DÁ PARA INFERIR A DIREÇÃO DESTE PAYLOAD. Vendeu-e-recomprou (short) e
+   comprou-e-vendeu (long) produzem exatamente os mesmos campos: `buy_qty`,
+   `sell_qty`, `avg_buy_price`, `avg_sell_price`, sem ordem nem horário. Nem o P&L
+   desempata — no caso medido a venda média (206.761) saiu abaixo da compra (207.054),
+   o que dá prejuízo NOS DOIS sentidos. Timestamp de boleta existe na
+   `JDS.VW_BLP_DEALS` (`TRANSACT_TIME`), que esta tela não lê.
+
+   Então a tela NÃO INVENTA direção: a linha passa a aceitar a FAIXA entre o alvo
+   reduzido e o alvo cheio. Dentro dela é ✓ (não dá para afirmar que está errado);
+   fora, segue vermelho. Uma boleta a 20 % continua sendo acusada. */
+function isBrEquityDaytradeFlat(r) {
+  if (!isBrEquity(r)) return false;
+  return !(r.final_qty ?? 0) && !(r.opening_qty ?? 0) && (r.gross_traded_qty ?? 0) > 0;
+}
+
 // Fator do rateio (ex.: 0.71) da aba ativa; null quando o backend não conseguiu o NAV do grupo.
 function prevShortBrEquityFactor() {
   const f = posDataByTab[activeTraderTab]?.prev_short_br_equity_factor;
