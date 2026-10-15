@@ -661,28 +661,17 @@ function renderPnlSummary(rows) {
 
   const { restoreBtn, settleBtn } = _pnlSummaryTools();
 
-  /* ⭐ **Quanto ficou FORA deste bloco** (09/10/2026). O título já dizia "MM", mas a mesa
-     comparou o resultado por moeda da seção 02 (que soma MM + MM Prev + RF) com este e achou
-     que não batia "nem aproximado" — a razão era exatamente **1,30**, o alvo do Prev.
-     Medido no PAbinader em 09/10: FX de MM +214.909 contra +278.608 na seção 02, e
-     214.909 × 1,296 = 278.608. Não era erro de conta, era escopo — e escopo que a tela
-     dizia só de relance. Agora ela diz o NÚMERO: com ele, a conta fecha à vista. */
-  const _foraPnl = (pnlData?.rows ?? []).filter(r => !_isPnlGroup(r.group));
-  const _foraTot = _foraPnl.reduce((a, r) => a + (pnlFor(r).total ?? 0), 0);
-  const _foraGrp = [...new Set(_foraPnl.map(r => r.group))];
-  const foraChip = _foraPnl.length
-    ? `<span style="font-weight:400;color:var(--text-muted);font-size:11px" title="${
-        ('Este bloco é só do grupo MM. ' + _foraGrp.join(' e ') + ' não entra aqui — '
-         + 'o NAV do trader cobre só o MM, e somar os dois misturaria denominadores.\n\n'
-         + 'É por isso que o resultado por moeda da seção "Posição por moeda" (que soma todos '
-         + 'os veículos do livro) é maior que o daqui: a diferença é este número.')
-        .replace(/"/g, '&quot;')}">· ${_foraGrp.join(' + ')} fora: ${fmtUSD(_foraTot)}</span>`
-    : '';
+  /* ⛔ **O chip "<grupo> fora: <valor>" foi REMOVIDO a pedido da mesa** (15/10/2026).
+     O fato que ele dizia continua valendo e importa para quem comparar os dois blocos:
+     este bloco é SÓ do grupo MM, enquanto o resultado por moeda da seção "Posição por
+     moeda" soma todos os veículos do livro (MM + MM Prev + RF) — medido no PAbinader em
+     09/10/2026, FX de MM +214.909 contra +278.608 lá, razão 1,296 (o alvo do Prev).
+     Não é erro de conta, é escopo; o NAV do trader cobre só o MM. */
 
   return `<div class="card">
     <div class="section-copy-target" style="background:var(--bg-card)">
       <div class="section-title" style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
-        <span>MM ${traderBadges} ${foraChip}</span>
+        <span>MM ${traderBadges}</span>
         ${restoreBtn}
         ${settleBtn}
         ${_pxSettleMsg}
