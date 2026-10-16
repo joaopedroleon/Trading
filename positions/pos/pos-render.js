@@ -665,7 +665,14 @@ const _netUsdPair = ccy => (_NET_USD_BASE_CCYS.has(ccy) ? ccy + 'USD' : 'USD' + 
    só, sem quebrar. `ccy` fica no leg para o tooltip dizer que perna entrou. */
 function _netFxLegs(r) {
   const pair = _netFxPair(r);
-  if (pair.length !== 6) return [{ sub: pair, w: 1 }];
+  // ☠️ **O teste tem de ser de FORMATO, não de COMPRIMENTO** — e o fallback que ele deixou
+  // passar tem 6 caracteres: `'Moedas'`. Com `pair.length !== 6`, toda linha de FX cujo par
+  // não se reconhece era quebrada em `'Moe'` + `'das'` e virava os chips **USDMOE** e
+  // **USDDAS**, com o mesmo número de sinais trocados — sem erro de JS, e lido como duas
+  // moedas. Medido em 16/10/2026 no EMota: as duas digitais de BRL somavam −3,91% e a tira
+  // imprimia `USDMOE +3.91%` e `USDDAS (3.91%)`. Par é 6 MAIÚSCULAS; qualquer outra coisa
+  // é rótulo, e rótulo não tem perna.
+  if (!/^[A-Z]{6}$/.test(pair)) return [{ sub: pair, w: 1 }];
   const legs = [];
   for (const [ccy, side] of [[pair.slice(0, 3), 1], [pair.slice(3), -1]]) {
     if (ccy === 'USD') continue;
