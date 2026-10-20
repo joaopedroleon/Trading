@@ -37,19 +37,23 @@ function effectiveRowValues(r) {
                    : (qtyOvr || isSwap) ? (opening ?? 0) + (traded ?? 0)
                    : r.final_qty;
 
+  // #PL de partida: o do backend, OU — se a opção tem marreta de delta (área "Análise de
+  // Opções") — o recomposto com o delta efetivo. Ver `optPlFromDelta`.
+  const basePl = optPlFromDelta(r);
+
   let dv01, pl, plType;
   if (isSwap) {                        // SWAP: a "qtd" É o DV01 — marreta direta OU abertura+operada
     dv01   = final || null;
-    pl     = (dv01 != null && nav) ? dv01 * 10_000 / nav : r.pl;
+    pl     = (dv01 != null && nav) ? dv01 * 10_000 / nav : basePl;
     plType = dv01 != null ? 'nominal' : r.pl_type;
   } else if (qtyOvr && r.final_qty) {  // linha normal marretada: escala linear pela nova qtd
     const ratio = final / r.final_qty;
     dv01   = r.usd_dv01 != null ? r.usd_dv01 * ratio : null;
-    pl     = r.pl       != null ? r.pl       * ratio : r.pl;
+    pl     = basePl     != null ? basePl     * ratio : basePl;
     plType = r.pl_type;
   } else {                             // sem override (ou final_qty=0): valores do backend
     dv01   = r.usd_dv01;
-    pl     = r.pl;
+    pl     = basePl;
     plType = r.pl_type;
   }
   return { isSwap, qtyOvr, opening, traded, final, dv01, pl, plType };
@@ -148,6 +152,37 @@ function effectiveDelta(r) {
   const sign = _optTypeSign(r.instrument_name);
   return sign != null ? sign * Math.abs(d) : d;
 }
+/* ── #PL de OPÇÃO com marreta de DELTA ──────────────────────────────────────────────
+   A marreta de delta mora na aba "Análise de Opções", mas o delta é do INSTRUMENTO
+   (`instKey`), não da aba — e a exposição que a mesa lê está na aba do TRADER. Até
+   out/2026 a coluna #PL ficava com o `pl` do backend: a linha ganhava a ★ e o número não
+   mudava, ou seja a tela dizia "marretado" e mostrava o valor não marretado.
+
+   ⭐ **Não é uma 2ª fórmula — é a MESMA do backend.** Em TODOS os ramos de opção do
+   `compute_pl` (positions/pricing/pnl.py) o #PL sai de `opt_nominal_pct × delta`, e o
+   `option_nominal_exp` do payload é exatamente esse `opt_nominal_pct` — a exposição
+   NOMINAL, que não depende do delta (ela já é a coluna "Nominal" da Análise de Opções).
+   Trocar o delta é, portanto, trocar um fator de um produto de dois. Aferido no book de
+   20/10/2026 (18 opções, 5 subtipos): `option_nominal_exp × option_delta == pl` em 18/18.
+
+   ⚠️ **Só recompõe `pl_type === 'pct'`.** O 1º ramo do `compute_pl` é o do DV01
+   (`usd_dv01 ≠ null → pl = DV01 × 10.000/NAV`, `pl_type: 'nominal'`), que uma opção de
+   futuro de SOFR/Euribor alcança — e ali o #PL NÃO é delta × nominal, é risco de taxa.
+   Escalar aquilo pelo delta seria inventar unidade. Nessas linhas (nenhuma no book de
+   hoje) o #PL segue o backend; a ★ e a Análise de Opções continuam mostrando a marreta.
+
+   ⚠️ **Sem marreta devolve o `pl` do backend INTACTO** — e não `nominal ×
+   effectiveDelta`. Os dois coincidem hoje, mas o `effectiveDelta` normaliza o sinal por
+   CALL/PUT no NOME e o backend só faz isso no subtipo `dol`: um papel com "PUT" no nome e
+   delta positivo na BBG mudaria de SINAL no dia em que ninguém marretou nada. Dia sem
+   marreta tem de imprimir o número do servidor. */
+function optPlFromDelta(r) {
+  if (!r.is_option || !deltaOverrides.has(instKey(r))) return r.pl;
+  if (r.pl_type !== 'pct') return r.pl;              // ramo do DV01: #PL não é delta × nominal
+  const nom = r.option_nominal_exp, d = effectiveDelta(r);
+  return (nom != null && d != null) ? nom * d : r.pl;
+}
+
 // Após marretar: re-renderiza a aba ativa e marca as demais carregadas p/ re-render ao abrir (sem refetch).
 function _markTabsDirtyAndRerender() {
   for (const tab of TRADER_TABS) if (posDataByTab[tab.id] && tab.id !== activeTraderTab) _dirtyTabs.add(tab.id);

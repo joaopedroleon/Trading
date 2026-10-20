@@ -482,10 +482,13 @@ function optEditApply(input, td) {
    do número. Balde que tenha os dois mostra os dois, separados por `·` — nunca um número
    só. É por isso também que os baldes nascem homogêneos por natureza do risco.
 
-   ⚠️ **O `net USDBRL` daqui pode NÃO bater com o TOTAL DÓLAR da aba Análise de Opções.**
-   Lá o delta é o EFETIVO (`effectiveDelta`, aceita marreta na própria tabela); aqui é o
-   delta do backend, porque é o que a coluna #PL usa. A tira está colada à tabela de
-   Posição e tem de fechar com ELA — divergir da coluna que está 2px acima é pior.
+   ⚠️ **O `net USDBRL` daqui pode NÃO bater com o TOTAL DÓLAR da aba Análise de Opções**
+   — mas desde out/2026 a diferença é só de ESCOPO, não mais de delta. A tira soma as
+   linhas da tabela de Posição (futuro + opção, com os filtros da aba); a outra soma só as
+   opções do bloco. O delta, esse, é o MESMO nas duas: a tira continua somando o
+   `effectiveRowPl` — ela está colada à tabela e divergir da coluna que está 2px acima
+   seria pior — e foi o próprio #PL de opção que passou a seguir a marreta de delta
+   (`optPlFromDelta`, pos-helpers.js). Até então a tira ficava com o delta do backend.
 
    ── Duas ordens, de propósito ────────────────────────────────────────────────────────
    `match` é avaliado NA ORDEM DO ARRAY (1º que casa vence); a EXIBIÇÃO segue `sort`. As
@@ -944,9 +947,13 @@ function renderTable(rows, tbodyId) {
         // `effectiveRowPl` (pos-helpers.js) é a fonte única do número desta célula — o mesmo
         // que o resumo "net por grupo de ativo" soma abaixo da tabela.
         const { pl: dispPl, type: dispType } = effectiveRowPl(r, eff);
-        const delta    = r.option_delta;
+        // Delta EFETIVO (a marreta da "Análise de Opções" vale aqui desde out/2026 — ver
+        // `optPlFromDelta`), e o hover diz QUAL dos dois está em uso: imprimir o delta do
+        // backend ao lado de um #PL marretado faria a célula se contradizer no title.
+        const delta    = r.is_option ? effectiveDelta(r) : r.option_delta;
+        const deltaOvr = r.is_option && deltaOverrides.has(instKey(r));
         const plTip    = delta != null
-          ? `Delta: ${delta} (clique para editar #PL)`
+          ? `Delta: ${delta}${deltaOvr ? ' ★ marreta manual (Análise de Opções)' : ''} (clique para editar #PL)`
           : 'Clique para editar #PL';
         return `<td class="col-final num" data-rowkey="${safeKey}" onclick="event.stopPropagation();posPlStartEdit(this)" style="cursor:pointer" title="${plTip}">${fmtPL(dispPl, dispType)}</td>`;
       })()}
