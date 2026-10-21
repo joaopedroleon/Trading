@@ -16,6 +16,7 @@ function activateTab(key) {
     case 'dolarconsol': showDolarConsolTab(); break;
     case 'dolar':       showDolarTab();       break;
     case 'rolagem':     showRolagemTab();     break;
+    case 'controle':    showControleTab();    break;   // Hedge Cambial → Controle (pos-hedge.js)
     case 'boletas':     showBoletasTab();     break;
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
@@ -75,12 +76,20 @@ function _invalidateAllTabs() {
   for (const t of Object.keys(dolarConsolData)) _dropTabCache(DOLAR_CONSOL_TAB_ID, t);
   _dropTabCache(DOLAR_TAB_ID);
   _dropTabCache(ROLAGEM_TAB_ID);
+  _dropTabCache(HEDGE_TAB_ID);
   _dropTabCache(BOLETAS_TAB_ID);
 }
 
 /* Apaga o cache de UMA aba (e o estado de UI derivado dele). `trader` só vale p/ a aba de
    Análise de Opções, cujo cache é por trader (`dolarConsolData`), não por aba. */
 function _dropTabCache(key, trader) {
+  if (key === HEDGE_TAB_ID) {   // Controle: o estado são 3 objetos de módulo, não posDataByTab
+    hedgeContexto = null;
+    hedgePlano = null;
+    delete _tabFetchSig[HEDGE_TAB_ID];
+    delete _tabFetchedAt[HEDGE_TAB_ID];
+    return;                     // hedgeRelatorio NÃO cai: o PDF lido é do usuário, não do servidor
+  }
   if (key === DOLAR_CONSOL_TAB_ID) {
     const t = trader ?? dolarConsolTrader;
     delete dolarConsolData[t];
@@ -119,6 +128,7 @@ function _invalidateStaleTabs() {
   }
   if (posDataByTab[DOLAR_TAB_ID]   && _tabFetchSig[DOLAR_TAB_ID]   !== sig) _dropTabCache(DOLAR_TAB_ID);
   if (posDataByTab[ROLAGEM_TAB_ID] && _tabFetchSig[ROLAGEM_TAB_ID] !== sig) _dropTabCache(ROLAGEM_TAB_ID);
+  if (hedgeContexto && _tabFetchSig[HEDGE_TAB_ID] !== sig) _dropTabCache(HEDGE_TAB_ID);
   if (posDataByTab[BOLETAS_TAB_ID] && _tabFetchSig[BOLETAS_TAB_ID] !== sig) _dropTabCache(BOLETAS_TAB_ID);
 }
 

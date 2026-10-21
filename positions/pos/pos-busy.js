@@ -62,6 +62,16 @@ const PosBusy = (() => {
     // A conferência com o tradebook sai do MESMO request da aba (o /boletas-resumo já
     // traz as duas pontas), como 'dc:consol'/'dc:opt' — dois ⟳, um source.
     'bol:chk':   { src: 'boldia',   containers: ['boletasCheck'] },
+    // ── Hedge Cambial · Controle ──
+    // `hedge`       = posição viva de Hedge_Cambial + ajuste D-1 (Oracle + BBG);
+    // `hedge-rel`   = leitura do PDF do relatório;
+    // `hedge-plano` = netting + boletas (não vai ao Oracle — é só conta sobre o que já veio).
+    // ⚠️ O <h2> do relatório NÃO tem `data-sec`: recarregar um PDF é ação de arquivo
+    // (o botão "Carregar PDF" está ali), não refetch — um ⟳ ali não teria o que refazer.
+    'hed:pla':   { src: 'hedge-plano', also: ['hedge', 'hedge-rel'],
+                   containers: ['hedgePlano'] },
+    'hed:bol':   { src: 'hedge-plano', also: ['hedge', 'hedge-rel'],
+                   containers: ['hedgeBoletas'] },
   };
   // Cada seção de aba de trader pinta DOIS containers: o principal e o bloco colapsado
   // que desceu p/ o fim da aba (#posPrevContainer-* / #pnlDetailContainer-*, ver a ordem
@@ -92,6 +102,7 @@ const PosBusy = (() => {
     rolagem:  () => { _dropTabCache(ROLAGEM_TAB_ID); return window.loadRolagem(); },
     boletas:  () => window.gerarBoletas(),
     boldia:   () => { _dropTabCache(BOLETAS_TAB_ID); return window.loadBoletas(); },
+    'hedge-plano': () => window.gerarPlanoHedge(),
   };
   // `fxlegs:<tab>` é dinâmico (um por aba de câmbio) e refaz SÓ a 2ª onda — as boletas do
   // Sophis —, sem tocar em Posição/PnL, que saem do outro request.
@@ -106,6 +117,7 @@ const PosBusy = (() => {
     rolagem:  'Resumo + detalhe da rolagem (mesmo request)',
     boletas:  'Prévia de boletas (real + gerencial)',
     boldia:   'Resumo de boletas do dia por ativo',
+    'hedge-plano': 'Netting entre traders, resíduo e boletas (sobre o relatório já lido)',
   };
 
   const _depth = new Map();   // src → nº de cargas em voo

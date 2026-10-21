@@ -104,6 +104,19 @@ html.theme-v2 .tabbtn:hover { color: var(--text); }
 html.theme-v2 .tabbtn.on { color: var(--text); border-bottom: 2px solid var(--green); }
 html.theme-v2 #tab-btn-other, html.theme-v2 #tab-btn-pabinader { position: relative; }
 html.theme-v2 #tab-btn-other .tab-chevron, html.theme-v2 #tab-btn-pabinader .tab-chevron { margin-left: 6px; }
+html.theme-v2 #tab-btn-hedge .tab-chevron { margin-left: 6px; }
+
+/* ═══ "Hedge Cambial": o botão é o MENU, não uma tela ═══
+   Nos outros dropdowns da barra (PAbinader, PAlves) o corpo do botão ativa a aba e o
+   <select> cobre só a setinha. Aqui o botão não tem tela própria — ele agrupa Rolagem Dol
+   e Controle Exposição —, então o <select> cobre o BOTÃO INTEIRO e qualquer clique abre o
+   droplist. O `onclick="event.stopPropagation()"` do .tab-chevron (que envolve o select) é
+   o que impede o listener delegado do #tabbar de ativar uma aba por baixo do menu aberto. */
+html.theme-v2 #tab-btn-hedge { position: relative; }
+html.theme-v2 #tab-btn-hedge .tab-chevron { position: static; }
+html.theme-v2 #tab-btn-hedge .tab-chevron select {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+}
 html.theme-v2 .tab { display: none; }
 html.theme-v2 .tab.on { display: block; }
 

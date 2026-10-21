@@ -1,3 +1,23 @@
+/* ── Marcas de EDIÇÃO: ficam na TELA, somem do PRINT ──────────────────────────
+   A ★ (marreta manual de preço/delta/quantidade/#PL), o ⚡ (linha adicionada à mão, que não
+   está na carteira) e o ✕ (excluir/ocultar a linha) são sinalização para QUEM OPERA a tela —
+   dizem o que foi mexido e onde clicar. Num print que vai para a mesa ou para o WhatsApp
+   eles não dizem nada a quem recebe e sujam a imagem (pedido do JLeon, out/2026).
+
+   ⚠️ O html2canvas **não clona** o nó com `data-html2canvas-ignore` — ele cai fora já no
+   `DocumentCloner`, não só na pintura. Ou seja a imagem é RE-MEDIDA sem a marca, e sai mais
+   justa: medido num tabelão de teste, a mesma linha com ✕ + ★ + ⚡ dá 574×66 px de canvas e,
+   com as três marcas ignoradas, **418×60** — a coluna do ✕ some inteira em vez de virar uma
+   lacuna. É o que se quer num print, mas vale saber que a largura das colunas é remedida (o
+   alvo é `width: fit-content`): a tela não pisca, porque nada disso toca o DOM vivo.
+   Vale para os 4 caminhos de cópia da tela — todos passam pelo `copyElementAsImage`
+   (pos-misc.js).
+
+   ⛔ Marca de PROCEDÊNCIA fica: o `*` de "sem mid two-sided na BBG" e o `~` de "vencimento
+   lido do nome" qualificam o NÚMERO, não o que o operador ajustou — tirá-los do print
+   esconderia de quem recebe que aquele preço não é um mid. */
+const IMG_SKIP = 'data-html2canvas-ignore="true"';
+
 const fmtDate = iso => {
   if (!iso) return '—';
   if (!/^\d{4}-/.test(iso)) return iso;  // vértice (ex: "3M", "2Y") → exibe direto
@@ -226,7 +246,7 @@ function sectionRestoreId(s) {
 function thead() {
   const d = detailVisible ? '' : 'style="display:none"';
   return `<thead><tr>
-    <th class="col-copy" title="Excluir linha"></th>
+    <th class="col-copy" ${IMG_SKIP} title="Excluir linha"></th>
     <th class="col-detail" ${d}>Área</th>
     <th class="col-detail" ${d}>Sub-área</th>
     <th class="col-detail" ${d}>Estratégia</th>

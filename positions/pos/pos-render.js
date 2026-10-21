@@ -228,7 +228,7 @@ function renderOptionsAnalysis() {
       const priceFmt = isFx ? fmtPricePct(m.price) : fmtOptPx(m.price);
       const deltaFmt = m.delta != null
         ? m.delta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '—';
-      const star     = m.edited ? '<span style="color:var(--accent);font-size:10px">★ </span>' : '';
+      const star     = m.edited ? `<span ${IMG_SKIP} style="color:var(--accent);font-size:10px">★ </span>` : '';
       // origem do preço (igual ao PnL): BBG → boleta → D-1 → manual
       const srcMap   = { bbg: ['BBG', 'var(--green)'], boleta: ['Boleta', 'var(--yellow)'], d1: ['D-1', 'var(--red)'], manual: ['Manual', 'var(--accent)'] };
       const [srcLbl, srcColor] = srcMap[m.src] || ['—', ''];
@@ -688,28 +688,46 @@ function _netFxLegs(r) {
 // USDBRL primeiro, os outros pares em ordem alfabética (pedido da mesa).
 const _netFxRank = lbl => (lbl === 'USDBRL' ? 0 : 1);
 
+/* ── Área/sub-área EFETIVAS da linha, para a tira ──────────────────────────────
+   A linha da carteira traz `area`/`subarea` do JRS/JDS (Rates · Currencies · Equities ·
+   Commodities) e é ela que manda — para essas linhas nada muda aqui.
+   ☠️ **A linha ADICIONADA À MÃO (➕ Simular linha) não tem área**: o backend carimba
+   `area: "SIMULAÇÃO"` de propósito, para ela cair num bloco próprio da tabela e nunca somar
+   dentro de um livro real (`positions/simulate.py`) — e com isso ela caía no balde
+   **"Outros"** da tira, mesmo quando o ticker diz exatamente o que ela é (a
+   `XGRV26C4 4160 Comdty` é opção de OURO, e o `_netCommodity` já sabe rotular o root `XGR`;
+   era o sintoma reportado pela mesa, out/2026).
+   ⚠️ Quem infere é o BACKEND, pela `FUTURES_CATEGORY` da BBG (`simulate._net_area`), e não
+   um 2º parser de ticker aqui: a yellow key `Comdty` cobre ouro, Treasury, SOFR e o DI, e
+   só a categoria os separa. O `net_area` entra **só se a `area` não for uma das quatro de
+   verdade** — ou seja, nunca sobrepõe o que veio do JRS/JDS. Sem ele (ticker que a BBG não
+   categoriza), a linha segue em "Outros", com aviso na própria linha simulada. */
+const _NET_REAL_AREAS = new Set(['Rates', 'Currencies', 'Equities', 'Commodities']);
+const _netAreaOf    = r => (_NET_REAL_AREAS.has(r.area) ? r.area : (r.net_area ?? r.area));
+const _netSubareaOf = r => (_NET_REAL_AREAS.has(r.area) ? r.subarea : (r.net_subarea ?? r.subarea));
+
 const POS_NET_GROUPS = [
   { id: 'fx', sort: 30, sub: _netFxPair, legs: _netFxLegs, subRank: _netFxRank,
     tip: 'Moedas, todas em PARES CONTRA O DÓLAR (convenção de mercado: USDBRL, USDMXN, EURUSD…). Um cross vira dois pares: EURBRL vendido 4% = EURUSD −4% e USDBRL −4%. Futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF entram como USDBRL (recorte do isUsdBrlDollarRow).',
-    match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || r.area === 'Currencies' },
+    match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || _netAreaOf(r) === 'Currencies' },
 
   { id: 'di', sort: 10, sub: () => 'DI',
     tip: 'Sub-área Fixed Rates Brazil — o mesmo recorte que o regime de DV01 usa para o DI (positions/pricing/dv01.py).',
-    match: r => r.subarea === 'Fixed Rates Brazil' },
+    match: r => _netSubareaOf(r) === 'Fixed Rates Brazil' },
   { id: 'jurosoff', sort: 11, sub: () => 'Juros off',
     tip: 'Resto da área Rates: juros de fora do Brasil (Fixed Rates G7 e demais sub-áreas).',
-    match: r => r.area === 'Rates' && r.subarea !== 'Cash' },
+    match: r => _netAreaOf(r) === 'Rates' && _netSubareaOf(r) !== 'Cash' },
   { id: 'caixa', sort: 12, sub: () => 'Caixa',
     tip: 'Sub-área Cash (LFT e afins). DV01 ~0 — fica fora do Juros off para não somar zero lá.',
-    match: r => r.subarea === 'Cash' },
+    match: r => _netSubareaOf(r) === 'Cash' },
 
   { id: 'bolsa', sort: 20, sub: _netEquity, subRank: _netEquityRank,
     tip: 'Bolsa (área Equities). RV BR quebra por ativo objeto (EWZ, IBOV, papel local); RV Off vai tudo num chip só.',
-    match: r => r.area === 'Equities' },
+    match: r => _netAreaOf(r) === 'Equities' },
 
   { id: 'commod', sort: 40, sub: _netCommodity,
     tip: 'Commodities, por ativo (root do ticker BBG).',
-    match: r => r.area === 'Commodities' },
+    match: r => _netAreaOf(r) === 'Commodities' },
 
   { id: 'outros', sort: 90, sub: () => 'Outros',
     tip: 'Não casou com nenhum balde acima — vale olhar a área/sub-área da linha.',
@@ -733,7 +751,10 @@ function netByAssetGroup(rows) {
     // (+1 base, −1 contra); os demais são uma perna só, peso 1 — comportamento de sempre.
     const legs = g.legs ? g.legs(r) : [{ sub: g.sub(r), w: 1 }];
     const { pl, type } = effectiveRowPl(r);
-    const name = r.instrument_name ?? '—';
+    /* A linha SIMULADA soma no chip como qualquer outra (mesmo NAV da aba, mesmo #PL) — é o
+       que a mesa pede ao adicionar a operação à mão. Mas o tooltip diz qual delas não está
+       na carteira: um net que mistura posição real com linha hipotética sem dizer engana. */
+    const name = (r.instrument_name ?? '—') + (r.is_simulated ? ' (simulada)' : '');
     /* ⭐ Linha de SLEEVE ganha BALDE PRÓPRIO (o dono entra na chave), não some da tira
        (08/10/2026, pedido da mesa: "pode sim mostrar o resumo das posições do Abinader").
        ☠️ Própria, e não somada ao balde do trader da aba, porque o #PL dela é fração de OUTRO
@@ -902,10 +923,10 @@ function renderTable(rows, tbodyId) {
     // e o nome ganha ⚡ (a coluna Área, que diria "SIMULAÇÃO", vem escondida por padrão).
     const simRef  = r.is_simulated ? (r.instrument_reference ?? '').replace(/'/g, "\\'") : null;
     const killCell = simRef
-      ? `<td class="col-copy" title="Remover esta linha simulada" onclick="event.stopPropagation();removeSimRow('${simRef}')">✕</td>`
-      : `<td class="col-copy" title="Excluir (ocultar) esta linha" onclick="event.stopPropagation();hideRow('${key}')">✕</td>`;
+      ? `<td class="col-copy" ${IMG_SKIP} title="Remover esta linha simulada" onclick="event.stopPropagation();removeSimRow('${simRef}')">✕</td>`
+      : `<td class="col-copy" ${IMG_SKIP} title="Excluir (ocultar) esta linha" onclick="event.stopPropagation();hideRow('${key}')">✕</td>`;
     const simMark = r.is_simulated
-      ? `<span style="color:var(--yellow)" title="${
+      ? `<span ${IMG_SKIP} style="color:var(--yellow)" title="${
            ['Linha SIMULADA — não está na carteira', ...(r.sim_avisos ?? []).map(a => '⚠ ' + a)]
              .join('\n').replace(/"/g, '&quot;')}">⚡ </span>`
       : '';
@@ -917,7 +938,7 @@ function renderTable(rows, tbodyId) {
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
       <td class="col-detail num" ${d}>${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
-      <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(rKeyFull) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? '<span style="color:var(--accent);font-size:10px">★ </span>' : ''}${simMark}${r.instrument_name ?? '—'}</td>
+      <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(rKeyFull) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? `<span ${IMG_SKIP} style="color:var(--accent);font-size:10px">★ </span>` : ''}${simMark}${r.instrument_name ?? '—'}</td>
       <!-- fmtOptMaturity, e nao fmtDate(r.maturity): a coluna tem de mostrar a MESMA data que
            ORDENA a linha (sortMaturityKey). Sem isso as opcoes abertas hoje, que chegam sem
            maturity do JRS, ficavam com um traco no meio do bloco, ordenadas por um criterio
