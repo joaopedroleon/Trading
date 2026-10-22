@@ -688,6 +688,27 @@ function _netFxLegs(r) {
 // USDBRL primeiro, os outros pares em ordem alfabética (pedido da mesa).
 const _netFxRank = lbl => (lbl === 'USDBRL' ? 0 : 1);
 
+/* ── CDS — balde PRÓPRIO na tira (22/10/2026, pedido da mesa) ──────────────────
+   O CDS vive em `Rates` (sub-área `Corporate Credit`), então caía no chip de juros junto
+   com o resto da área e somava com DI/Juros off. ☠️ **São réguas diferentes**: ali o #PL é
+   `nominal` (PL por 100bp) de risco de TAXA, e o do CDS é de risco de CRÉDITO (100bp de
+   SPREAD). O número é plausível e a soma não quer dizer nada — mesma família do "instrumento
+   contra instrumento não compara nada" dos checks de câmbio.
+   Quem casa é o `instrument_type` do JRS **ou** o prefixo `CDS_` do nome: o tipo vem vazio
+   na row que nasce só de boleta (JDS), e o nome vem vazio em nenhuma — por isso os dois.
+   O rótulo quebra por ENTIDADE (`CDS_BRAZIL_20-Dec-31` → `CDS Brazil`), que é como a mesa
+   lê: dois CDS de emissores diferentes não se somam num chip só. */
+const _netIsCds = r =>
+     /credit\s*default\s*swap/i.test(r.instrument_type || '')
+  || /^CDS[_\s]/i.test(r.instrument_name || '');
+
+function _netCds(r) {
+  const m = String(r.instrument_name || '').trim().match(/^CDS[_\s]+([A-Za-z0-9]+)/i);
+  if (!m) return 'CDS';
+  const e = m[1];
+  return 'CDS ' + e.charAt(0).toUpperCase() + e.slice(1).toLowerCase();
+}
+
 /* ── Área/sub-área EFETIVAS da linha, para a tira ──────────────────────────────
    A linha da carteira traz `area`/`subarea` do JRS/JDS (Rates · Currencies · Equities ·
    Commodities) e é ela que manda — para essas linhas nada muda aqui.
@@ -710,6 +731,13 @@ const POS_NET_GROUPS = [
   { id: 'fx', sort: 30, sub: _netFxPair, legs: _netFxLegs, subRank: _netFxRank,
     tip: 'Moedas, todas em PARES CONTRA O DÓLAR (convenção de mercado: USDBRL, USDMXN, EURUSD…). Um cross vira dois pares: EURBRL vendido 4% = EURUSD −4% e USDBRL −4%. Futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF entram como USDBRL (recorte do isUsdBrlDollarRow).',
     match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || _netAreaOf(r) === 'Currencies' },
+
+  /* ⚠️ ANTES do `di`/`jurosoff` de propósito: a ordem do array é a prioridade de match, e
+     o CDS casaria em `jurosoff` (área Rates, sub-área ≠ Cash). O `sort: 13` mantém o chip
+     no bloco de juros da tira, mas como balde separado. */
+  { id: 'cds', sort: 13, sub: _netCds,
+    tip: 'CDS por entidade, FORA dos chips de juros (DI · Juros off · Caixa): o #PL aqui é PL por 100bp de SPREAD DE CRÉDITO, não de taxa — somar com juros não mede nada. ⚠️ O DV01 do CDS Brazil está MARRETADO em 440 USD/bp por contrato (positions/pricing/dv01.py), provisório até a tela ganhar a anuidade de risco da curva.',
+    match: _netIsCds },
 
   { id: 'di', sort: 10, sub: () => 'DI',
     tip: 'Sub-área Fixed Rates Brazil — o mesmo recorte que o regime de DV01 usa para o DI (positions/pricing/dv01.py).',
