@@ -33,8 +33,29 @@ const fmtDateTime = iso => {
   return `${d}/${m}${hm ? ' ' + hm : ''}`;
 };
 
-const fmtQty = v =>
-  v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+/* ── Quantidade: casas decimais POR LINHA ────────────────────────────────────
+   O padrão da tela é 0 casa e separador en-US, porque a unidade de quase tudo aqui é o
+   CONTRATO e contrato é inteiro.
+   ⭐ **CDS é a exceção: 1 casa e VÍRGULA** (pedido da mesa, 22/10/2026). Ali a quantidade é
+   fracionária de verdade — em 21/10/2026 o JRS traz `0,5` e `4` no mesmo instrumento —, e com
+   0 casa o `toLocaleString` ARREDONDA sem avisar: meio contrato imprimia **1**, o dobro da
+   posição, sem erro nenhum e sem nada na tela dizendo que havia decimal.
+   ⚠️ Quem casa é o `instrument_type` ("Credit Default Swap…") **ou** o prefixo `CDS_` do nome
+   — os mesmos dois do balde `cds` da tira NET (pos-render.js), e pelo mesmo motivo: a
+   sub-área mente (o MESMO ref vem em `Fixed Rates Brazil` e em `Corporate Credit`, conforme
+   o livro) e o `instrument_type` vem vazio na row que nasce só de boleta. */
+const isCdsRow = r =>
+     /credit\s*default\s*swap/i.test(r?.instrument_type || '')
+  || /^CDS[_\s]/i.test(r?.instrument_name || '');
+
+// Casas decimais da quantidade desta linha. É o único lugar que decide isso.
+const qtyDec = r => (isCdsRow(r) ? 1 : 0);
+
+/* `dec > 0` troca o locale junto (pt-BR): o pedido é a VÍRGULA, e separador decimal e de
+   milhar vêm do mesmo locale — misturar `en-US` com 1 casa daria `20.0`, que é o oposto. */
+const fmtQty = (v, dec = 0) =>
+  v == null ? '—' : v.toLocaleString(dec ? 'pt-BR' : 'en-US',
+                                     { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
 const fmtPrice = v =>
   v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -81,15 +102,15 @@ function fmtPL(v, type, noGreen = false) {
 }
 
 
-function fmtTradedQty(v) {
+function fmtTradedQty(v, dec = 0) {
   if (v == null || v === 0) return '<span style="color:var(--text-muted)">—</span>';
-  const s = fmtQty(Math.abs(v));
+  const s = fmtQty(Math.abs(v), dec);
   return v < 0 ? `<span style="color:var(--red)">(${s})</span>` : s;
 }
 
-function fmtFinalQty(v) {
+function fmtFinalQty(v, dec = 0) {
   if (v == null) return '—';
-  const s = fmtQty(Math.abs(v));
+  const s = fmtQty(Math.abs(v), dec);
   if (v < 0) return `<span style="color:var(--red)">(${s})</span>`;
   if (v === 0) return `<span style="color:var(--text-muted)">—</span>`;
   return s;

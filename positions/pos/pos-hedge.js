@@ -19,6 +19,9 @@
    `/api/positions/hedge-cambial/*`): aqui só há tela. */
 
 const HEDGE_TAB_ID = 'controle';
+// US$ por contrato MINI (WDO). O relatório vem em MILHARES de USD, então minis × 10 = kUSD
+// — é por aí que o resumo do resíduo fecha com a coluna Total do próprio relatório.
+const HEDGE_KUSD_POR_MINI = 10;
 // Qual das duas telas do dropdown "Hedge Cambial" está ativa. Persiste para o F5
 // não devolver sempre a Rolagem a quem vive na aba de Controle.
 const LS_HEDGE_VIEW = 'jgp_pos_hedge_view_v1';
@@ -39,6 +42,11 @@ const hedgeConfig = {
   obs_reserved: '', ignore_previous: '',
   limiar_kusd: 10, instrument: '', price: '', price_date: '',
   mkt_price: '', mkt_broker: (typeof ROLAGEM_BROKER_DEFAULT === 'string' ? ROLAGEM_BROKER_DEFAULT : 'Ativa CTVC'),
+  // ⚠️ **NÃO persiste, de propósito** (mesma família do `deal_date`): desligar o desconto
+  // é uma conferência pontual — "o que o relatório pediria se eu não tivesse boletado
+  // nada". Persistido, ele voltaria ligado num outro dia e a tela mandaria boletar de novo
+  // o que já está feito, que é exatamente o erro que esta camada existe para evitar.
+  ignorar_boletas: false,
 };
 const LS_HEDGE_CFG = 'jgp_hedge_cfg_v1';
 const _HEDGE_CFG_PERSIST = ['counterparty_gerencial', 'giveup', 'deal_type', 'value_date',
@@ -137,6 +145,13 @@ async function loadHedgeContexto(opts = {}) {
     if (!hedgeConfig.price_date) hedgeConfig.price_date = data.price_date || '';
     if (hedgeConfig.price === '' && data.price != null) hedgeConfig.price = String(data.price);
     if (!hedgeConfig.deal_date) hedgeConfig.deal_date = _fmtDDMMYYYY(data.ref_date || '');
+    // Relatório do cache: a tela volta ao estado de antes depois de um F5 em vez de pedir
+    // o PDF de novo. ⚠️ Só quando NÃO há um carregado — o que está na tela é sempre o que
+    // a mesa acabou de subir, nunca o de disco.
+    if (!hedgeRelatorio && data.relatorio_cache?.relatorio) {
+      hedgeRelatorio = { ...data.relatorio_cache.relatorio, cache: data.relatorio_cache };
+      hedgeMktSel = {};
+    }
     if (status) status.textContent = '';
     // ⚠️ Posição e ajuste mudaram ⇒ o plano que está na tela é de outro contrato/preço.
     // Refaz (e já re-renderiza) em vez de deixar os dois discordando em silêncio.
@@ -237,9 +252,15 @@ function setHedgeCfg(key, val) {
   _hedgeInvalidarPlano();
 }
 
+// ⚠️ O fallback existe só para o instante entre abrir a aba e o `/contexto` responder.
+// Quem manda na lista é o SERVIDOR (`hedge_controle.TRADERS_PADRAO`): duplicá-la aqui como
+// fonte da verdade faria a tela netar um conjunto de traders e o plano, outro.
+const HEDGE_TRADERS_FALLBACK = ['ECotrim', 'EMota', 'GBranquinho', 'LAguiar', 'PAbinader',
+  'PAlves', 'Portfolio'];
+
 function _hedgeTradersDisponiveis() {
   const doRel = (hedgeRelatorio?.linhas || []).map(l => l.trader);
-  const padrao = hedgeContexto?.traders_padrao || ['ECotrim', 'EMota', 'GBranquinho', 'LAguiar', 'PAbinader'];
+  const padrao = hedgeContexto?.traders_padrao || HEDGE_TRADERS_FALLBACK;
   return [...new Set([...padrao, ...doRel])];
 }
 
@@ -247,8 +268,7 @@ function _hedgeRenderChips() {
   const el = document.getElementById('hedgeTraderChips');
   if (!el) return;
   if (!hedgeTraders) {
-    hedgeTraders = new Set(hedgeContexto?.traders_padrao
-      || ['ECotrim', 'EMota', 'GBranquinho', 'LAguiar', 'PAbinader']);
+    hedgeTraders = new Set(hedgeContexto?.traders_padrao || HEDGE_TRADERS_FALLBACK);
   }
   const chips = _hedgeTradersDisponiveis().map(t => {
     const on = hedgeTraders.has(t);
@@ -283,6 +303,7 @@ function _hedgeRenderRelatorio() {
       ${r ? `<span style="font-size:12px;color:var(--text-muted)">
         ${r.filename ? r.filename + ' · ' : ''}${r.as_of ? 'as of <b>' + fmtDate(r.as_of) + '</b>' : 'sem data no título'}
         · ${r.linhas.length} traders · ${r.fundos.length} fundos · lido do ${r.origem}</span>` : ''}
+      ${_hedgeSeloRelatorio(r)}
       <span id="hedgeUpStatus" style="font-size:12px;color:var(--text-muted)"></span>
     </div>
     <div id="hedgeColarBox" style="display:none;margin-top:8px">
@@ -350,6 +371,34 @@ function _hedgeRenderRelatorio() {
     </div></div>`;
 }
 
+// Selo de PROCEDÊNCIA do relatório que está na tela: de que dia ele é, quando foi lido,
+// e se está atrasado.
+//
+// ☠️ **Relatório defasado parece atual**: a tabela enche, a conferência do próprio
+// relatório fecha, as boletas saem — e estão hedgeando o descasamento de outro dia.
+// Medido com os dois exemplares reais: pelo de 20/10 a tela mandaria **vender 23 minis**
+// no Strategy Master que, pelo de 22/10 (o certo), não existem — o livro já estava zerado.
+// Por isso o atraso é faixa vermelha, não nota de rodapé.
+function _hedgeSeloRelatorio(r) {
+  if (!r) return '';
+  const c = r.cache || {};
+  const d = hedgePlano?.defasagem || c.defasagem || null;
+  const lido = c.salvo_em
+    ? `<span style="font-size:11px;color:var(--text-muted)" title="quando este relatório foi lido e guardado no cache da tela">
+         lido ${String(c.salvo_em).replace('T', ' ').slice(0, 16)}</span>` : '';
+  if (!d) return lido;
+  if (d.status === 'atrasado') {
+    return `${lido} <span style="color:var(--red);font-weight:600;font-size:12px"
+      title="O esperado é o relatório do dia útil anterior (${d.esperado}). Este é mais velho — as boletas abaixo hedgeiam o descasamento de outro dia.">
+      ⚠ DEFASADO — ${d.atrasado_du} pregão(ões) atrás (esperado: as of ${fmtDate(d.esperado)})</span>`;
+  }
+  if (d.status === 'sem_data' || d.status === 'ilegivel') {
+    return `${lido} <span style="color:var(--amber,#c90);font-size:12px">⚠ sem data legível no título — não dá para saber se está atual</span>`;
+  }
+  return `${lido} <span style="color:var(--green);font-weight:600;font-size:12px"
+    title="as of = dia útil anterior a ${d.ref_date}, que é como o relatório chega">✓ em dia</span>`;
+}
+
 function toggleHedgeColar() {
   const b = document.getElementById('hedgeColarBox');
   if (b) b.style.display = b.style.display === 'none' ? 'block' : 'none';
@@ -410,6 +459,7 @@ async function gerarPlanoHedge() {
       price: hedgeConfig.price === '' ? undefined : hedgeConfig.price,
       price_date: hedgeConfig.price_date || undefined,
       config: hedgeConfig,
+      ignorar_boletas: !!hedgeConfig.ignorar_boletas,
       mercado: { linhas, price: hedgeConfig.mkt_price, broker: hedgeConfig.mkt_broker },
     };
     const data = await (await fetch(`${API_BASE}/api/positions/hedge-cambial/plano`, {
@@ -442,22 +492,33 @@ function _hedgeRenderPlano() {
   const fundos = p.fundos, traders = p.traders;
   const cab = f => f.replace(/^JGP /, '');
 
-  // Matriz: necessidade · casado · resíduo, por (trader, fundo).
+  // Matriz: relatório · já boletado · falta · casado · resíduo, por (trader, fundo).
+  // ⭐ As três primeiras camadas vêm SEPARADAS do servidor (`need_bruto` → `boletado` →
+  // `need`) e a célula mostra as três: fundidas num número só, não daria para conferir a
+  // tela contra a tabela do próprio relatório, logo acima.
+  const _br = (t, f) => (p.need_bruto && p.need_bruto[t] ? p.need_bruto[t][f] : 0) || 0;
+  const _bo = (t, f) => (p.boletado && p.boletado[t] ? p.boletado[t][f] : 0) || 0;
   const linha = (t) => {
     const cells = fundos.map(f => {
       const need = p.need[t][f] || 0;
+      const br = _br(t, f), bo = _bo(t, f);
       const cas = (p.casado[f] || {})[t] || 0;
       const res = need - cas;
-      if (!need && !cas) return `<td class="num" style="color:var(--text-muted)">·</td>`;
-      return `<td class="num" title="necessidade ${_hedgeQty(need)} · gerencial ${_hedgeQty(cas)} · resíduo ${_hedgeQty(res)}">
+      if (!need && !cas && !br && !bo) return `<td class="num" style="color:var(--text-muted)">·</td>`;
+      return `<td class="num" title="relatório ${_hedgeQty(br)} · já boletado ${_hedgeQty(bo)} · falta ${_hedgeQty(need)} · gerencial ${_hedgeQty(cas)} · resíduo ${_hedgeQty(res)}">
         <span style="${_hedgeCor(need)}">${_hedgeQty(need)}</span>
         <span style="font-size:10px;color:var(--text-muted)"> → ${_hedgeQty(cas)}</span>
         ${res ? `<span style="font-size:10px;${_hedgeCor(res)}"> | ${_hedgeQty(res)}</span>` : ''}
+        ${bo ? `<div style="font-size:9px;color:var(--text-muted);line-height:1.2">rel ${_hedgeQty(br)} · bol ${_hedgeQty(bo)}</div>` : ''}
       </td>`;
     }).join('');
+    const sb = fundos.reduce((a, f) => a + _br(t, f), 0);
+    const sbo = fundos.reduce((a, f) => a + _bo(t, f), 0);
     const sn = fundos.reduce((a, f) => a + (p.need[t][f] || 0), 0);
     const sc = fundos.reduce((a, f) => a + ((p.casado[f] || {})[t] || 0), 0);
     return `<tr><td style="font-weight:600">${t}</td>${cells}
+      <td class="num" style="${_hedgeCor(sb)}">${_hedgeQty(sb)}</td>
+      <td class="num" style="${_hedgeCor(sbo)}">${_hedgeQty(sbo)}</td>
       <td class="num" style="${_hedgeCor(sn)};font-weight:600">${_hedgeQty(sn)}</td>
       <td class="num" style="${_hedgeCor(sc)}">${_hedgeQty(sc)}</td>
       <td class="num" style="${_hedgeCor(sn - sc)};font-weight:600">${_hedgeQty(sn - sc)}</td></tr>`;
@@ -466,15 +527,20 @@ function _hedgeRenderPlano() {
   // um total vazio. O resíduo total é, portanto, igual à necessidade total: o que as
   // gerenciais fazem é redistribuir, nunca reduzir o descasamento AGREGADO da mesa.
   const needTot = traders.reduce((a, t) => a + fundos.reduce((b, f) => b + (p.need[t][f] || 0), 0), 0);
+  const bruTot = traders.reduce((a, t) => a + fundos.reduce((b, f) => b + _br(t, f), 0), 0);
+  const bolTot = traders.reduce((a, t) => a + fundos.reduce((b, f) => b + _bo(t, f), 0), 0);
   const rodape = `<tr style="font-weight:600;border-top:2px solid var(--border)">
     <td>Total</td>
     ${fundos.map(f => {
       const s = traders.reduce((a, t) => a + (p.need[t][f] || 0), 0);
+      const bo = traders.reduce((a, t) => a + _bo(t, f), 0);
       const c = (p.resumo.find(x => x.fund === f) || {}).casado || 0;
-      return `<td class="num" title="necessidade líquida do fundo ${_hedgeQty(s)} · ${c} mini(s) casados entre os traders">
+      return `<td class="num" title="falta líquida do fundo ${_hedgeQty(s)} · ${c} mini(s) casados entre os traders · já boletado ${_hedgeQty(bo)}">
         <span style="${_hedgeCor(s)}">${_hedgeQty(s)}</span>
         <span style="font-size:10px;color:var(--text-muted)"> · casa ${c}</span></td>`;
     }).join('')}
+    <td class="num" style="${_hedgeCor(bruTot)}">${_hedgeQty(bruTot)}</td>
+    <td class="num" style="${_hedgeCor(bolTot)}">${_hedgeQty(bolTot)}</td>
     <td class="num" style="${_hedgeCor(needTot)}">${_hedgeQty(needTot)}</td>
     <td class="num" title="o netting redistribui, não reduz o descasamento agregado — esta soma é sempre zero">0</td>
     <td class="num" style="${_hedgeCor(needTot)}">${_hedgeQty(needTot)}</td></tr>`;
@@ -486,13 +552,17 @@ function _hedgeRenderPlano() {
     <div class="card" style="display:flex;flex-direction:column;gap:10px">
       <div style="font-size:12px;color:var(--text-muted)">
         Quantidades em <b>minis (WDO)</b> e com sinal: <b>+ compra</b> dólar futuro,
-        <b>− vende</b>. Cada célula traz <b>necessidade → gerencial</b> e, quando sobra,
-        <b>| resíduo</b>. Célula com |exposição| abaixo de
+        <b>− vende</b>. Cada célula traz <b>falta → gerencial</b> e, quando sobra,
+        <b>| resíduo</b>; embaixo, <b>rel · bol</b> — o que o relatório pedia e o que já foi
+        boletado. Célula com |exposição| abaixo de
         <b>${_hedgeNum(p.limiar_kusd, 0)} kUSD</b> não vira boleta.
       </div>
+      ${_hedgeFaixaBoletas(p)}
       <div style="overflow-x:auto"><table class="data-table" style="font-size:11px">
         <thead><tr><th>Trader</th>${fundos.map(f => `<th class="num">${cab(f)}</th>`).join('')}
-          <th class="num">Necess.</th><th class="num">Gerencial</th><th class="num">Resíduo</th></tr></thead>
+          <th class="num" title="o que o relatório pedia, em minis">Relatório</th>
+          <th class="num" title="o que já foi boletado em Hedge_Cambial depois do relatório">Já boletado</th>
+          <th class="num">Falta</th><th class="num">Gerencial</th><th class="num">Resíduo</th></tr></thead>
         <tbody>${traders.map(linha).join('')}${rodape}</tbody></table></div>
       <div style="font-size:12px">
         <b>${casadoTot}</b> minis casados entre os traders (${p.n_gerencial} boletas gerenciais) ·
@@ -503,6 +573,67 @@ function _hedgeRenderPlano() {
     </div>`;
 }
 
+// Faixa que declara a JANELA das boletas já descontadas — e deixa desligar o desconto.
+//
+// ⭐ **A janela sai do `as of` do próprio relatório, não de "hoje"**: `(as of, ref_date]`.
+// Relatório que chegou atrasado tem mais de um dia de boleta pela frente, e cortar em
+// "só hoje" deixaria o ajuste de ontem de fora — mandando boletá-lo outra vez.
+// ⚠️ O botão de desligar existe para a conferência "o que o relatório pediria se eu não
+// tivesse boletado nada", e NÃO persiste entre sessões, de propósito.
+function _hedgeFaixaBoletas(p) {
+  const j = p.janela_boletas || {};
+  // ☠️ **Bruto e líquido não se misturam na mesma frase.** A 1ª versão imprimia o total
+  // como Σ|líquido por (trader,fundo)| e o split como Σ|gerencial| e Σ|mercado| — e os
+  // números NÃO fechavam (88 contra 82+52), porque um trader com +10 gerencial e −3 de
+  // mercado no mesmo fundo conta 7 de um jeito e 13 do outro. Aqui o total é o BRUTO, que
+  // é o que "foi boletado" quer dizer, e aí o parêntese soma.
+  //
+  // ☠️ **E só conta quem está NO NETTING.** A query das boletas é do livro inteiro de
+  // `Hedge_Cambial` — ela não sabe quem a tela está netando —, e a faixa somava todo mundo:
+  // em 23/10/2026 imprimia **126 minis "descontados"** quando o descontado eram **80**, com
+  // os outros 46 sendo do `Treasurer`, que está fora do netting (e cujo líquido era zero:
+  // 3 boletas que se cancelam). Número plausível, e dizendo que se descontou o que não se
+  // descontou. O que sobra NÃO some: sai na mesma faixa, declarado como não descontado.
+  const noNet = new Set(p.traders || []);
+  const fundosNet = new Set(Object.values(p.fund_map || {}).filter(Boolean));
+  const _soma = (dentro) => {
+    let ger = 0, mkt = 0;
+    const quem = new Set();
+    for (const [lab, porT] of Object.entries(p.boletado_tipo || {})) {
+      for (const [t, x] of Object.entries(porT)) {
+        if ((noNet.has(t) && fundosNet.has(lab)) !== dentro) continue;
+        ger += Math.abs(x.gerencial || 0);
+        mkt += Math.abs(x.mercado || 0);
+        if (Math.abs(x.gerencial || 0) + Math.abs(x.mercado || 0)) quem.add(t);
+      }
+    }
+    return { ger, mkt, tot: ger + mkt, quem: [...quem].sort() };
+  };
+  const d = _soma(true), fora = _soma(false);
+  const ger = d.ger, mkt = d.mkt, tot = d.tot;
+  const foraTxt = fora.tot
+    ? ` <span style="color:var(--text-muted)" title="boletas de Hedge_Cambial de quem não está netando aqui (ou em fundo fora do relatório) — ficam de fora da conta, mas existem">
+         · <b>${fora.tot}</b> mini(s) fora do netting, não descontados (${fora.quem.join(', ')})</span>`
+    : '';
+  const off = !!hedgeConfig.ignorar_boletas;
+  const janTxt = j.erro
+    ? `<span style="color:var(--red)">falhou ao ler as boletas — o plano é o do relatório cru</span>`
+    : (!j.inicio
+        ? `<span style="color:var(--amber,#c90)">nenhuma boleta descontada${j.motivo === 'as_of_na_data' ? ' (o relatório já é desta data)' : ''}</span>`
+        : `boletas de <b>${fmtDate(j.inicio)}</b>${j.fim !== j.inicio ? ' a <b>' + fmtDate(j.fim) + '</b>' : ''}
+           — <b>${tot}</b> mini(s) descontados em Hedge_Cambial
+           <span style="color:var(--text-muted)" title="bruto, somando os dois sentidos: a gerencial muda o hedge do trader tanto quanto a de mercado, mas soma zero dentro do fundo">(${ger} gerencial · ${mkt} a mercado)</span>${foraTxt}`);
+  return `<div style="font-size:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+      padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2,transparent)">
+    <span title="O relatório é a foto do fechamento de D-1; tudo o que foi boletado em Hedge_Cambial depois dele já corrigiu parte do descasamento e é descontado aqui.">
+      ↩ <b>Já ajustado</b>: ${off ? '<span style="color:var(--amber,#c90)">desconto DESLIGADO — o plano abaixo é o do relatório cru</span>' : janTxt}</span>
+    <label style="display:flex;gap:4px;align-items:center;font-size:11px;color:var(--text-muted);cursor:pointer"
+           title="Desliga o desconto para ver o que o relatório pediria do zero. Não fica guardado.">
+      <input type="checkbox" ${off ? 'checked' : ''} onchange="setHedgeCfg('ignorar_boletas', this.checked)">
+      ignorar o que já foi boletado</label>
+  </div>`;
+}
+
 function _hedgeChecks(p) {
   const c = p.checks || [];
   if (!c.length) return `<div style="font-size:12px;color:var(--green);font-weight:600">
@@ -511,9 +642,113 @@ function _hedgeChecks(p) {
     ${c.map(x => `<div>⚠ ${x.msg}${x.fund ? ` — ${x.fund}` : ''}${x.trader ? ` / ${x.trader}` : ''}</div>`).join('')}</div>`;
 }
 
+// Σ do resíduo por FUNDO — "quanto de mini dólar falta negociar para zerar a exposição
+// daquele fundo". É a pergunta que a mesa faz depois das gerenciais, e a tabela detalhada
+// abaixo (uma linha por trader × fundo) não a responde sem somar de cabeça.
+//
+// ⭐ **Somar por fundo é EXATO, não aproximação.** Dentro de um fundo o netting casa o lado
+// MENOR por inteiro (`netear`: `m = min(compras, vendas)`), então o que sobra é todo do
+// MESMO sentido — ou só comprador, ou só vendedor, nunca os dois pela metade. Logo a soma
+// é a necessidade LÍQUIDA do fundo, e não há compra e venda se cancelando dentro da célula.
+// ☠️ Por isso mesmo, resíduo nos DOIS sentidos no mesmo fundo seria **bug do netting**, não
+// arredondamento: sai marcado na linha em vez de desaparecer dentro da soma.
+//
+// ⚠️ **O total entre fundos é líquido e NÃO é o que se executa.** Cada fundo tem a sua
+// boleta, então +8 num fundo e −8 em outro são 16 minis de execução, não zero — o rodapé
+// imprime os dois lados separados e o líquido só como referência.
+function _hedgeResiduoResumo(p) {
+  const m = new Map();
+  for (const r of p.residuo) {
+    let o = m.get(r.fund);
+    if (!o) { o = { fund: r.fund, label: r.fund_label, qty: 0, compra: 0, venda: 0, mkt: 0, por_trader: [] }; m.set(r.fund, o); }
+    o.qty += r.qty;
+    if (r.qty > 0) o.compra += r.qty; else o.venda += r.qty;
+    o.mkt += Number(hedgeMktSel[`${r.trader}||${r.fund}`] || 0);
+    o.por_trader.push(`${r.trader} ${_hedgeQty(r.qty)}`);
+  }
+  // Relatório e já-boletado do FUNDO (todos os traders do netting, não só os com resíduo):
+  // é a identidade que a mesa confere de olho — `falta = relatório − já boletado`.
+  for (const o of m.values()) {
+    o.bruto = (p.traders || []).reduce((a, t) => a + ((p.need_bruto && p.need_bruto[t] ? p.need_bruto[t][o.fund] : 0) || 0), 0);
+    o.bol = (p.traders || []).reduce((a, t) => a + ((p.boletado && p.boletado[t] ? p.boletado[t][o.fund] : 0) || 0), 0);
+  }
+  // ⭐ Conferência de graça: o servidor já publica `residuo_compra`/`residuo_venda` por fundo
+  // em `resumo` (de `netear`), por um caminho independente desta soma. Os dois têm de dar o
+  // mesmo número — se um dia divergirem, é a lista detalhada discordando do netting, e aí
+  // esta tabela estaria mandando negociar a quantidade errada. Declara em vez de escolher um.
+  for (const o of m.values()) {
+    const r = (p.resumo || []).find(x => x.fund === o.fund);
+    o.esperado = r ? (r.residuo_compra || 0) - (r.residuo_venda || 0) : null;
+  }
+  const linhas = [...m.values()].sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty));
+  const acao = o => o.qty > 0 ? '<b style="color:var(--green)">COMPRAR</b>'
+    : o.qty < 0 ? '<b style="color:var(--red)">VENDER</b>'
+    : '<b style="color:var(--amber,#c90)">— nada</b>';
+  const rows = linhas.map(o => {
+    const falta = o.qty - o.mkt;
+    const dois = o.compra && o.venda;
+    return `<tr>
+      <td>${o.fund.replace(/^JGP /, '')}${o.label ? ''
+        : ' <span style="color:var(--red)" title="sem fundo correspondente no JDS — esta linha não vira boleta">⚠</span>'}</td>
+      <td class="num" style="${_hedgeCor(o.bruto)};font-size:10px">${_hedgeQty(o.bruto)}</td>
+      <td class="num" style="${_hedgeCor(o.bol)};font-size:10px">${o.bol ? _hedgeQty(o.bol) : '—'}</td>
+      <td>${acao(o)}${dois ? ' <span style="color:var(--amber,#c90)" title="o netting deveria ter casado estes dois lados dentro do fundo — confira">⚠ dois sentidos</span>' : ''}${
+        (o.esperado != null && o.esperado !== o.qty)
+          ? ` <span style="color:var(--red)" title="o netting do servidor diz ${_hedgeQty(o.esperado)} neste fundo e a soma das linhas diz ${_hedgeQty(o.qty)} — não boletar sem conferir">⚠ não bate com o netting</span>` : ''}</td>
+      <td class="num" style="${_hedgeCor(o.qty)};font-weight:600"
+          title="minis de WDO a negociar para zerar o descasamento que sobrou neste fundo">${_hedgeQty(o.qty)}</td>
+      <td class="num" style="${_hedgeCor(o.qty)}">${_hedgeNum(o.qty * HEDGE_KUSD_POR_MINI, 0)}</td>
+      <td class="num" style="${_hedgeCor(o.mkt)}">${o.mkt ? _hedgeQty(o.mkt) : '—'}</td>
+      <td class="num" style="${_hedgeCor(falta)};font-weight:600">${_hedgeQty(falta)}</td>
+      <td style="font-size:10px;color:var(--text-muted)">${o.por_trader.join(' · ')}</td></tr>`;
+  }).join('');
+  const tC = linhas.reduce((a, o) => a + (o.qty > 0 ? o.qty : 0), 0);
+  const tV = linhas.reduce((a, o) => a + (o.qty < 0 ? o.qty : 0), 0);
+  const tM = linhas.reduce((a, o) => a + o.mkt, 0);
+  const liq = tC + tV;
+  const tBru = linhas.reduce((a, o) => a + (o.bruto || 0), 0);
+  const tBol = linhas.reduce((a, o) => a + (o.bol || 0), 0);
+  const rodape = `<tr style="font-weight:600;border-top:2px solid var(--border)">
+    <td>Total</td>
+    <td class="num" style="${_hedgeCor(tBru)};font-size:10px">${_hedgeQty(tBru)}</td>
+    <td class="num" style="${_hedgeCor(tBol)};font-size:10px">${tBol ? _hedgeQty(tBol) : '—'}</td>
+    <td style="font-size:10px;color:var(--text-muted)">comprar <span style="color:var(--green)">${tC}</span> ·
+      vender <span style="color:var(--red)">${Math.abs(tV)}</span></td>
+    <td class="num" style="${_hedgeCor(liq)}"
+        title="líquido entre fundos — referência, não ordem: cada fundo tem a sua boleta">${_hedgeQty(liq)}</td>
+    <td class="num" style="${_hedgeCor(liq)}">${_hedgeNum(liq * HEDGE_KUSD_POR_MINI, 0)}</td>
+    <td class="num" style="${_hedgeCor(tM)}">${tM ? _hedgeQty(tM) : '—'}</td>
+    <td class="num" style="${_hedgeCor(liq - tM)}">${_hedgeQty(liq - tM)}</td>
+    <td style="font-size:10px;color:var(--text-muted)">${tC + Math.abs(tV)} mini(s) de execução ao todo</td></tr>`;
+
+  return `
+    <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+      O que <b>ainda</b> falta negociar de <b>mini dólar (WDO)</b> em cada fundo — já descontado
+      o que foi boletado hoje em Hedge_Cambial. <b>+ comprar</b>, <b>− vender</b> dólar futuro.
+    </div>
+    <div style="overflow-x:auto"><table class="data-table" style="font-size:11px">
+      <thead><tr><th>Fundo</th>
+        <th class="num" title="o que o relatório pedia neste fundo, somando os traders do netting">Relatório</th>
+        <th class="num" title="o que já foi boletado em Hedge_Cambial depois do relatório (gerencial + mercado)">Já boletado</th>
+        <th>Ação</th><th class="num">Minis (WDO)</th>
+        <th class="num" title="1 mini = US$ 10 mil — é a mesma unidade da coluna Total do relatório">kUSD</th>
+        <th class="num">A mercado</th><th class="num">Falta</th><th>Por trader</th></tr></thead>
+      <tbody>${rows}${rodape}</tbody></table></div>`;
+}
+
 function _hedgeResiduoTabela(p) {
   if (!p.residuo.length) {
-    return `<div style="font-size:12px;color:var(--text-muted)">Sem resíduo — as gerenciais zeram tudo.</div>`;
+    // ⚠️ **Nada a fazer tem DOIS motivos, e dizer o errado manda procurar o que não existe.**
+    // Com as boletas do dia descontadas, o caso comum passou a ser "já está tudo boletado" —
+    // creditar as gerenciais aí faria a mesa procurar um netting que não aconteceu.
+    const bol = (p.traders || []).reduce((a, t) => a + (p.fundos || []).reduce(
+      (b, f) => b + Math.abs((p.boletado && p.boletado[t] ? p.boletado[t][f] : 0) || 0), 0), 0);
+    const cas = (p.resumo || []).reduce((a, x) => a + (x.casado || 0), 0);
+    const pq = bol && !cas ? 'o que o relatório pedia já foi boletado hoje'
+      : (bol && cas ? 'entre o que já foi boletado e as gerenciais, não sobra nada'
+        : 'as gerenciais zeram tudo');
+    return `<div style="font-size:12px;color:var(--green);font-weight:600">
+      ✓ Nada a ajustar — ${pq}.</div>`;
   }
   const rows = p.residuo.map(r => {
     const k = `${r.trader}||${r.fund}`;
@@ -530,6 +765,8 @@ function _hedgeResiduoTabela(p) {
   const selTot = Object.values(hedgeMktSel).reduce((a, v) => a + Math.abs(Number(v) || 0), 0);
   return `
     <div class="block-header" style="margin-top:4px">Resíduo — o que não casou entre os traders</div>
+    ${_hedgeResiduoResumo(p)}
+    <div class="block-header" style="margin-top:6px">Detalhe por trader · o que vai a mercado</div>
     <div style="font-size:12px;color:var(--text-muted)">
       Marque o que você vai levar <b>a mercado</b> e informe preço e corretora. O que ficar
       desmarcado segue descasado mesmo — é a decisão da mesa, não um erro da tela.

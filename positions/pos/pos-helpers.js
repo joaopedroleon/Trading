@@ -24,6 +24,16 @@ function swapEffQty(r) {
    DV01 (a célula de DV01 continua mostrando o derivado da quantidade). Quem quer o número
    COMO A COLUNA MOSTRA chama `effectiveRowPl`. */
 function effectiveRowValues(r) {
+  /* ☠️ **Linha SINTÉTICA do split por fundo (pos-fundsplit.js) devolve valores CRUS.**
+     O `rowKey` não tem o fundo, então as duas sintéticas de uma linha compartilham a chave
+     da principal — e reaplicar a marreta aqui daria o valor CHEIO em CADA tabela, ou seja o
+     dobro do livro, sem erro nenhum. A marreta já entrou lá, UMA vez, pela proporção do
+     fundo. Sem marreta a razão é 1 e o Σ dos fundos bate o consolidado exatamente. */
+  if (r._fundSplit) {
+    return { isSwap: r.swap_detail != null, qtyOvr: false,
+             opening: r.opening_qty, traded: r.traded_qty, final: r.final_qty,
+             dv01: r.usd_dv01, pl: r.pl, plType: r.pl_type };
+  }
   const isSwap     = r.swap_detail != null;
   const k          = rowKey(r);
   const nav        = r.nav ?? (posDataByTab[activeTraderTab] ?? positionsData)?.traders?.[r.trader];
@@ -63,6 +73,12 @@ function effectiveRowValues(r) {
    (`plOverrides`, sempre fração do NAV) domina; senão o derivado das marretas de
    quantidade. `eff` é opcional, só p/ não recalcular quem já tem. */
 function effectiveRowPl(r, eff) {
+  // Sintética do split por fundo: a marreta de #PL já entrou rateada (mesmo motivo do
+  // guard em `effectiveRowValues` — a chave não distingue os dois fundos).
+  if (r._fundSplit) {
+    const e = eff || effectiveRowValues(r);
+    return { pl: e.pl, type: e.plType };
+  }
   const ov = plOverrides.get(rowKey(r));
   if (ov !== undefined) return { pl: ov, type: 'pct' };
   const e = eff || effectiveRowValues(r);
@@ -445,6 +461,88 @@ function rfAllocEval(mmQty, rfQty, cfg) {
     // Alvo de quantidade que os NAVs de hoje pedem para a exposição dar 1/10.
     navTarget: (expTarget != null && navRatio) ? expTarget / navRatio : null,
   };
+}
+
+/* ── ESPELHO DE JUROS: PortfolioRF × EMota (23/10/2026) ───────────────────────────────
+   A mesa segue a MESMA alocação de juros do EMota no PortfolioRF, então os dois têm de
+   carregar a mesma exposição **em % do NAV de cada um** — alvo 1:1, não uma fração como no
+   sleeve do Abinader.
+
+   ⭐ **A razão sai da QUANTIDADE, e é exata.** O instrumento é o mesmo dos dois lados (o
+   vértice de DI), então preço e tamanho de contrato cancelam:
+
+       exp_RF / exp_EM  =  (q_RF / q_EM) × (NAV_EM / NAV_RF)
+
+   Aferido em 23/10/2026 contra o #PL que a própria tela calcula, nos 3 vértices do livro:
+   1,01290 × 1,01290 · 1,01159 × 1,01159 · 1,02911 × 1,02911 — casa na 5ª decimal. Por isso o
+   backend manda só `qty` por instrumento, sem tocar a Bloomberg para o livro do EMota.
+
+   ☠️ **"RF − EMota" cru MENTE em posição vendida.** O livro de juros do RF está TOMADO (DI
+   em −705, −1.021): ali o RF ter MAIS risco que o EMota dá uma diferença NEGATIVA na
+   subtração, e a célula se leria como "o RF está alocado a menos" — o oposto do que
+   aconteceu. O sinal desta coluna é o da RAZÃO: `+` = o RF carrega mais exposição que o
+   EMota, `−` = menos, qualquer que seja o lado da posição. Em lados OPOSTOS (razão < 0) não
+   existe "a mais/a menos": a célula diz isso por extenso. */
+const RF_MIRROR_REL_TOL = 0.05;   // fallback; o valor que vale vem do payload (`rel_tol`)
+
+/* Config do espelho na aba (ou null). Uma porta só, como o `rfSleeveCfg`. */
+function rfMirrorCfg(tabId) {
+  const d = posDataByTab[tabId ?? currentRenderTab()] ?? positionsData;
+  return d?.rf_mirror ?? null;
+}
+
+/* Conta única do check de espelho. `null` em qualquer campo = não afirmado — a tela imprime
+   "—", nunca um número inventado.
+     qMm    quantidade do EMota naquele instrumento (soma dos sub-books dele)
+     qEq    quantidade que o RF teria de ter para igualar o %NAV do EMota
+     ratio  exposição do RF ÷ exposição do EMota (alvo 1)
+     rel    ratio − 1 (o desvio que a faixa de cor mede)
+     diff   diferença de EXPOSIÇÃO, com o sinal da razão (ver o ☠️ acima)
+     tol    tolerância efetiva (ver o ⚠️ do arredondamento de lote)
+     caso   'ok' | 'fora' | 'so_rf' | 'zerado_rf' | 'oposto' | null (não afirmado) */
+function rfMirrorEval(row, cfg) {
+  const out = { qMm: null, qEq: null, ratio: null, rel: null, expRf: null, expMm: null,
+                diff: null, tol: cfg?.rel_tol ?? RF_MIRROR_REL_TOL, caso: null };
+  if (!cfg || !row?.rf_mirror_scope) return out;
+  const navMm = cfg.nav, navRf = row.nav;
+  if (!navMm || !navRf) return out;
+
+  const qRf = (typeof effectiveRowValues === 'function'
+    ? effectiveRowValues(row).final : row.final_qty) ?? 0;
+  const qMm = (cfg.qty ?? {})[row.instrument_reference] ?? 0;
+  out.qMm = qMm;
+  out.qEq = qMm * (navRf / navMm);
+  out.expRf = (typeof effectiveRowPl === 'function' ? effectiveRowPl(row).pl : row.pl) ?? null;
+
+  if (!qRf && !out.qEq) return out;                      // nada dos dois lados
+  if (!out.qEq) { out.caso = 'so_rf'; out.diff = out.expRf; return out; }
+  if (!qRf)     { out.caso = 'zerado_rf'; return out; }
+
+  out.ratio = qRf / out.qEq;
+  out.rel   = out.ratio - 1;
+  // Exposição do EMota no NAV DELE, derivada da do RF pela razão (o `k` do instrumento
+  // cancela): exp_EM = exp_RF × qEq / qRf.
+  out.expMm = out.expRf != null ? out.expRf * (out.qEq / qRf) : null;
+  // ⚠️ **Arredondamento de LOTE não é desalinhamento.** Um contrato de diferença é o mínimo
+  // que a boleta consegue, então a tolerância nunca é menor que isso — num vértice de 20
+  // contratos, 5% seria 1 contrato e a coluna acusaria o que não dá para corrigir. Em
+  // instrumento cotado em NOCIONAL (1/|qEq| ~ 0) a guarda é inerte sozinha.
+  out.tol = Math.max(out.tol, Math.abs(1 / out.qEq));
+  if (out.ratio < 0) { out.caso = 'oposto'; return out; }
+  // ☠️ O sinal é o da RAZÃO, não o da subtração — ver o ☠️ do cabeçalho.
+  out.diff = (out.expRf != null && out.expMm != null)
+    ? Math.sign(out.rel) * Math.abs(Math.abs(out.expRf) - Math.abs(out.expMm)) : null;
+  out.caso = Math.abs(out.rel) <= out.tol ? 'ok' : 'fora';
+  return out;
+}
+
+/* Faixa de cor do espelho: verde dentro da tolerância, amarelo até o dobro, vermelho além. */
+function rfMirrorClass(e) {
+  if (!e || e.caso == null) return '';
+  if (e.caso === 'ok') return 'alloc-ok';
+  if (e.caso === 'oposto' || e.caso === 'so_rf' || e.caso === 'zerado_rf') return 'alloc-bad';
+  const a = Math.abs(e.rel ?? 0);
+  return a <= 2 * e.tol ? 'alloc-warn' : 'alloc-bad';
 }
 
 /* ── Short de bolsa BR: target reduzido no grupo Prev ─────────────────────

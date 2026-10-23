@@ -363,11 +363,11 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
 
     // Abert. MM Prev
     const prevQty = prev?.opening_qty ?? null;
-    const prevQtyCell = `<td class="num">${prevQty != null ? fmtFinalQty(prevQty) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
+    const prevQtyCell = `<td class="num">${prevQty != null ? fmtFinalQty(prevQty, qtyDec(mm)) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
 
     // Qtd Operada MM Prev
     const prevTraded = prev?.traded_qty ?? null;
-    const tradedCell = `<td class="num">${prevTraded != null ? fmtTradedQty(prevTraded) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
+    const tradedCell = `<td class="num">${prevTraded != null ? fmtTradedQty(prevTraded, qtyDec(mm)) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
 
     // Check Boleta
     let dealCell = _checkVazio('—', 'Sem boleta nesta linha hoje.');
@@ -426,7 +426,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     // com a mesma coluna da tabela de câmbio (pos-fxlegs.js), que soma os três.
     const rfFinal   = showRf ? (lookupRf(mm)?.final_qty ?? 0) : 0;
     const total     = (mmFinal) + (prevFinal ?? 0) + rfFinal;
-    const totalCell = `<td class="num">${fmtFinalQty(total)}</td>`;
+    const totalCell = `<td class="num">${fmtFinalQty(total, qtyDec(mm))}</td>`;
 
     return `<tr class="${rowClass} ${areaClass} ${tradedClass}">
       <td>${mm.instrument_name ?? '—'}${shortMark}</td>
@@ -449,9 +449,9 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
     const bkO = _bucketCheck(p, buckets, target);
     return `<tr class="${stripe}">
       <td>${p.instrument_name ?? '—'}</td>
-      <td class="num">${p.opening_qty != null ? fmtFinalQty(p.opening_qty) : muted}</td>
-      <td class="num">${p.traded_qty  != null ? fmtTradedQty(p.traded_qty)  : muted}</td>
-      <td class="num">${fmtFinalQty(p.final_qty ?? 0)}</td>
+      <td class="num">${p.opening_qty != null ? fmtFinalQty(p.opening_qty, qtyDec(p)) : muted}</td>
+      <td class="num">${p.traded_qty  != null ? fmtTradedQty(p.traded_qty, qtyDec(p))  : muted}</td>
+      <td class="num">${fmtFinalQty(p.final_qty ?? 0, qtyDec(p))}</td>
       ${_checkVazio('—', 'Linha sem par no MM — check de boleta não se aplica.')}
       ${bkO ? _bucketCell(bkO, target) : _checkVazio()}
       ${showRf ? _checkVazio() : ''}
@@ -472,12 +472,12 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   if (missingFactor) {
     const note = `↓ short de bolsa BR onshore: o target deveria ser reduzido (${blocked0} fica fora), `
       + `mas o NAV do grupo Prev não veio — check usando o target cheio de ${fmtPct(target)}.`;
-    footTr = `<tr><td colspan="${NCOL}" style="white-space:normal;font-size:11px;color:var(--red)">${note}</td></tr>`;
+    footTr = `<tr><td class="aux-foot" colspan="${NCOL}" style="font-size:11px;color:var(--red)"><div>${note}</div></td></tr>`;
   }
 
   // Rodapé do sleeve: o 2º check NO AGREGADO — o alvo fixo contra o que os NAVs de hoje
   // pedem para a exposição dar 1/10. É esta linha que acusa quando os 4% envelheceram.
-  const rfFootTr = showRf ? `<tr><td colspan="${NCOL}" style="white-space:normal;font-size:11px;color:var(--text-muted)">${rfTargetNote(rfCfg)}</td></tr>` : '';
+  const rfFootTr = showRf ? `<tr><td class="aux-foot" colspan="${NCOL}" style="font-size:11px;color:var(--text-muted)"><div>${rfTargetNote(rfCfg)}</div></td></tr>` : '';
 
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead><tr>
@@ -919,6 +919,160 @@ const _rfEsc = t => String(t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').rep
    (`rfCheckCell`, uma auxiliar só). Ficavam ~50 linhas com um `colspan` que já não batia com
    o nº de colunas depois que as três viraram uma. */
 
+/* ── ESPELHO DE JUROS: a coluna `Check EMota` (23/10/2026) ───────────────────────────
+   "Geralmente seguimos a mesma alocação de juros do EMota no PortfolioRF, então ambos
+   precisam estar alinhados" (mesa). Alvo **1:1** — a mesma exposição em % do NAV de cada
+   um —, e não uma fração como nos outros dois checks da tela.
+
+   A conta inteira mora no `rfMirrorEval` (pos-helpers.js); aqui é só o veredito. Fora do
+   escopo de juros (LFT/caixa, dólar, hedge cambial, e as linhas do sleeve) a célula fica
+   MUDA, sem fundo: pintar o que não foi conferido é pior que não pintar.
+
+   ⚠️ O que a célula imprime quando não bate é a DIFERENÇA DE EXPOSIÇÃO, na unidade do #PL
+   da linha (pedido da mesa) — `%` do NAV nas linhas de preço, "% do NAV por 100 bps" nas de
+   taxa, que é a mesma unidade da coluna #PL ao lado. 3 casas quando o número é pequeno: com
+   2 fixas um desvio de 15% num vértice pequeno imprimia "0.00" em VERMELHO. */
+function _mirrorDiffTxt(diff, type) {
+  const abs = Math.abs(diff);
+  const dec = abs < 0.01 ? 3 : 2;
+  const s = type === 'pct'
+    ? (abs * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'
+    : abs.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  return (diff >= 0 ? '+' : '−') + s;
+}
+
+/* ☠️ TOOLTIP NÃO ACEITA HTML — e o erro é silencioso. `fmtFinalQty`/`fmtPL` devolvem
+   `<span style=…>`, que num `title=` aparece COMO TEXTO ("<span style="color:var(--red)">(705)").
+   Daí estes dois formatadores de TEXTO PURO, na mesma convenção da tabela (negativo entre
+   parênteses). ⚠️ Vale para qualquer tooltip novo desta tela. */
+function _txtNum(v, dec) {
+  const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  return v < 0 ? `(${s})` : s;
+}
+
+function _mirrorQtyTxt(v) {
+  return v == null ? '—' : _txtNum(Math.round(v), 0);
+}
+
+function _mirrorExpTxt(v, type) {
+  if (v == null) return '—';
+  return type === 'pct' ? _txtNum(v * 100, 2) + '%' : _txtNum(v, 2);
+}
+
+function mirrorCheckCell(row, cfg, escopo) {
+  const tr = cfg?.trader ?? 'EMota';
+  if (!cfg) return '';
+  /* `escopo` = o lado que está sendo conferido. Vazio = o livro do RF inteiro (modo
+     consolidado); no modo "Por fundo" vem o rótulo do bloco, porque ali a linha avaliada é a
+     do FUNDO — mesmo check, outro denominador, e a célula tem de dizer de quem fala. */
+  const esc = escopo || 'RF';
+  if (!row?.rf_mirror_scope) {
+    return _checkVazio('—', `Fora do espelho de juros: o check compara com o book de MM do `
+      + `${tr} só nas linhas de JUROS DIRECIONAIS.
+
+Ficam de fora o caixa/carry (LFT), o `
+      + `dólar do próprio RF e o hedge cambial — lá o ${tr} ou não tem a linha, ou a tem com `
+      + `outra finalidade, e a razão não mediria nada.`);
+  }
+  const e   = rfMirrorEval(row, cfg);
+  const un  = row.pl_type === 'pct' ? '% do NAV' : '% do NAV por 100 bps';
+  const qtd = `  ${tr}: ${_mirrorQtyTxt(e.qMm)}  ⇒  equivale a ${_mirrorQtyTxt(e.qEq)} aqui `
+            + `(pela razão dos NAVs)
+  ${esc}: ${_mirrorQtyTxt(
+                (typeof effectiveRowValues === 'function'
+                  ? effectiveRowValues(row).final : row.final_qty) ?? 0)}`;
+
+  if (e.caso == null) {
+    return _checkVazio('—', `Não afirmado: falta o NAV de um dos dois lados, ou a linha não `
+      + `tem posição em nenhum deles.`);
+  }
+  if (e.caso === 'so_rf') {
+    return `<td class="check-cell alloc-bad" title="${_rfEsc(
+      `⚠ O ${tr} NÃO TEM esta linha.
+
+${qtd}
+
+Toda a exposição ${escopo ? 'do ' + esc : 'do RF'} aqui `
+      + `(${_mirrorExpTxt(e.expRf, row.pl_type)} ${un}) está sem par no book dele.`)}">⚠ sem par</td>`;
+  }
+  if (e.caso === 'zerado_rf') {
+    return `<td class="check-cell alloc-bad" title="${_rfEsc(
+      `⚠ ZERADO ${escopo ? 'NO ' + esc.toUpperCase() : 'NO RF'}, e o ${tr} carrega.
+
+${qtd}
+
+`
+      + `Para igualar o %NAV dele, ${escopo ? 'este fundo' : 'o RF'} precisaria de `
+      + `~${_mirrorQtyTxt(e.qEq)}.`)}">⚠ zerado ${escopo ? 'aqui' : 'no RF'}</td>`;
+  }
+  if (e.caso === 'oposto') {
+    return `<td class="check-cell alloc-bad" title="${_rfEsc(
+      `⛔ LADOS OPOSTOS — ${escopo ? 'o ' + esc : 'o RF'} está de um lado e o ${tr} do outro.
+
+${qtd}
+
+Não existe `
+      + `"a mais/a menos" aqui: é divergência de direção, não de tamanho.`)}">⛔ lado oposto</td>`;
+  }
+
+  const relPct = (e.rel * 100).toLocaleString('en-US', { maximumFractionDigits: 1 });
+  const tip = `ESPELHO DE JUROS — a mesma exposição que o ${tr}, cada um sobre o NAV do seu `
+    + `livro (alvo 1:1).${escopo ? ' Aqui o lado do RF é o ' + esc + '.' : ''}
+
+`
+    + `  ${esc.padEnd(5)} ${_mirrorExpTxt(e.expRf, row.pl_type).padStart(9)}  (${un})
+`
+    + `  ${tr.padEnd(5)} ${_mirrorExpTxt(e.expMm, row.pl_type).padStart(9)}
+`
+    + `  ${esc} ÷ ${tr} = ${fmtPct(e.ratio)}   (${e.rel >= 0 ? '+' : ''}${relPct}%)
+
+`
+    + qtd + `
+
+`
+    + `Verde dentro de ±${(e.tol * 100).toLocaleString('en-US', {maximumFractionDigits: 1})}% `
+    + `da exposição dele, amarelo até o dobro, vermelho além`
+    + (e.tol > (cfg.rel_tol ?? RF_MIRROR_REL_TOL) + 1e-9
+        ? ` — faixa alargada nesta linha porque 1 contrato de diferença já passaria de `
+          + `${((cfg.rel_tol ?? RF_MIRROR_REL_TOL) * 100).toFixed(0)}%, e abaixo disso a boleta não desce.`
+        : '.');
+  const cls = rfMirrorClass(e);
+  return `<td class="check-cell ${cls}" title="${_rfEsc(tip)}">${
+    e.caso === 'ok' ? '✓'
+      : (e.diff != null ? '⚠ ' + _mirrorDiffTxt(e.diff, row.pl_type)
+                        : '⚠ ' + fmtPct(e.ratio))}</td>`;
+}
+
+/* Cabeçalho da coluna do espelho.
+   ⚠️ **O rótulo é só "Check EMota"** (pedido da mesa, 23/10/2026). Ele nasceu com o alvo
+   embaixo ("1:1"), como o `rfCheckHead` faz com os 4,4% do sleeve — mas ali o número é o que a
+   mesa troca de tempos em tempos, e aqui ele é fixo por definição (a mesma alocação é a mesma
+   alocação). O que o alvo explicava continua no `title`, que é onde a dúvida nasce.
+   `extraTip` acrescenta uma linha ao tooltip — é por onde o modo "Por fundo" diz que o veredito
+   é do LIVRO INTEIRO, informação que antes vivia num `(livro)` embaixo do rótulo. */
+function mirrorCheckHead(cfg, extraTip) {
+  const tr  = cfg?.trader ?? 'EMota';
+  const tol = (cfg?.rel_tol ?? RF_MIRROR_REL_TOL) * 100;
+  const tip = `A mesma alocação de JUROS do ${tr}: os dois carregam a mesma exposição, cada `
+    + `um em % do NAV do seu livro (alvo 1:1).
+
+`
+    + `A razão sai da QUANTIDADE e é exata — o instrumento é o mesmo dos dois lados, então `
+    + `preço e tamanho de contrato cancelam: exp_RF/exp_${tr} = (q_RF/q_${tr}) × (NAV_${tr}/NAV_RF).
+
+`
+    + `✓ = alinhado (±${tol.toLocaleString('en-US', {maximumFractionDigits: 1})}%, e nunca `
+    + `menos que 1 contrato). Fora disso a célula mostra a DIFERENÇA DE EXPOSIÇÃO na unidade `
+    + `do #PL da linha, com + = o RF carrega mais que o ${tr}.
+
+`
+    + `"—" = fora do espelho (caixa/carry, dólar, hedge cambial e as linhas do sleeve).`
+    + (extraTip ? `
+
+${extraTip}` : '');
+  return `<th title="${_rfEsc(tip)}">Check ${tr}</th>`;
+}
+
 /* ── Fund breakdown table (portfoliorf) ───────────────────────────────────
    ⭐ É a ÚNICA auxiliar da aba, e desde 08/10/2026 ela também carrega os 2 checks do sleeve
    de RF: as linhas do outro trader passaram a viver na MESMA tabela principal (pedido da
@@ -929,6 +1083,12 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   if (!fundRows?.length || !fundNavs) return '';
   // Colunas do sleeve: só quando há linha dele na tabela E o lado do MM veio no payload.
   const rfSleeveCols = !!rfCfg?.mm_rows?.length && mainRows.some(r => r.is_rf_sleeve);
+  /* Espelho de juros (PortfolioRF × EMota). ⭐ A coluna existe quando o PAYLOAD traz o
+     espelho — não quando há linha em escopo. É a mesma lição do `Check RF`: no dia em que o
+     livro de juros estiver vazio, "não há juros no RF" é o veredito, e some justamente a
+     coluna que tinha o que dizer. */
+  const mirrorCfg  = (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(currentRenderTab()) : null;
+  const mirrorCols = !!mirrorCfg;
   const lookupMmRf   = rfSleeveCols ? makeMirrorLookup(rfCfg.mm_rows) : null;
 
   const fundLabels = Object.keys(fundNavs).sort();
@@ -993,6 +1153,9 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
         <td style="color:var(--text-muted);text-align:right;font-size:11px" title="${_rfEsc(
           'Rateio entre os dois Masters não se aplica: a linha é do sleeve.')}">sleeve</td>
         <td style="color:var(--text-muted);text-align:right;font-size:11px">sleeve</td>
+        ${mirrorCols ? _checkVazio('—', 'Linha do sleeve de RF: o espelho de juros confere o '
+            + 'livro do PortfolioRF contra o EMota, e esta linha é do outro trader — o check '
+            + 'dela é a coluna ao lado.') : ''}
         ${rfSleeveCols ? rfCheckCell(rfCfg, { mmQty: mmRf?.final_qty ?? null,
             rfQty: effectiveRowValues(r).final ?? r.final_qty ?? 0, row: r }) : ''}
       </tr>`;
@@ -1011,7 +1174,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       }
       fundPlArr.push(fundPl);
 
-      const qtyCell = `<td class="num">${fund_qty !== 0 ? fmtFinalQty(fund_qty) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
+      const qtyCell = `<td class="num">${fund_qty !== 0 ? fmtFinalQty(fund_qty, qtyDec(r)) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
       const pctCell = `<td class="num">${pct != null ? fmtPct(pct) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
       const plCell  = `<td class="num">${fundPl != null ? fmtPL(fundPl, r.pl_type) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
       return qtyCell + pctCell + plCell;
@@ -1083,6 +1246,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       ${cells}
       ${checkCell}
       ${checkPlCell}
+      ${mirrorCols ? mirrorCheckCell(r, mirrorCfg) : ''}
       ${rfSleeveCols ? _checkVazio() : ''}
     </tr>`;
   }).join('');
@@ -1098,20 +1262,20 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
 
   // Rodapé: diz por que aquelas linhas não seguem o rateio por NAV (a tela não pode
   // trocar o alvo do check em silêncio).
-  const NC = 1 + 3 * fundLabels.length + 2 + (rfSleeveCols ? 1 : 0);
+  const NC = 1 + 3 * fundLabels.length + 2 + (mirrorCols ? 1 : 0) + (rfSleeveCols ? 1 : 0);
   const footTr = usedOffOnly
-    ? `<tr><td colspan="${NC}" style="white-space:normal;font-size:11px;color:var(--text-muted)">`
+    ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--text-muted)"><div>`
       + `US$ dólar (WDO/UC, opção DOL/USDBRL, spot-fwd USD/BRL): alocação vai 100% para `
       + `${shortLabel(offFund)} — o check usa esse alvo, não o rateio por NAV, e a exposição `
-      + `(#PL) da tabela principal é calculada sobre o NAV desse fundo.</td></tr>`
+      + `(#PL) da tabela principal é calculada sobre o NAV desse fundo.</div></td></tr>`
     : '';
   const rfFootTr = rfSleeveCols
-    ? `<tr><td colspan="${NC}" style="white-space:normal;font-size:11px">${rfTargetNote(rfCfg)}</td></tr>`
+    ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px"><div>${rfTargetNote(rfCfg)}</div></td></tr>`
     : '';
 
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead>
-      <tr><th rowspan="2">Instrumento</th>${headers}<th rowspan="2">Check Qtd</th><th rowspan="2">Check #PL</th>${rfSleeveCols ? rfCheckHead(rfCfg, true).replace('<th ', '<th rowspan="2" ') : ''}</tr>
+      <tr><th rowspan="2">Instrumento</th>${headers}<th rowspan="2">Check Qtd</th><th rowspan="2">Check #PL</th>${mirrorCols ? mirrorCheckHead(mirrorCfg).replace('<th ', '<th rowspan="2" ') : ''}${rfSleeveCols ? rfCheckHead(rfCfg, true).replace('<th ', '<th rowspan="2" ') : ''}</tr>
       <tr>${subHeaders}</tr>
     </thead>
     <tbody>${rows}${footTr}${rfFootTr}</tbody>
@@ -1139,6 +1303,10 @@ function _alignAuxTables(tabId) {
         writes.push([spacerEl, h]);
       }
     }
+    /* ⚠️ Um só par (principal × auxiliar) nos DOIS modos — o modo "Por fundo" passou a viver
+       DENTRO deste card (ver `renderFundSplitInline`), então aqui não há mais caso especial.
+       O que o modo expandido acrescenta é a igualação da altura das linhas-cabeçalho de
+       fundo, logo abaixo. */
     if (hasFundBreak && s.group === 'Todos') {
       const spacerEl = document.getElementById('fund_break_spacer_portfoliorf');
       const outerEl  = document.getElementById('fund_break_outer_portfoliorf');
@@ -1149,9 +1317,31 @@ function _alignAuxTables(tabId) {
                               - outerEl.getBoundingClientRect().top - fThead.offsetHeight);
         writes.push([spacerEl, h]);
       }
+      _alignFsHeads(document.getElementById(sectionBodyId(s)),
+                    document.querySelector('#fund_break_portfoliorf tbody'));
     }
   }
   for (const [el, h] of writes) el.style.height = h + 'px';
+}
+
+/* ── Modo "Por fundo": a linha-CABEÇALHO das duas tabelas tem de ter a MESMA altura ──────
+   O alinhamento linha a linha das duas tabelas é natural — elas têm a mesma sequência de
+   linhas e a mesma altura de célula. A linha-cabeçalho de fundo é a exceção: na principal ela
+   carrega rótulo + NAV + a tira NET daquele fundo, e na auxiliar só o rótulo. Sem igualar, a
+   diferença de altura desloca TUDO o que vem abaixo dela — e no 2º bloco o erro se soma ao do
+   1º.
+   ⚠️ Reseta antes de medir, pelo mesmo motivo de sempre: a altura escrita no render anterior
+   entraria na medida do seguinte. */
+function _alignFsHeads(mainBody, auxBody) {
+  if (!mainBody || !auxBody) return;
+  const a = [...mainBody.querySelectorAll('tr.fs-head')];
+  const b = [...auxBody.querySelectorAll('tr.fs-head')];
+  if (!a.length || a.length !== b.length) return;
+  for (const tr of [...a, ...b]) tr.style.height = '';
+  const hs = a.map((tr, i) => Math.max(tr.getBoundingClientRect().height,
+                                       b[i].getBoundingClientRect().height));
+  a.forEach((tr, i) => { tr.style.height = hs[i] + 'px'; });
+  b.forEach((tr, i) => { tr.style.height = hs[i] + 'px'; });
 }
 
 /* ── Tab switching ───────────────────────────────────────────────────────── */

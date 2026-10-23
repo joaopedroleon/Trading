@@ -77,6 +77,43 @@ html.theme-v2 .net-chip.net-chip-sleeve {
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
+/* ═══ Modo "Por fundo" da seção 1 (PortfolioRF) — a linha-CABEÇALHO de cada bloco ═══
+   O modo é uma EXPANSÃO da tabela do consolidado, não outra moldura: o bloco de cada fundo
+   começa por esta linha, que varre a tabela e carrega rótulo, fundo, NAV e a tira NET DAQUELE
+   fundo. A mesma classe vive na auxiliar, como espaçador — a altura das duas é igualada no
+   `_alignFsHeads` (pos-fundtables.js), porque só a da principal tem a tira NET.
+   ⚠️ `:hover` não muda nada aqui: a linha não é posição, é divisória — reagir ao mouse a faria
+   parecer clicável como as outras. */
+/* ☠️ **`color-mix()` aqui QUEBRA o "⎘ Copiar"** (23/10/2026) — e em silêncio. O Chrome
+   serializa `color-mix()` no estilo COMPUTADO como `color(srgb …)`, e o html2canvas 1.4.1
+   estoura com *"Attempting to parse an unsupported color function \"color\""*; o
+   `copyElementAsImage` tem `catch` vazio, então o botão só volta ao normal e nada acontece.
+   Por isso o fundo usa a `--green-tint`, que já é `rgba()` nos dois temas. ⚠️ Vale para
+   QUALQUER regra que pegue elemento dentro do `.section-copy-target` — e é por isso que
+   existe o saneador do `onclone` (pos-misc.js), a rede que pega as outras. */
+html.theme-v2 .data-table tbody tr.fs-head > td {
+  background: var(--green-tint);
+  border-top: 2px solid var(--green);
+  border-bottom: 1px solid var(--border);
+  padding: 5px 12px; font-size: 11.5px; white-space: nowrap;
+}
+html.theme-v2 .data-table tbody tr.fs-head:hover > td { background: var(--green-tint); }
+html.theme-v2 .data-table tbody tr.fs-head .fs-head-lbl {
+  font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+  color: var(--text-primary);
+}
+/* A tira NET do fundo entra na PRÓPRIA linha. Ela mantém a classe `.net-summary` (é de lá
+   que vem o estilo das pílulas — ver o ☠️ no `_fsHeadHtml`); aqui só se desfaz o que ela tem
+   de BLOCO: largura cheia e margem embaixo, que dentro de uma `<td>` virariam uma linha
+   dentro da linha. */
+html.theme-v2 .data-table tbody tr.fs-head .net-summary.fs-head-net {
+  display: inline-flex; width: auto; min-width: 0; margin: 0 0 0 14px;
+  vertical-align: middle; gap: 4px 6px;
+}
+html.theme-v2 .data-table tbody tr.fs-head .net-summary.fs-head-net .net-chip {
+  padding: 1px 8px 2px; font-size: 11px;
+}
+
 html.theme-v2 .data-table td { border-bottom: 1px solid var(--border); }
 
 /* resultado/total em destaque — ajuda a bater o olho */
@@ -355,6 +392,21 @@ html.theme-v2 .jgp-tbl .nd { color: var(--text-muted); }
    `width:0` zera a contribuição do texto no cálculo do fit-content (quem passa a mandar é
    a TABELA); `min-width:100%` devolve a largura já resolvida, e o texto quebra nela. */
 html.theme-v2 .jgp-tbl-note { width: 0; min-width: 100%; }
+
+/* ☠️ **RODAPÉ DE TABELA AUXILIAR: o texto dele NÃO pode ditar a largura da tabela.**
+   As auxiliares têm `width:auto` — a largura nasce do maior conteúdo —, e um rodapé de uma
+   frase é, de longe, o maior conteúdo que elas têm. Medido em 23/10/2026 na auxiliar do
+   PortfolioRF: a nota do dólar ("US$ dólar (WDO/UC, opção DOL/USDBRL…)") inflava a tabela de
+   **858px para 1.184px**, e com isso ela deixava de caber ao lado da principal e DESCIA para
+   baixo dela (o `flex-wrap` do card) — num monitor de 1920px. O `white-space:normal` da célula
+   não basta: ele PERMITE quebrar, mas o algoritmo de tabela ainda pede a largura de
+   max-content quando há espaço.
+   Mesmo truque do `.jgp-tbl-note` e da `.net-summary`: largura definida em 0 (o que a célula
+   contribui para o intrínseco) e `min-width:100%` (o que ela ocupa de fato). A nota continua
+   inteira, quebrando em linhas dentro da largura que as COLUNAS pedem.
+   ⚠️ Vale para qualquer rodapé novo destas tabelas — e o `colspan` sozinho não protege. */
+html.theme-v2 .data-table tbody tr > td.aux-foot { white-space: normal; }
+html.theme-v2 .data-table tbody tr > td.aux-foot > div { width: 0; min-width: 100%; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ESTADO "ATUALIZANDO" POR SEÇÃO  +  botão ⟳ de seção   (ver pos-busy.js)

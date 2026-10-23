@@ -609,6 +609,11 @@ function _renderSectionsForTab(tabId, allRows) {
        `fit-content` do pai — a imagem sairia com faixa branca morta à direita e a tira nunca
        quebraria de linha. É a mesma trava do `.jgp-tbl-note`, pelo mesmo motivo. */
     mainCards.push(`
+    ${hasFund && typeof fundSplitBarHtml === 'function'
+        ? fundSplitBarHtml(tabId,
+            fundSplitOn(tabId) ? 'Posição por fundo' : 'Posição consolidada',
+            typeof fundSplitWarnHtml === 'function' ? fundSplitWarnHtml(tabId, s, data) : '')
+        : ''}
     <div class="card">
       <!-- Par principal + auxiliar. ⭐ flex-wrap:wrap + flex-shrink:0 nos dois:
            quando não couberem lado a lado, a auxiliar DESCE INTEIRA para baixo da principal
@@ -642,6 +647,11 @@ function _renderSectionsForTab(tabId, allRows) {
                     style="padding:2px 10px;font-size:12px;display:none"
                     onclick="hideZeroRowsInSection('${sectionBodyId(s)}')"
                     title="Oculta, de uma vez, as linhas DESTA tabela cuja quantidade FINAL é zero (posição zerada no dia ou que já veio zerada).&#10;É a mesma ferramenta do ✕ de cada linha — o ↩ Restaurar ocultas traz tudo de volta.&#10;Linha simulada não entra."></button>
+            <!-- A troca de modo NAO mora aqui: ela e a tira acima do card
+                 (fundSplitBarHtml), igual nos dois modos. Dentro do sec-tools ela ficava
+                 DENTRO do branco no consolidado e FORA no por fundo, pulando de lugar a cada
+                 clique. Aqui so ficam as ferramentas DESTA tabela.
+                 (Sem crase neste comentario: ele vive dentro de um template literal.) -->
             <button class="btn btn-secondary" style="padding:2px 10px;font-size:12px" onclick="copyCardImage(this)">⎘ Copiar</button>
             </span>
           </div>
@@ -669,7 +679,15 @@ function _renderSectionsForTab(tabId, allRows) {
 
   for (const s of sections) {
     const rows = filterRows(sortRows(sectionRows(s)));
-    renderTable(rows, sectionBodyId(s));
+    /* ⭐ MODO "POR FUNDO" (pos-fundsplit.js): a MOLDURA é a mesma do consolidado — mesmo
+       card, mesmo título, mesma auxiliar à direita, mesmos ids. O modo troca só o CONTEÚDO:
+       o tbody ganha um bloco de linhas por fundo (com linha-cabeçalho) e a auxiliar passa a
+       ser a do modo. Só a seção `Todos` do PortfolioRF, e só quando o payload traz break por
+       fundo + NAV por fundo + a config das tabelas. */
+    const expandido = hasFundBreak && s.group === 'Todos'
+                   && typeof fundSplitOn === 'function' && fundSplitOn(tabId);
+    const blocos = expandido ? renderFundSplitInline(tabId, s, data, rows) : null;
+    if (!expandido) renderTable(rows, sectionBodyId(s));
     if (s.group === 'MM' && displayRows.some(r =>
         (r.group === 'MM Prev' || r.group === rfGroupId) && r.trader === s.trader)) {
       const el = document.getElementById(allocCheckId(s.trader));
@@ -679,10 +697,11 @@ function _renderSectionsForTab(tabId, allRows) {
       const el = document.getElementById('fund_break_portfoliorf');
       // ⚠️ MESMA lista de linhas da tabela principal (sleeve incluído quando mesclado) —
       // é o que mantém as duas alinhadas linha a linha sem JS de medição.
-      if (el) el.innerHTML = renderFundBreakTable(
-        filterRows(sortRows(sectionRows(s))),
-        data.fund_rows, data.fund_navs, filterRows, data.portfoliorf_offshore_fund, rfCfg
-      );
+      if (el) el.innerHTML = expandido
+        ? renderFundSplitAuxInline(data, blocos, rfCfg,
+            (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(tabId) : null)
+        : renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows,
+                               data.portfoliorf_offshore_fund, rfCfg);
     }
   }
 

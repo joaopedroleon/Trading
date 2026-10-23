@@ -193,9 +193,12 @@ const fmtBps = v => {
   return `<span style="color:var(--text-muted)">—</span>`;
 };
 
-const fmtQtySummary = v => {
+// `dec` = casas decimais da linha (`qtyDec`, pos-format.js) — 0 em tudo, 1 no CDS, que tem
+// quantidade fracionária de verdade (ver o bloco de `fmtQty`). Chamador sem `dec` não muda.
+const fmtQtySummary = (v, dec = 0) => {
   if (v == null || v === 0) return '<span style="color:var(--text-muted)">—</span>';
-  const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const s = Math.abs(v).toLocaleString(dec ? 'pt-BR' : 'en-US',
+                                       { minimumFractionDigits: dec, maximumFractionDigits: dec });
   return v < 0 ? `(${s})` : s;
 };
 
@@ -580,9 +583,9 @@ function _pnlSummaryBody(map) {
       }
       tbody += `<tr onclick="hidePnlRow('${sk}')" title="Clique para ocultar" style="cursor:pointer">
         <td style="padding-left:16px"${swapAttr}>${e.instrument_name ?? '—'}</td>
-        <td class="num">${fmtQtySummary(e.opening_qty)}</td>
-        <td class="num">${fmtQtySummary(tradedQty)}</td>
-        <td class="num">${fmtQtySummary(e.final_qty)}</td>
+        <td class="num">${fmtQtySummary(e.opening_qty, qtyDec(e))}</td>
+        <td class="num">${fmtQtySummary(tradedQty, qtyDec(e))}</td>
+        <td class="num">${fmtQtySummary(e.final_qty, qtyDec(e))}</td>
         <td class="num">${fmtUSD(e.total_usd)}</td>
         <td class="num" style="font-weight:600">${fmtBps(e.result_bps)}</td>
         <td class="num">${avgPriceCell}</td>
@@ -1029,16 +1032,16 @@ function renderPnlTable(rows, tbodyId) {
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
       <td${swapAttr}>${r.instrument_name ?? '—'}</td>
       <td>${fmtDate(r.maturity)}</td>
-      <td class="num">${fmtQty(oq)}</td>
+      <td class="num">${fmtQty(oq, qtyDec(r))}</td>
       <td class="num">${r.option_subtype === 'fx' ? fmtPricePct4(r.price) : fmtPrice4(r.price)}</td>
       <td class="num" data-key="${pnlRowKey(r).replace(/"/g, '&quot;')}"
           title="Fonte: ${priceSrcLabel(src, r.price_live_kind)}"
           onclick="pnlStartEdit(this)"
           style="cursor:pointer;${priceLiveStyle(src)}"
       >${r.option_subtype === 'fx' ? fmtPricePct4(ep) : fmtPrice4(ep)}</td>
-      <td class="num">${bq ? fmtQty(bq)  : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="num">${bq ? fmtQty(bq, qtyDec(r))  : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="num">${r.avg_buy_price  != null ? (r.option_subtype === 'fx' ? fmtPricePct4(r.avg_buy_price)  : fmtPrice4(r.avg_buy_price))  : '<span style="color:var(--text-muted)">—</span>'}</td>
-      <td class="num">${sq ? fmtQty(sq) : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="num">${sq ? fmtQty(sq, qtyDec(r)) : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="num">${r.avg_sell_price != null ? (r.option_subtype === 'fx' ? fmtPricePct4(r.avg_sell_price) : fmtPrice4(r.avg_sell_price)) : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="col-pnl num">${fmtUSD(pf.estoque)}</td>
       <td class="col-pnl num">${fmtUSD(pf.compra)}</td>

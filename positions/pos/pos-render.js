@@ -12,7 +12,16 @@ function rerenderTables(onlyKey) {
   for (const s of sectionsFor(activeTraderTab, displayRows)) {
     const isTarget = !onlySection || (s.group === onlySection[0] && s.trader === onlySection[1]);
     const rows = filterRows(sortRows(sectionRowsFor(activeTraderTab, s, displayRows)));
-    if (isTarget) renderTable(rows, sectionBodyId(s));
+    /* Modo "Por fundo" (pos-fundsplit.js): o tbody ganha os blocos por fundo no lugar das
+       linhas do livro — mesma moldura, mesmo card, mesma auxiliar.
+       ⚠️ Tem de passar por AQUI, e não só pelo rebuild: ocultar uma linha ou mexer num chip de
+       filtro entra por este caminho, e sem isto a tabela ficaria com o conteúdo do render
+       anterior — sem erro nenhum. */
+    const expandido = hasFundBreak && s.group === 'Todos'
+                   && typeof fundSplitOn === 'function' && fundSplitOn(activeTraderTab);
+    let blocos = null;
+    if (expandido)      blocos = renderFundSplitInline(activeTraderTab, s, data, rows);
+    else if (isTarget)  renderTable(rows, sectionBodyId(s));
     if (s.group === 'MM' && displayRows.some(r =>
         (r.group === 'MM Prev' || r.group === rfGroupId) && r.trader === s.trader)) {
       const el = document.getElementById(allocCheckId(s.trader));
@@ -20,9 +29,11 @@ function rerenderTables(onlyKey) {
     }
     if (hasFundBreak && s.group === 'Todos') {
       const el = document.getElementById('fund_break_portfoliorf');
-      if (el) el.innerHTML = renderFundBreakTable(rows, data.fund_rows, data.fund_navs,
-                                                  filterRows, data.portfoliorf_offshore_fund,
-                                                  data.rf_sleeve);
+      if (el) el.innerHTML = expandido
+        ? renderFundSplitAuxInline(data, blocos, data.rf_sleeve,
+            (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(activeTraderTab) : null)
+        : renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows,
+                               data.portfoliorf_offshore_fund, data.rf_sleeve);
     }
   }
   // Câmbio da aba do PAbinader: soma as MESMAS linhas exibidas, então tem de refazer junto
@@ -698,9 +709,10 @@ const _netFxRank = lbl => (lbl === 'USDBRL' ? 0 : 1);
    na row que nasce só de boleta (JDS), e o nome vem vazio em nenhuma — por isso os dois.
    O rótulo quebra por ENTIDADE (`CDS_BRAZIL_20-Dec-31` → `CDS Brazil`), que é como a mesa
    lê: dois CDS de emissores diferentes não se somam num chip só. */
-const _netIsCds = r =>
-     /credit\s*default\s*swap/i.test(r.instrument_type || '')
-  || /^CDS[_\s]/i.test(r.instrument_name || '');
+// ⚠️ Definição ÚNICA em `isCdsRow` (pos-format.js, que carrega antes): a mesma pergunta
+// decide o balde da tira E as casas decimais da quantidade (`qtyDec`). Duas cópias
+// divergiriam no 1º CDS de nome diferente — e só uma das duas telas mudaria.
+const _netIsCds = r => isCdsRow(r);
 
 function _netCds(r) {
   const m = String(r.instrument_name || '').trim().match(/^CDS[_\s]+([A-Za-z0-9]+)/i);
@@ -940,11 +952,11 @@ function renderTable(rows, tbodyId) {
     const openingCell = `<td class="col-pnl num" style="cursor:pointer" title="Clique para editar"
             data-swapkey="${safeKey}" data-opening="${effOpening ?? ''}"
             onclick="event.stopPropagation();swapStartEdit(this,'opening',this.dataset.swapkey,parseFloat(this.dataset.opening))">
-           ${fmtFinalQty(effOpening)}</td>`;
+           ${fmtFinalQty(effOpening, qtyDec(r))}</td>`;
     const tradedCell = `<td class="num" style="cursor:pointer" title="Clique para editar"
             data-swapkey="${safeKey}" data-traded="${effTraded ?? ''}"
             onclick="event.stopPropagation();swapStartEdit(this,'traded',this.dataset.swapkey,parseFloat(this.dataset.traded))">
-           ${fmtTradedQty(effTraded)}</td>`;
+           ${fmtTradedQty(effTraded, qtyDec(r))}</td>`;
 
     const refCopy = (r.instrument_reference ?? r.instrument_name ?? '').replace(/"/g, '&quot;');
     // Linha SIMULADA (pos-simular.js): o ✕ REMOVE a simulação em vez de só ocultar a linha,
@@ -974,7 +986,7 @@ function renderTable(rows, tbodyId) {
       <td>${fmtOptMaturity(r)}</td>
       ${openingCell}
       ${tradedCell}
-      <td class="col-right num">${fmtFinalQty(effFinal)}</td>
+      <td class="col-right num">${fmtFinalQty(effFinal, qtyDec(r))}</td>
       ${(() => {
         const isFxOpt       = r.option_subtype === 'fx';
         const dispPriceLive = effectivePrice(r);

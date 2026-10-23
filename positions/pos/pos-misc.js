@@ -119,6 +119,40 @@ function _padCanvas(src, bg, padDev) {
   return out;
 }
 
+/* ── ☠️ O html2canvas 1.4.1 não entende `color()` — e `color-mix()` vira `color()` ───────
+   O Chrome serializa `color-mix(in srgb, …)` no estilo COMPUTADO como `color(srgb r g b / a)`.
+   O html2canvas 1.4.1 estoura ali (*"Attempting to parse an unsupported color function
+   \"color\""*) e o print inteiro falha — por UMA regra de CSS, em qualquer elemento da área
+   copiada. Medido em 23/10/2026 no modo "Por fundo": a linha-cabeçalho de fundo derrubava o
+   botão do card, enquanto o consolidado copiava normalmente.
+   ⚠️ A área copiada tem outras: `.sleeve-row` e `.net-chip-sleeve` usam `color-mix` e
+   quebrariam o print da aba do PortfolioRF **no dia em que o Abinader boletar** — hoje não há
+   linha de sleeve, então o defeito está adormecido.
+   Daí esta rede, no `onclone` (que recebe a CÓPIA, não a tela): converte o que o navegador
+   serializou em `color(srgb …)` de volta para `rgba()`, que o html2canvas lê. Varre só a
+   subárvore copiada, e só as propriedades de cor. */
+const _COLOR_FN_PROPS = ['backgroundColor', 'color', 'borderTopColor', 'borderRightColor',
+                         'borderBottomColor', 'borderLeftColor', 'boxShadow', 'outlineColor'];
+
+function _srgbToRgba(v) {
+  return v.replace(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/g,
+    (_, r, g, b, a) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, `
+                     + `${Math.round(b * 255)}, ${a === undefined ? 1 : a})`);
+}
+
+function _sanitizeColorFns(root) {
+  if (!root) return;
+  const win = root.ownerDocument?.defaultView;
+  if (!win) return;
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    const cs = win.getComputedStyle(el);
+    for (const prop of _COLOR_FN_PROPS) {
+      const v = cs[prop];
+      if (v && v.indexOf('color(') !== -1) el.style[prop] = _srgbToRgba(v);
+    }
+  }
+}
+
 async function copyElementAsImage(el, btn) {
   if (!el) return;
   const origText = btn?.textContent;
@@ -130,11 +164,20 @@ async function copyElementAsImage(el, btn) {
       useCORS: true,
       logging: false,
       backgroundColor: null,
+      // Ver o ☠️ acima. O 2º argumento é o CLONE do elemento alvo.
+      onclone: (_doc, clone) => { try { _sanitizeColorFns(clone); } catch {} },
     });
     const out = _padCanvas(canvas, _imgBgColor(el), _IMG_PAD_CSS * _IMG_SCALE);
     out.toBlob(blob => { _deliverImageBlob(blob, btn, origText); }, 'image/png');
-  } catch {
-    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  } catch (e) {
+    /* ⚠️ **Falhar calado foi o que fez este bug durar**: o `catch` vazio devolvia o botão ao
+       normal e a mesa via "não acontece nada", sem nada no console para investigar. Hoje o
+       botão DIZ que falhou (volta sozinho) e o motivo vai para o console. */
+    console.warn('[copiar imagem] html2canvas falhou:', e);
+    if (btn) {
+      btn.textContent = '✕ falhou';
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+    }
   }
 }
 
