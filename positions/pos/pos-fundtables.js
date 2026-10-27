@@ -775,7 +775,7 @@ function renderRfTargetBanner(cfg) {
     <div style="font-size:12px;line-height:1.7">
       <b>Sleeve de RF — alvo da boleta ${fmtPct(e.allocTarget)}</b>
       <span style="color:${COR};font-weight:600">&nbsp;&nbsp;${veredito}</span>${semLinha}
-      <div style="color:var(--text-primary);margin-top:2px">${detalhe}</div>
+      <div style="color:var(--text);margin-top:2px">${detalhe}</div>
       <div style="margin-top:2px">${navLinha}</div>
     </div>
   </div>`;
@@ -1147,7 +1147,6 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     const totalQty    = r.final_qty || 0;
     const totalNavSum = fundLabels.reduce((s, fl) => s + (fundNavs[fl] ?? 0), 0);
     const groupPl     = r.pl;
-    const ratioByFund = {};
     const fundPlArr   = [];
     // Linha cuja alocação vai 100% para o fundo offshore por desenho (hoje: dólar).
     // O sleeve offshore (`is_offshore`) segue no ramo próprio, sem check.
@@ -1170,10 +1169,9 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
         'Linha do sleeve de RF — ' + (r.trader ?? '—') + ', 100% no ' +
         (rfCfg?.fund ?? 'veículo offshore') + '. Não entra no rateio entre os dois Masters.')}">
         <td>${r.instrument_name ?? '—'}</td>
-        ${dash.repeat(3 * fundLabels.length)}
+        ${dash.repeat(2 * fundLabels.length)}
         <td style="color:var(--text-muted);text-align:right;font-size:11px" title="${_rfEsc(
           'Rateio entre os dois Masters não se aplica: a linha é do sleeve.')}">sleeve</td>
-        <td style="color:var(--text-muted);text-align:right;font-size:11px">sleeve</td>
         ${mirrorCols ? _checkVazio('—', 'Linha do sleeve de RF: o espelho de juros confere o '
             + 'livro do PortfolioRF contra o EMota, e esta linha é do outro trader — o check '
             + 'dela é a coluna ao lado.') : ''}
@@ -1182,12 +1180,16 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       </tr>`;
     }
 
+    /* ⛔ **"% Qtd" e "Check Qtd" saíram** (mesa, 27/10/2026: *"não precisa delas, pelo PL e
+       check PL já consigo bater se está ok ou não"*). As duas diziam a MESMA notícia que o
+       `#PL`/`Check #PL` ao lado, só na unidade de quantidade — e o rateio por quantidade e o
+       por exposição não podem divergir, porque o #PL de cada fundo É derivado da fatia de
+       quantidade (`groupPl × fund_qty/totalQty × refNav/navF`, logo abaixo). Duas colunas
+       para o mesmo veredito custavam largura numa tabela auxiliar que já é larga. */
     const cells = fundLabels.map(fl => {
       const fr       = byFund[fl];
       const fund_qty = fr?.final_qty ?? 0;
       const navF     = fundNavs[fl];
-      const pct      = totalQty !== 0 ? fund_qty / totalQty : null;
-      ratioByFund[fl] = navF && totalNavSum ? (navF / totalNavSum) : null;
 
       let fundPl = null;
       if (!r.is_offshore && groupPl != null && totalQty !== 0 && navF && refNav) {
@@ -1196,42 +1198,12 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       fundPlArr.push(fundPl);
 
       const qtyCell = `<td class="num">${fund_qty !== 0 ? fmtFinalQty(fund_qty, qtyDec(r)) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
-      const pctCell = `<td class="num">${pct != null ? fmtPct(pct) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
       const plCell  = `<td class="num">${fundPl != null ? fmtPL(fundPl, r.pl_type) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
-      return qtyCell + pctCell + plCell;
+      return qtyCell + plCell;
     }).join('');
 
-    // Check Qtd: % qty de cada fundo vs % NAV esperada
-    let checkCell = '<td></td>';
-    if (r.is_offshore) {
-      checkCell = '<td style="color:var(--text-muted);text-align:right;font-size:11px">offshore</td>';
-    } else if (offOnly) {
-      // Alvo 100% no fundo offshore — NÃO é desligar o check, é trocar o alvo: qtd que
-      // vaze para o outro fundo continua sendo acusada.
-      const offQty = byFund[offFund]?.final_qty ?? 0;
-      const pctOff = totalQty !== 0 ? offQty / totalQty : null;
-      const dev    = pctOff != null ? Math.abs(pctOff - 1) : null;
-      const lbl    = dev == null ? '—' : dev < 0.01 ? '✓' : `±${(dev * 100).toLocaleString('en-US', {maximumFractionDigits:1})}pp`;
-      checkCell = `<td class="check-cell ${allocClass(dev)}" title="Dólar — alvo 100% em ${
-        shortLabel(offFund)}, não o rateio por NAV">${lbl}</td>`;
-    } else {
-      const checks = fundLabels.map(fl => {
-        const fr       = byFund[fl];
-        const fund_qty = fr?.final_qty ?? 0;
-        const pctQty   = totalQty !== 0 ? fund_qty / totalQty : null;
-        const pctNav   = ratioByFund[fl];
-        return pctQty != null && pctNav != null ? Math.abs(pctQty - pctNav) : null;
-      });
-      const valid  = checks.filter(c => c != null);
-      const maxDev = valid.length === fundLabels.length ? Math.max(...valid) : null;
-      const cls    = allocClass(maxDev);
-      const label  = maxDev == null ? '—' : maxDev < 0.01 ? '✓' : `±${(maxDev * 100).toLocaleString('en-US', {maximumFractionDigits:1})}pp`;
-      checkCell = maxDev == null
-        ? '<td class="num" style="color:var(--text-muted);text-align:right">—</td>'
-        : `<td class="check-cell ${cls}">${label}</td>`;
-    }
-
     // Check #PL: #PL individual de cada fundo vs #PL do grupo
+    // (o "Check Qtd" que ficava aqui saiu em 27/10/2026 — ver a nota no `cells` acima)
     let checkPlCell = '<td></td>';
     if (r.is_offshore) {
       checkPlCell = '<td style="color:var(--text-muted);text-align:right;font-size:11px">offshore</td>';
@@ -1265,7 +1237,6 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     return `<tr class="${rowClass} ${areaClass}">
       <td>${r.instrument_name ?? '—'}${offMark}</td>
       ${cells}
-      ${checkCell}
       ${checkPlCell}
       ${mirrorCols ? mirrorCheckCell(r, mirrorCfg) : ''}
       ${rfSleeveCols ? _checkVazio() : ''}
@@ -1277,13 +1248,13 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     const navStr = navF != null
       ? `<br><small style="font-weight:normal;font-size:10px">${fmtNav(navF)}</small>`
       : '';
-    return `<th colspan="3">${shortLabel(fl)}${navStr}</th>`;
+    return `<th colspan="2">${shortLabel(fl)}${navStr}</th>`;
   }).join('');
-  const subHeaders = fundLabels.map(() => '<th>Qty</th><th>% Qtd</th><th>#PL</th>').join('');
+  const subHeaders = fundLabels.map(() => '<th>Qty</th><th>#PL</th>').join('');
 
   // Rodapé: diz por que aquelas linhas não seguem o rateio por NAV (a tela não pode
   // trocar o alvo do check em silêncio).
-  const NC = 1 + 3 * fundLabels.length + 2 + (mirrorCols ? 1 : 0) + (rfSleeveCols ? 1 : 0);
+  const NC = 1 + 2 * fundLabels.length + 1 + (mirrorCols ? 1 : 0) + (rfSleeveCols ? 1 : 0);
   const footTr = usedOffOnly
     ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--text-muted)"><div>`
       + `US$ dólar (WDO/UC, opção DOL/USDBRL, spot-fwd USD/BRL): alocação vai 100% para `
@@ -1296,7 +1267,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
 
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead>
-      <tr><th rowspan="2">Instrumento</th>${headers}<th rowspan="2">Check Qtd</th><th rowspan="2">Check #PL</th>${mirrorCols ? mirrorCheckHead(mirrorCfg).replace('<th ', '<th rowspan="2" ') : ''}${rfSleeveCols ? rfCheckHead(rfCfg, true).replace('<th ', '<th rowspan="2" ') : ''}</tr>
+      <tr><th rowspan="2">Instrumento</th>${headers}<th rowspan="2">Check #PL</th>${mirrorCols ? mirrorCheckHead(mirrorCfg).replace('<th ', '<th rowspan="2" ') : ''}${rfSleeveCols ? rfCheckHead(rfCfg, true).replace('<th ', '<th rowspan="2" ') : ''}</tr>
       <tr>${subHeaders}</tr>
     </thead>
     <tbody>${rows}${footTr}${rfFootTr}</tbody>

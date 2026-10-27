@@ -1,7 +1,6 @@
 function rerenderTables(onlyKey) {
   const data = posDataByTab[activeTraderTab];
   if (!data?.rows) return;
-  const onlySection = onlyKey ? onlyKey.split('||') : null;  // [group, trader, ...]
   const keep       = tabRowFilter(activeTraderTab);        // pos-helpers.js — fonte única
   const filterRows = rows => rows.filter(keep);
   const hasFundBreak = activeTraderTab === 'portfoliorf' && !!(data?.fund_rows?.length);
@@ -10,8 +9,18 @@ function rerenderTables(onlyKey) {
   // Uma cópia da regra aqui foi o que apagou as linhas do sleeve no 1º filtro (ver a nota lá).
   const rfGroupId = rfGroupIdFor(data);
   for (const s of sectionsFor(activeTraderTab, displayRows)) {
-    const isTarget = !onlySection || (s.group === onlySection[0] && s.trader === onlySection[1]);
     const rows = filterRows(sortRows(sectionRowsFor(activeTraderTab, s, displayRows)));
+    /* ☠️ **A seção-alvo é a que CONTÉM a chave, não a que casa o `group||trader` DELA.** Era
+       `s.group === onlyKey[0] && s.trader === onlyKey[1]`, na premissa de que a linha é
+       desenhada na seção do próprio grupo/trader. **O sleeve de RF quebrou a premissa**: as
+       linhas dele são `RF Offshore||PAbinader||…` e aparecem DENTRO da seção
+       `Todos / PortfolioRF` (intercaladas, por decisão da mesa). Resultado medido em
+       27/10/2026: clicar no ✕ de um `USD/MXN` do sleeve **não repintava nada** — nenhuma
+       seção casava —, a linha entrava em `hiddenRows` em silêncio e só sumia da tela no
+       próximo render completo, quando já não havia como trazê-la de volta. A mesa relatou
+       exatamente isso ("ocultei e depois não consegui voltar com elas").
+       Procurar a chave nas linhas da seção é exato e não depende do formato dela. */
+    const isTarget = !onlyKey || rows.some(r => rowKey(r) === onlyKey);
     /* Modo "Por fundo" (pos-fundsplit.js): o tbody ganha os blocos por fundo no lugar das
        linhas do livro — mesma moldura, mesmo card, mesma auxiliar.
        ⚠️ Tem de passar por AQUI, e não só pelo rebuild: ocultar uma linha ou mexer num chip de

@@ -942,7 +942,6 @@ async function loadEnquadramentoRF(opts = {}) {
 }
 
 // Formatadores locais (qtd inteira · PU/preço 2 casas · taxa 3 casas).
-function _enqQty(v)  { return (v == null) ? '—' : Math.round(v).toLocaleString('pt-BR'); }
 function _enqNum(v, d = 2) { return (v == null || !isFinite(v)) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
 
 const _ENQ_DOL_CAT = { mini: 'Mini (WDO)', cheio: 'Cheio (UC)', option: 'Opção' };

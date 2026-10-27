@@ -1,5 +1,6 @@
 /* ── Casca de abas unificada (padrão Monitor RF) ──────────────────────────────
-   Um ÚNICO controlador delegado no #tabbar troca as 7 abas. _showPanel faz a
+   Um ÚNICO controlador delegado no #tabbar troca as abas (10 botões / 11 painéis — o
+   botão do Hedge Cambial serve duas telas). _showPanel faz a
    parte comum (toggle .on no botão + no painel, via CSS .tab/.tab.on); cada
    show*Tab mantém só o seu despacho (lazy-load / prefetch / dirty-state).
    No snapshot estático (sem #tabbar nem painéis .tab) _showPanel é inócuo. */

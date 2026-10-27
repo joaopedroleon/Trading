@@ -62,15 +62,42 @@ html.theme-v2 .data-table tbody tr:hover      { background: var(--green-tint); }
    se distinguir a olho. A mesa pediu **tom de fundo**, não um selo de texto ao lado do
    nome: o selo repetia o mesmo nome em toda linha e competia com o instrumento.
    ⚠️ Vem DEPOIS da zebra para sobrescrevê-la, e ANTES do `:hover` continuar valendo (o
-   hover está acima e tem a mesma especificidade — a ordem é que decide). O azul é o
-   `--accent` da casa a 6%: suficiente para separar os blocos, fraco o bastante para não
-   competir com o verde/vermelho dos números. A barrinha à esquerda é o que sobrevive à
-   impressão em P&B e ao daltonismo. */
+   hover está acima e tem a mesma especificidade — a ordem é que decide). */
+/* ☠️ **A barrinha é `border-left` na 1ª célula, NÃO `box-shadow: inset` no `<tr>`** — e a
+   razão é o "⎘ Copiar". O **html2canvas 1.4.1 pinta `inset` como preenchimento da ÁREA
+   INTEIRA**, ignorando o deslocamento: a barra de 3px virava a linha toda azul no print.
+   Medido em 27/10/2026 na aba do PortfolioRF — na tela a linha é `rgb(240, 246, 251)`
+   (quase branca) e no print saía `rgb(75, 154, 210)`, com a varredura horizontal dando o
+   mesmo tom em x+4, x+40, x+120 e x+300. A mesa reportou como "fica muito azul".
+   ⚠️ **Não é bug da rede de `color-mix`**: ela funciona (o clone recebe
+   `background-color: rgb(240, 246, 251)` inline, conferido). O problema é o `inset` em si.
+   ⚠️ Borda na 1ª CÉLULA e não no `<tr>`: com `border-collapse` a borda do `<tr>` não
+   renderiza. E **cor OPACA** (misturada no papel, não em `transparent`): alfa aqui voltaria a
+   depender de composição, que é justamente o que o html2canvas erra.
+   ⚠️ O fundo é fraco de propósito — 4% do `--accent` (era 6%; a mesa pediu mais fraco ainda).
+   Separa o bloco sem competir com o verde/vermelho dos números, e a barrinha é o que
+   sobrevive à impressão em P&B e ao daltonismo. */
 html.theme-v2 .data-table tbody tr.sleeve-row {
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-card));
+}
+html.theme-v2 .data-table tbody tr.sleeve-row > td:first-child {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 55%, var(--bg-card));
 }
 html.theme-v2 .data-table tbody tr.sleeve-row:hover { background: var(--green-tint); }
+
+/* ☠️ **Linha do sleeve FORA DO ESCOPO do veículo** (`rf_sleeve_fora_de_escopo`, funds.py).
+   O `pos-helpers.js` já carimbava a classe `sleeve-fora-escopo` e o comentário dele promete
+   "marcação PRÓPRIA, vermelha: a faixa do topo nomeia, e aqui a linha se identifica no meio
+   das outras" — **mas a regra nunca existiu**, então a linha saía igual às outras e o aviso
+   do topo não tinha a que apontar. Achado na revisão de 27/10/2026.
+   ⚠️ Vermelho tênue + barrinha vermelha, no mesmo desenho da linha de sleeve normal: o que
+   muda é a COR, não a forma — as duas são linha de sleeve, e só uma está fora do escopo. */
+html.theme-v2 .data-table tbody tr.sleeve-row.sleeve-fora-escopo {
+  background: color-mix(in srgb, var(--red) 7%, var(--bg-card));
+}
+html.theme-v2 .data-table tbody tr.sleeve-row.sleeve-fora-escopo > td:first-child {
+  border-left: 3px solid color-mix(in srgb, var(--red) 60%, var(--bg-card));
+}
 
 /* Chip da tira NET que é do sleeve — mesmo tom da linha na tabela, para o olho ligar os dois. */
 html.theme-v2 .net-chip.net-chip-sleeve {
@@ -100,7 +127,7 @@ html.theme-v2 .data-table tbody tr.fs-head > td {
 html.theme-v2 .data-table tbody tr.fs-head:hover > td { background: var(--green-tint); }
 html.theme-v2 .data-table tbody tr.fs-head .fs-head-lbl {
   font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 /* A tira NET do fundo entra na PRÓPRIA linha. Ela mantém a classe `.net-summary` (é de lá
    que vem o estilo das pílulas — ver o ☠️ no `_fsHeadHtml`); aqui só se desfaz o que ela tem
@@ -156,16 +183,15 @@ html.theme-v2 .tabbtn.on { color: var(--text); border-bottom: 2px solid var(--gr
    ⚠️ A classe vai no HTML (`positions.html`), uma por botão, e o id continua sendo o contrato
    de DOM com o `_showPanel`/PosBusy — a cor não é funcional. */
 html.theme-v2 .tabbtn.tb-pf,
-html.theme-v2 .tabbtn.tb-bol,
 html.theme-v2 .tabbtn.tb-tool { border-radius: 4px 4px 0 0; }
 
 /* Fundo pessoa física dos traders (Impar / Vista) — âmbar */
 html.theme-v2 .tabbtn.tb-pf    { background: rgba(190, 140,  30, .09); }
 html.theme-v2 .tabbtn.tb-pf:hover { background: rgba(190, 140,  30, .16); }
-/* Conferência do dia (Boletas) — azul */
-html.theme-v2 .tabbtn.tb-bol   { background: rgba( 50, 110, 190, .09); }
-html.theme-v2 .tabbtn.tb-bol:hover { background: rgba( 50, 110, 190, .16); }
-/* Ferramentas de controle (Análise de Opções · Check Enquadramento · Hedge Cambial) — cinza */
+/* Ferramentas de controle — cinza. ⚠️ A "Boletas do Dia" voltou para o FIM da barra e para
+   esta cor (mesa, 27/10/2026): ela chegou a ter tom próprio ao lado do PortfolioRF, mas é
+   conferência, não livro — mora com as outras ferramentas.
+   Hoje: Análise de Opções · Check Enquadramento · Hedge Cambial · Boletas do Dia. */
 html.theme-v2 .tabbtn.tb-tool  { background: rgba(110, 120, 135, .09); }
 html.theme-v2 .tabbtn.tb-tool:hover { background: rgba(110, 120, 135, .16); }
 /* A aba ATIVA volta ao branco do papel: o grupo já foi comunicado no caminho até o clique,
@@ -641,4 +667,22 @@ html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-bad {
   html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-warn { color: var(--yellow); }
   html.theme-v2 .data-table tbody tr td.check-cell.alloc-ok,
   html.theme-v2 .jgp-tbl    tbody tr td.check-cell.alloc-ok   { color: var(--green); }
+}
+
+/* ── ☠️ `class="ed"` estava carimbada e SEM REGRA — o campo editável não se identificava ──
+   Mesma família do `.sleeve-fora-escopo`: o JS marca, o CSS não pinta, e nada dá erro.
+   O `pos-margem.js` põe `class="ed"` nos 4 campos digitáveis da aba Impar / Vista (NAV,
+   "Qtd operada", e o par ativo+quantidade da linha de novo ativo) seguindo a convenção da
+   casa — "campo editável tem UMA marca só em toda a tela", a mesma âmbar da `fx-options`.
+   Sem a regra eles saíam com a bordinha cinza do estilo inline, iguais a qualquer input, e
+   justamente nessa aba o ponto é a mesa SABER onde pode digitar (não há fonte intradiária:
+   a quantidade operada e o ativo novo só existem se alguém os digitar).
+   ⚠️ `!important` é deliberado e vem da referência: os inputs trazem `background`/`border`
+   no atributo `style=`, e declaração inline vence stylesheet — sem o `!important` a regra
+   entraria e continuaria invisível, que é o pior dos dois mundos.
+   ⚠️ E é `rgba()`, não `color-mix()`: esta área é copiada pelo "⎘ Copiar" e `color-mix`
+   serializa como `color(srgb …)`, que o html2canvas 1.4.1 não lê (ver `pos-misc.js`). */
+html.theme-v2 .ed {
+  background: rgba(201, 162, 39, .10) !important;
+  border-color: rgba(201, 162, 39, .55) !important;
 }

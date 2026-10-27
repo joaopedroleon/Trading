@@ -267,11 +267,6 @@ function _expCell(exp, nav, qty, lb = false) {
   return `<td class="num"${style}${_qtyTip(qty)}>${_fmtBrl(exp)}<br><span style="font-size:11px;color:var(--text-muted)">${pct}</span></td>`;
 }
 
-// Célula só BRL (linha de total geral, onde % do NAV não faz sentido entre fundos).
-function _brlCell(exp, lb = false) {
-  return `<td class="num"${lb ? ' style="border-left:1px solid var(--border)"' : ''}>${_fmtBrl(exp)}</td>`;
-}
-
 // BRL sem coloração própria (para a célula destacada, onde a cor vem do limite).
 function _brlPlain(v) {
   if (v == null) return '—';
