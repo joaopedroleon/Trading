@@ -66,12 +66,20 @@ const PosBusy = (() => {
     // `hedge`       = posição viva de Hedge_Cambial + ajuste D-1 (Oracle + BBG);
     // `hedge-rel`   = leitura do PDF do relatório;
     // `hedge-plano` = netting + boletas (não vai ao Oracle — é só conta sobre o que já veio).
-    // ⚠️ O <h2> do relatório NÃO tem `data-sec`: recarregar um PDF é ação de arquivo
-    // (o botão "Carregar PDF" está ali), não refetch — um ⟳ ali não teria o que refazer.
-    'hed:pla':   { src: 'hedge-plano', also: ['hedge', 'hedge-rel'],
-                   containers: ['hedgePlano'] },
-    'hed:bol':   { src: 'hedge-plano', also: ['hedge', 'hedge-rel'],
-                   containers: ['hedgeBoletas'] },
+    // Duas seções, uma por público — e as duas saem do MESMO /plano, então acendem juntas.
+    // ⚠️ **`hedgeRelatorio` fica FORA das duas listas**, apesar de estar dentro da seção
+    // `hed:mm`: ali mora o botão "Carregar PDF", e o véu do PosBusy põe
+    // `pointer-events:none` — velar o seletor de arquivo durante um recálculo tiraria do ar
+    // justamente a ação que não depende dele. (Era o motivo de o <h2> do relatório não ter
+    // `data-sec` quando ele era seção própria.)
+    'hed:mm':    { src: 'hedge-plano', also: ['hedge', 'hedge-rel'],
+                   containers: ['hedgePlano', 'hedgeBoletas'] },
+    'hed:prev':  { src: 'hedge-plano', also: ['hedge', 'hedge-rel'],
+                   containers: ['hedgePrev', 'hedgePrevBoletas'] },
+    // ── IMPAR / VISTA — margem B3 dos fundos pessoa física ──
+    // Source próprio: a leitura é do OUTLOOK e não tem nada a ver com o /reference das abas
+    // de trader. Um container só — o pos-margem.js desenha um card por conta dentro dele.
+    'marg:all':  { src: 'margem', containers: ['margemContainer'] },
   };
   // Cada seção de aba de trader pinta DOIS containers: o principal e o bloco colapsado
   // que desceu p/ o fim da aba (#posPrevContainer-* / #pnlDetailContainer-*, ver a ordem
@@ -103,6 +111,7 @@ const PosBusy = (() => {
     boletas:  () => window.gerarBoletas(),
     boldia:   () => { _dropTabCache(BOLETAS_TAB_ID); return window.loadBoletas(); },
     'hedge-plano': () => window.gerarPlanoHedge(),
+    margem:   () => window.loadMargem({ fresh: true }),
   };
   // `fxlegs:<tab>` é dinâmico (um por aba de câmbio) e refaz SÓ a 2ª onda — as boletas do
   // Sophis —, sem tocar em Posição/PnL, que saem do outro request.
@@ -118,6 +127,7 @@ const PosBusy = (() => {
     boletas:  'Prévia de boletas (real + gerencial)',
     boldia:   'Resumo de boletas do dia por ativo',
     'hedge-plano': 'Netting entre traders, resíduo e boletas (sobre o relatório já lido)',
+    margem:   'Margem B3 das duas contas pessoa física (relê o e-mail no Outlook)',
   };
 
   const _depth = new Map();   // src → nº de cargas em voo

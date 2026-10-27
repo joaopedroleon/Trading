@@ -12,6 +12,11 @@ const API_BASE = location.protocol === 'file:' ? 'http://localhost:8083' : '';
    trader: é contrato de DOM com o pos-fxlegs.js e o PosBusy. As pernas exigem uma query a
    mais + duas tabelas próprias no DOM da aba. Ligar numa aba sem os containers
    `#fxCcyContainer-*` não quebra (o renderizador sai cedo), mas paga a query sem mostrar nada. */
+/* ⛔ **A margem B3 dos fundos PESSOA FÍSICA não mora aqui.** Ela nasceu como um card dentro
+   da seção "Posição" das abas do EMota e do ECotrim (flag `margemB3`) e a mesa a mandou para
+   uma ABA PRÓPRIA em 27/10/2026 — "IMPAR / VISTA", `#tab-margem`. Aqueles fundos são pessoa
+   física dos traders e não têm nada a ver com a base da JGP; um palmo abaixo do livro, o
+   número convidava a somar. Nada de reintroduzir a flag: ver pos-margem.js. */
 const TRADER_TABS = [
   { id: 'emota',       trader: 'EMota',      filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
   { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
@@ -55,6 +60,13 @@ const wdoUcAggregated      = new Set(); // tabIds com agregação WDO+UC ativa
    dois payloads no mesmo lugar faria a 2ª onda reescrever a tabela principal, que é
    exatamente o que não se quer. Ver pos-fxlegs.js e `loadFxDealsForTab` (pos-tabs.js). */
 const fxDealsByTab = {};             // tabId → payload da 2ª onda (só as seções de câmbio)
+/* Cache da aba MARGEM B3 (fundos pessoa física) — `conta → payload`, mais o envelope.
+   ☠️ A chave é a CONTA, não a aba: as duas contas convivem na mesma aba "IMPAR / VISTA",
+   e é por conta que se grava a quantidade operada. ☠️ E fica SEPARADO do `posDataByTab`
+   pelo mesmo motivo do `fxDealsByTab`, mais um: este dado não é do livro da JGP, e
+   misturar os payloads seria o primeiro passo para ele vazar para um total da tela.
+   `margemData === null` = ainda não carregou (o renderizador não toca no container). */
+let margemData = null;        // { contas: {conta: {...}}, erro, fonte } | null
 /* Abas com a tabela "Posição por moeda" QUEBRADA POR VÉNTICE (chip "⤵ Por vencimento").
    Default VAZIO — a mesa pediu o resumo (uma linha por moeda) como leitura de relance, com a
    quebra por vencimento sob demanda. Estado por aba, não global: é escolha de exibição de uma

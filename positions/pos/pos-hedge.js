@@ -32,6 +32,12 @@ let hedgePlano = null;        // último retorno de POST /plano
 let hedgeTraders = null;      // Set de traders no netting (null = ainda não montado)
 let hedgeMktSel = {};         // 'trader||fund' → qtd escolhida para ir a mercado
 let _hedgeCfgLoaded = false;
+/* Fundos Prev (a 2ª tabela do PDF). `null` = default do servidor; o usuário sobrescreve.
+   ⭐ **Nasce LIGADO**, ao contrário do resíduo MM: lá há uma decisão a tomar (levar ou não
+   a mercado o que não casou); aqui não há netting nenhum — o net dos 7 fundos Prev é
+   SEMPRE boletado no JGP FIM IE-A. Desligar é opt-out, e some junto com o relatório. */
+let hedgePrevAtivo = null;    // null = ligado quando há falta; false = o usuário desligou
+let hedgePrevQty = '';        // marreta da quantidade ('' = usa o `falta` do servidor)
 
 // Config das colunas fixas da boleta + preço/corretora do resíduo. Mesmo espírito do
 // `rolagemConfig`. ⚠️ `deal_date` NÃO persiste — ver a mesma nota em pos-rolagem.js:
@@ -42,6 +48,11 @@ const hedgeConfig = {
   obs_reserved: '', ignore_previous: '',
   limiar_kusd: 10, instrument: '', price: '', price_date: '',
   mkt_price: '', mkt_broker: (typeof ROLAGEM_BROKER_DEFAULT === 'string' ? ROLAGEM_BROKER_DEFAULT : 'Ativa CTVC'),
+  // Fundos Prev: preço e corretora PRÓPRIOS, não os do resíduo MM. ⚠️ São execuções
+  // diferentes — aferido no JDS, a perna dos Prev sai sozinha e por corretora própria
+  // (Link CCTVM em 27/10/2026; Agora, XP, BTG, Santander, Itaú e Renaissance antes dela),
+  // sem relação com o broker do resíduo da mesa no mesmo dia.
+  prev_price: '', prev_broker: (typeof ROLAGEM_BROKER_DEFAULT === 'string' ? ROLAGEM_BROKER_DEFAULT : 'Ativa CTVC'),
   // ⚠️ **NÃO persiste, de propósito** (mesma família do `deal_date`): desligar o desconto
   // é uma conferência pontual — "o que o relatório pediria se eu não tivesse boletado
   // nada". Persistido, ele voltaria ligado num outro dia e a tela mandaria boletar de novo
@@ -51,7 +62,7 @@ const hedgeConfig = {
 const LS_HEDGE_CFG = 'jgp_hedge_cfg_v1';
 const _HEDGE_CFG_PERSIST = ['counterparty_gerencial', 'giveup', 'deal_type', 'value_date',
   'fixing_date', 'fo_remark', 'bo_remark', 'obs_reserved', 'ignore_previous',
-  'limiar_kusd', 'mkt_broker'];
+  'limiar_kusd', 'mkt_broker', 'prev_broker'];
 
 function saveHedgeConfig() {
   try {
@@ -151,6 +162,7 @@ async function loadHedgeContexto(opts = {}) {
     if (!hedgeRelatorio && data.relatorio_cache?.relatorio) {
       hedgeRelatorio = { ...data.relatorio_cache.relatorio, cache: data.relatorio_cache };
       hedgeMktSel = {};
+      _hedgePrevReset();
     }
     if (status) status.textContent = '';
     // ⚠️ Posição e ajuste mudaram ⇒ o plano que está na tela é de outro contrato/preço.
@@ -169,7 +181,9 @@ function renderHedge() {
   _hedgeRenderControles();
   _hedgeRenderRelatorio();
   _hedgeRenderPlano();
+  _hedgeRenderPrev();
   _hedgeRenderBoletas();
+  _hedgeRenderPrevBoletas();
 }
 
 function _hedgeNum(v, dec = 2) {
@@ -227,7 +241,7 @@ function _hedgeInput(label, key, val, ph, w) {
 }
 /* ☠️ **Invalidar o plano sem REFAZÊ-LO esvazia a tela.** Era `hedgePlano = null;
    renderHedge()` — e qualquer campo que se mexesse (o preço de mercado, o limiar, um chip
-   de trader) apagava as seções 02 e 03 inteiras, sem nada no lugar e sem nenhum request
+   de trader) apagava o plano e as boletas inteiros, sem nada no lugar e sem nenhum request
    em voo: a tela voltava para "Carregue o relatório", com o relatório carregado logo
    acima. Quem invalida tem de disparar o recálculo; sem relatório não há o que refazer,
    e aí só o render mesmo. */
@@ -286,7 +300,7 @@ function toggleHedgeTrader(t) {
   _hedgeInvalidarPlano();
 }
 
-/* ── Seção 01 — o relatório ───────────────────────────────────────────────── */
+/* ── SEÇÃO 1 (traders) · a — o relatório ───────────────────────────────────────────────── */
 function _hedgeRenderRelatorio() {
   const el = document.getElementById('hedgeRelatorio');
   if (!el) return;
@@ -430,6 +444,10 @@ async function _hedgeEnviarRelatorio(body, formato, filename) {
     hedgeRelatorio = data;
     hedgePlano = null;
     hedgeMktSel = {};
+    // Relatório novo = necessidade nova: a marreta de quantidade dos Prev e o opt-out
+    // valiam para o exemplar ANTERIOR. Mantê-los faria a tela boletar o número de ontem
+    // sobre o relatório de hoje, sem nada apontar — mesma família do `hedgeMktSel`.
+    _hedgePrevReset();
     if (st) st.textContent = '';
     await gerarPlanoHedge();
   } catch (e) {
@@ -440,7 +458,7 @@ async function _hedgeEnviarRelatorio(body, formato, filename) {
   }
 }
 
-/* ── Seção 02 — necessidade, netting e resíduo ────────────────────────────── */
+/* ── SEÇÃO 1 (traders) · b — necessidade, netting e resíduo ────────────────────────────── */
 async function gerarPlanoHedge() {
   if (!hedgeRelatorio) return;
   const st = document.getElementById('refStatus');
@@ -461,6 +479,14 @@ async function gerarPlanoHedge() {
       config: hedgeConfig,
       ignorar_boletas: !!hedgeConfig.ignorar_boletas,
       mercado: { linhas, price: hedgeConfig.mkt_price, broker: hedgeConfig.mkt_broker },
+      // ⚠️ `ativo` só vai quando o usuário DESLIGOU: o default (ligado) é do servidor, e
+      // mandá-lo daqui criaria uma 2ª fonte da verdade para "a seção dos Prev gera boleta?".
+      // `qty` idem — vazio = o `falta` que o servidor calculou.
+      prev: {
+        ...(hedgePrevAtivo === false ? { ativo: false } : {}),
+        ...(hedgePrevQty !== '' ? { qty: hedgePrevQty } : {}),
+        price: hedgeConfig.prev_price, broker: hedgeConfig.prev_broker,
+      },
     };
     const data = await (await fetch(`${API_BASE}/api/positions/hedge-cambial/plano`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -596,25 +622,51 @@ function _hedgeFaixaBoletas(p) {
   // descontou. O que sobra NÃO some: sai na mesma faixa, declarado como não descontado.
   const noNet = new Set(p.traders || []);
   const fundosNet = new Set(Object.values(p.fund_map || {}).filter(Boolean));
-  const _soma = (dentro) => {
+  // ⭐ TRÊS baldes, não dois: o que esta seção descontou, o que a seção dos **fundos Prev**
+  // descontou, e o que ninguém descontou.
+  // ☠️ **O balde do Prev tem de SAIR por chave, não por subtração do total.** Ele mora num
+  // fundo fora do relatório MM (`JGP FIM IE-A`), então cairia inteiro em `fora` e a faixa
+  // diria "não descontado" sobre o que a tela desconta na seção seguinte. Subtrair o valor
+  // consertaria o nÚMERO e deixaria o `PortfolioPrev` na LISTA de quem ficou de fora —
+  // plausível, e acusando um trader que está em dia.
+  const pv = p.prev || {};
+  const _ehPrev = (lab, t, area, strat) => !!pv.disponivel
+    && lab === pv.fund_label && t === pv.trader
+    && String(area || '').toLowerCase() === String(pv.area || '').toLowerCase()
+    && String(strat || '').toLowerCase() === String(pv.strategy_raw || '').toLowerCase();
+  // ⚠️ Agrega por (fundo, trader, tipo) ANTES do módulo — é a granularidade do
+  // `boletado_tipo`, e é ela que faz a ROLAGEM se cancelar (vender X26 + comprar Z26 = 0).
+  // Somar |minis| linha a linha contaria as duas pernas e dobraria o número num dia de roll.
+  const baldes = { dentro: new Map(), prev: new Map(), fora: new Map() };
+  for (const l of (p.boletado_linhas || [])) {
+    const lab = l.fund_label, t = l.trader;
+    const b = _ehPrev(lab, t, l.area, l.strategy) ? 'prev'
+      : ((noNet.has(t) && fundosNet.has(lab)) ? 'dentro' : 'fora');
+    const k = `${lab}||${t}||${l.tipo}`;
+    const m = baldes[b];
+    m.set(k, (m.get(k) || 0) + (Number(l.minis) || 0));
+  }
+  const _soma = (nome) => {
     let ger = 0, mkt = 0;
     const quem = new Set();
-    for (const [lab, porT] of Object.entries(p.boletado_tipo || {})) {
-      for (const [t, x] of Object.entries(porT)) {
-        if ((noNet.has(t) && fundosNet.has(lab)) !== dentro) continue;
-        ger += Math.abs(x.gerencial || 0);
-        mkt += Math.abs(x.mercado || 0);
-        if (Math.abs(x.gerencial || 0) + Math.abs(x.mercado || 0)) quem.add(t);
-      }
+    for (const [k, v] of baldes[nome]) {
+      const [, t, tipo] = k.split('||');
+      const a = Math.abs(Math.round(v));
+      if (!a) continue;
+      if (tipo === 'gerencial') ger += a; else mkt += a;
+      quem.add(t);
     }
     return { ger, mkt, tot: ger + mkt, quem: [...quem].sort() };
   };
-  const d = _soma(true), fora = _soma(false);
+  const d = _soma('dentro'), fora = _soma('fora'), prev = _soma('prev');
   const ger = d.ger, mkt = d.mkt, tot = d.tot;
-  const foraTxt = fora.tot
+  const prevTxt = prev.tot
+    ? ` <span style="color:var(--text-muted)" title="o net dos fundos Prev tem seção própria, logo abaixo, e lá estes minis JÁ são descontados">
+         · <b>${prev.tot}</b> descontado(s) na seção dos fundos Prev</span>` : '';
+  const foraTxt = (fora.tot
     ? ` <span style="color:var(--text-muted)" title="boletas de Hedge_Cambial de quem não está netando aqui (ou em fundo fora do relatório) — ficam de fora da conta, mas existem">
          · <b>${fora.tot}</b> mini(s) fora do netting, não descontados (${fora.quem.join(', ')})</span>`
-    : '';
+    : '') + prevTxt;
   const off = !!hedgeConfig.ignorar_boletas;
   const janTxt = j.erro
     ? `<span style="color:var(--red)">falhou ao ler as boletas — o plano é o do relatório cru</span>`
@@ -807,40 +859,281 @@ function hedgeMarcarTodoResiduo() {
   gerarPlanoHedge();
 }
 
-/* ── Seção 03 — boletas ───────────────────────────────────────────────────── */
-// Colunas do JDS que ficam sempre vazias: escondidas na prévia, presentes no export
-// (o paste no JDS conta coluna). Mesma regra da Rolagem Dólar.
+/* ── SEÇÃO 2 (Prev) — o net vai TODO no JGP FIM IE-A ───────────────────
+   A 2ª tabela do MESMO PDF ("BRL exposure for Prev Funds") traz os 7 fundos do grupo
+   MM Prev. O hedge cambial de todos eles mora num fundo só — o `JGP FIM IE-A` —, então
+   aqui **não há netting**: o que se boleta é o NET das 7 linhas, uma vez, no trader
+   `PortfolioPrev` e sempre em `Rates - Hedge_Cambial - Hedge_Cambial` (regra da mesa).
+
+   ☠️ **Soma primeiro, arredonda depois.** A tabela por fundo mostra os minis de cada
+   linha só para a mesa ver de onde veio o net — e eles NÃO somam o que se boleta. No
+   exemplar de 22/10/2026 as 7 linhas arredondadas dão **+2** e o Total dá **+4**: o dobro.
+   Por isso a coluna por fundo sai esmaecida e o número que vira boleta é o da linha Total.
+
+   ⚠️ A contraparte é CORRETORA, não `Gerencial` — com um fundo e um trader só não há o
+   que netar entre livros, então o ajuste vai a mercado (é o que as boletas de 2026 do
+   PortfolioPrev mostram: Agora, XP, BTG, Santander, Itaú, Renaissance, Link). */
+function _hedgePrevReset() {
+  hedgePrevAtivo = null;
+  hedgePrevQty = '';
+}
+
+function setHedgePrevAtivo(on) {
+  hedgePrevAtivo = on ? null : false;   // `null` = default do servidor (ligado)
+  gerarPlanoHedge();
+}
+function setHedgePrevQty(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (t === '') { hedgePrevQty = ''; gerarPlanoHedge(); return; }
+  const n = parseInt(t, 10);
+  hedgePrevQty = Number.isFinite(n) ? n : '';
+  gerarPlanoHedge();
+}
+// Volta a quantidade ao que o servidor calculou (relatório − já boletado).
+function hedgePrevUsarFalta() {
+  hedgePrevQty = '';
+  gerarPlanoHedge();
+}
+
+// ⚠️ **"Nada a boletar" tem TRÊS motivos, e dizer o errado manda procurar o que não
+// existe** — mesma lição do `_hedgeResiduoTabela` do resíduo MM. Com o desconto das boletas
+// do dia, o caso comum passou a ser "já está feito", e creditar isso ao limiar (ou ao
+// contrário) faria a mesa conferir a coisa errada.
+function _hedgePrevPorQue(n) {
+  if (!n.bruto && !n.boletado) return `o descasamento dos Prev está abaixo do limiar de ${_hedgeNum(n.limiar, 0)} kUSD`;
+  if (!n.bruto && n.boletado) return 'o relatório não pedia nada e o que foi boletado hoje já se compensa';
+  return 'o que o relatório pedia já foi boletado hoje';
+}
+
+function _hedgeRenderPrev() {
+  const el = document.getElementById('hedgePrev');
+  if (!el) return;
+  const p = hedgePlano;
+  if (!p) {
+    el.innerHTML = `<div class="card no-data">Carregue o relatório — a tabela dos fundos Prev vem no mesmo PDF.</div>`;
+    return;
+  }
+  const pv = p.prev || {};
+  if (!pv.disponivel) {
+    // ⚠️ Declara em vez de sumir: o PDF pode ter vindo sem a página (ou com ela ilegível),
+    // e uma seção vazia em silêncio leria como "os Prev estão zerados hoje".
+    const erro = pv.prev && pv.prev.erro;
+    return void (el.innerHTML = `<div class="card" style="font-size:12px;color:var(--amber,#c90)">
+      ⚠ Não li a tabela dos fundos Prev neste relatório${erro ? ' — ' + erro : ''}.
+      ${(hedgeRelatorio && hedgeRelatorio.origem === 'texto')
+        ? ' O caminho de <b>texto colado</b> lê só a 1ª tabela (a dos traders); a dos Prev vem só do <b>PDF</b>.'
+        : ' Ela é a página <i>“BRL exposure for Prev Funds”</i> do mesmo PDF.'}
+      <br>Nenhuma boleta de Prev é gerada.</div>`);
+  }
+
+  const n = pv.need || {};
+  const conf = pv.conferencia || [];
+  const badge = conf.length
+    ? `<span style="color:var(--red);font-weight:600">⚠ ${conf.length} linha(s) não fecham com o próprio relatório</span>`
+    : `<span style="color:var(--green);font-weight:600">✓ leitura confere (Σ fundos = Total · contratos = −arred(kUSD/50))</span>`;
+  const confTxt = conf.length
+    ? `<div style="font-size:11px;color:var(--red)">${conf.map(c =>
+        `${c.linha}: ${c.tipo === 'contratos' ? 'contratos' : 'soma'} lido ${c.lido}, relatório diz ${c.esperado}`
+      ).join(' · ')}</div>` : '';
+
+  // Tabela por fundo — contexto, não ordem. A coluna de minis sai esmaecida de propósito
+  // (ver o ☠️ do cabeçalho): quem vira boleta é o Total.
+  const linhas = (n.por_fundo || []).map(f => `<tr>
+      <td>${f.fund.replace(/^JGP /, '')}</td>
+      <td class="num" style="${_hedgeCor(f.kusd)}">${_hedgeNum(f.kusd)}</td>
+      <td class="num" style="${_hedgeCor(f.contratos)}">${f.contratos == null ? '—' : _hedgeQty(f.contratos)}</td>
+      <td class="num" style="${_hedgeCor(f.minis)};opacity:.5">${_hedgeQty(f.minis)}</td></tr>`).join('');
+  const somaMinis = (n.por_fundo || []).reduce((a, f) => a + (f.minis || 0), 0);
+  const divergeArred = somaMinis !== n.bruto;
+  const rodape = `<tr style="font-weight:600;border-top:2px solid var(--border)">
+      <td>Total (é ele que vira boleta)</td>
+      <td class="num" style="${_hedgeCor(n.kusd)}">${_hedgeNum(n.kusd)}</td>
+      <td class="num" style="${_hedgeCor(pv.prev && pv.prev.total_contratos)}">${
+        (pv.prev && pv.prev.total_contratos != null) ? _hedgeQty(pv.prev.total_contratos) : '—'}</td>
+      <td class="num" style="${_hedgeCor(n.bruto)}"
+          title="minis = arred(Total em kUSD ÷ 10). Somar os minis fundo a fundo daria ${_hedgeQty(somaMinis)} — o arredondamento é por linha e não é o que se boleta.">
+        ${_hedgeQty(n.bruto)}${divergeArred ? ' <span style="font-size:10px;color:var(--amber,#c90)">*</span>' : ''}</td></tr>`;
+
+  const off = hedgePrevAtivo === false;
+  const qty = pv.qty || 0;
+  const marretada = hedgePrevQty !== '' && Number(hedgePrevQty) !== Number(n.falta);
+  const acao = qty > 0 ? '<b style="color:var(--green)">COMPRAR</b>'
+    : qty < 0 ? '<b style="color:var(--red)">VENDER</b>'
+    : '<b style="color:var(--amber,#c90)">— nada a fazer</b>';
+
+  // Posição viva do livro que vai receber a boleta (a mesma régua do resto da aba:
+  // minis-equivalentes, WDO 1 e UC 5).
+  const posAreas = Object.entries(pv.posicao || {}).filter(([, v]) => Math.round(v));
+  const posTxt = posAreas.length
+    ? posAreas.map(([a, v]) => `${a} <b style="${_hedgeCor(v)}">${_hedgeQty(Math.round(v))}</b>`).join(' · ')
+    : '<span style="color:var(--text-muted)">sem posição de Hedge_Cambial neste fundo</span>';
+
+  el.innerHTML = `
+    <div class="card" style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:12px;color:var(--text-muted)">
+        Os <b>7 fundos do grupo MM Prev</b> vêm na 2ª tabela do mesmo PDF. O hedge cambial de
+        todos eles mora no <b>${pv.fund_label}</b>, então o que se boleta é o <b>net</b> das 7
+        linhas — uma boleta só, no trader <b>${pv.trader}</b>, sempre em
+        <b>${pv.strategy}</b>.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${badge}</div>
+      ${confTxt}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+        <div style="overflow-x:auto"><table class="data-table" style="font-size:11px">
+          <thead><tr><th>Fundo Prev</th>
+            <th class="num">kUSD</th>
+            <th class="num" title="coluna 'in number of future contracts' do próprio relatório — contratos CHEIOS, com o sinal da posição que o fundo já tem">Contratos (cheio)</th>
+            <th class="num" title="só para mostrar de onde vem o net — a soma destes NÃO é o que se boleta (o arredondamento é por linha)">Minis (ref.)</th></tr></thead>
+          <tbody>${linhas}${rodape}</tbody></table></div>
+        <div style="flex:1;min-width:300px;display:flex;flex-direction:column;gap:8px">
+          ${_hedgePrevFaixa(pv)}
+          <div style="font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px">
+            <div style="font-size:11px;color:var(--text-muted)">Posição viva de Hedge_Cambial em ${pv.fund_label} · ${pv.trader}</div>
+            <div style="font-size:12px;margin-top:2px">${posTxt}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:2px">
+              Em minis-equivalentes (WDO 1 · UC 5). A boleta entra na área <b>${pv.area}</b>;
+              as demais áreas aparecem aqui só como contexto — esta seção não escolhe área
+              (a estratégia é fixa).
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding-top:4px;border-top:1px solid var(--border)">
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"
+               title="O net dos Prev é sempre boletado neste fundo — por isso nasce ligado. Desmarque para não gerar a boleta hoje.">
+          <input type="checkbox" ${off ? '' : 'checked'} onchange="setHedgePrevAtivo(this.checked)">
+          <b>gerar boleta</b></label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--text-muted)">
+          Quantidade (minis)
+          <input type="text" inputmode="numeric" value="${hedgePrevQty === '' ? '' : hedgePrevQty}"
+                 placeholder="${_hedgeQty(n.falta)}" style="width:90px;text-align:right;font-size:12px"
+                 onchange="setHedgePrevQty(this.value)"
+                 title="Vazio = o que falta (relatório − já boletado). Digite para executar menos.">
+        </label>
+        ${marretada ? `<button class="btn btn-secondary" onclick="hedgePrevUsarFalta()"
+            style="padding:4px 10px;font-size:11px" title="Volta para ${_hedgeQty(n.falta)}, o que falta pelo relatório">↩ usar ${_hedgeQty(n.falta)}</button>` : ''}
+        ${_hedgeInput('Preço (mercado)', 'prev_price', hedgeConfig.prev_price, 'ajuste D-1', 110)}
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--text-muted)">Corretora
+          <select onchange="setHedgeCfg('prev_broker', this.value)" style="font-size:12px">
+            ${(typeof ROLAGEM_BROKERS !== 'undefined' ? ROLAGEM_BROKERS : ['Ativa CTVC']).map(b =>
+              `<option ${b === hedgeConfig.prev_broker ? 'selected' : ''}>${b}</option>`).join('')}
+          </select></label>
+        <div style="font-size:12px;margin-left:auto;text-align:right">
+          ${off ? '<span style="color:var(--amber,#c90)">boleta DESLIGADA nesta seção</span>'
+            : (!qty ? `<span style="color:var(--green);font-weight:600">✓ Nada a boletar — ${_hedgePrevPorQue(n)}.</span>`
+                : `${acao} <b style="${_hedgeCor(qty)}">${_hedgeQty(qty)}</b> mini(s) de
+                   <b>${pv.instrument}</b> @ ${pv.price == null ? '<span style="color:var(--red)">sem preço</span>' : _hedgeNum(pv.price, 3)}
+                   ${marretada ? ' <span style="color:var(--amber,#c90)" title="quantidade digitada; o relatório pede ' + _hedgeQty(n.falta) + '">★</span>' : ''}`)}
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted)">
+        ⚠️ A contraparte é <b>corretora</b>, não <code>Gerencial</code>: com um fundo e um trader
+        só não há o que netar entre livros, então o ajuste vai a mercado.
+        ${divergeArred ? `<br>* Somar os minis fundo a fundo daria <b>${_hedgeQty(somaMinis)}</b> e o
+          Total dá <b>${_hedgeQty(n.bruto)}</b> — o arredondamento é por linha. O que vira boleta é
+          <b>arred(Total ÷ 10)</b>, porque a boleta é uma só.` : ''}
+      </div>
+    </div>`;
+}
+
+// "Relatório → já boletado → falta", a mesma identidade da seção do netting, aqui em UMA
+// linha só (há um fundo e um trader). ⚠️ O já-boletado é filtrado por ÁREA e ESTRATÉGIA:
+// o MESMO fundo e trader têm um 2º livro de Hedge_Cambial (`Equities`/`Carteira BR`, o
+// hedge da carteira de ações) que NÃO é ajuste de caixa dos Prev.
+function _hedgePrevFaixa(pv) {
+  const n = pv.need || {};
+  const j = (hedgePlano && hedgePlano.janela_boletas) || {};
+  const off = !!hedgeConfig.ignorar_boletas;
+  const linhas = pv.boletado_linhas || [];
+  const det = linhas.length
+    ? linhas.map(l => `${l.tipo === 'gerencial' ? 'ger' : 'mkt'} ${_hedgeQty(Math.round(l.minis))} ${l.instrument || ''}`).join(' · ')
+    : '';
+  const janTxt = off
+    ? '<span style="color:var(--amber,#c90)">desconto DESLIGADO na seção acima</span>'
+    : (!j.inicio ? 'nenhuma boleta descontada'
+      : `boletas de ${fmtDate(j.inicio)}${j.fim !== j.inicio ? ' a ' + fmtDate(j.fim) : ''}`);
+  return `<div style="font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2,transparent)">
+    <div style="display:flex;justify-content:space-between;gap:10px">
+      <span title="arred(Total do relatório em kUSD ÷ 10) — 1 mini = US$ 10 mil">Relatório</span>
+      <b style="${_hedgeCor(n.bruto)}">${_hedgeQty(n.bruto)}</b></div>
+    <div style="display:flex;justify-content:space-between;gap:10px"
+         title="o que o ${pv.trader} já boletou em ${pv.strategy} dentro da janela — ${janTxt}${det ? ' (' + det + ')' : ''}">
+      <span>Já boletado <span style="color:var(--text-muted);font-size:10px">(${janTxt})</span></span>
+      <b style="${_hedgeCor(n.boletado)}">${_hedgeQty(n.boletado)}</b></div>
+    <div style="display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--border);margin-top:3px;padding-top:3px">
+      <span><b>Falta</b></span>
+      <b style="${_hedgeCor(n.falta)}">${_hedgeQty(n.falta)}</b></div>
+  </div>`;
+}
+
+/* ── Boletas — UM card por seção, cada um com o SEU escopo ────────────────────
+   A tela tem duas seções (traders · fundos Prev) e cada uma vai do relatório à boleta.
+   ⭐ **O export é por escopo, e isso é o ponto da divisão**: são execuções diferentes, em
+   fundos e traders diferentes, feitas em momentos diferentes. Um TSV só obrigava a mesa a
+   colar tudo junto ou a recortar linha no Excel.
+   ⚠️ O rótulo do botão diz o escopo ("Copiar traders" / "Copiar Prev") — com dois botões
+   iguais em cards parecidos, "Copiar (TSV)" nos dois seria a forma mais fácil de colar o
+   conjunto errado. */
 const _HEDGE_HIDE_COLS = new Set(['Giveup Counterparty', 'Deal Type', 'Value date',
   'Fixing date', 'FO Remark', 'BO Remark', '(OBS) Reserved',
   'Ignore previous positions', 'Auxiliary number']);
 
-function _hedgeRenderBoletas() {
-  const el = document.getElementById('hedgeBoletas');
+// `escopo`: 'mm' = gerenciais + resíduo a mercado · 'prev' = o net dos fundos Prev.
+function _hedgeBoletasDo(escopo) {
+  const b = (hedgePlano && hedgePlano.boletas) || [];
+  return escopo === 'prev' ? b.filter(x => x._kind === 'prev')
+                           : b.filter(x => x._kind !== 'prev');
+}
+
+function _hedgeRenderBoletas() { _hedgeBoletasCard('hedgeBoletas', 'mm'); }
+function _hedgeRenderPrevBoletas() { _hedgeBoletasCard('hedgePrevBoletas', 'prev'); }
+
+function _hedgeBoletasCard(elId, escopo) {
+  const el = document.getElementById(elId);
   if (!el) return;
   const p = hedgePlano;
-  if (!p || !p.boletas.length) {
-    el.innerHTML = `<div class="card no-data">Sem boletas — carregue o relatório e confira o plano acima.</div>`;
+  const prev = escopo === 'prev';
+  if (!p) {
+    el.innerHTML = `<div class="card no-data">Sem boletas — carregue o relatório.</div>`;
+    return;
+  }
+  const lista = _hedgeBoletasDo(escopo);
+  if (!lista.length) {
+    // ⚠️ "Zero boletas" significa coisas diferentes nas duas seções, e a de cima já
+    // explicou o porquê (nada a netar · nada a ajustar · seção desligada). Aqui basta não
+    // desenhar uma tabela vazia.
+    el.innerHTML = `<div class="card no-data">${prev
+      ? 'Sem boleta dos fundos Prev — veja o motivo logo acima.'
+      : 'Sem boletas dos traders — confira o plano acima.'}</div>`;
     return;
   }
   const vis = p.columns.filter(c => !_HEDGE_HIDE_COLS.has(c));
-  const head = `<tr><th>Tipo</th>${vis.map(c => `<th${c === 'Quantity' || c === 'Price' ? ' class="num"' : ''}>${c}</th>`).join('')}</tr>`;
-  const rows = p.boletas.map(b => {
+  // ⚠️ A coluna "Tipo" só existe no escopo MM, onde ela separa gerencial de mercado. Na
+  // seção dos Prev toda linha é a mesma coisa, e uma coluna de valor único é ruído.
+  const head = `<tr>${prev ? '' : '<th>Tipo</th>'}${vis.map(c =>
+    `<th${c === 'Quantity' || c === 'Price' ? ' class="num"' : ''}>${c}</th>`).join('')}</tr>`;
+  const rows = lista.map(b => {
     const ger = b._kind === 'gerencial';
-    return `<tr><td style="font-size:10px;color:${ger ? 'var(--text-muted)' : 'var(--green)'}">${ger ? 'ger' : 'mercado'}</td>
+    const tipoTd = prev ? '' :
+      `<td style="font-size:10px;color:${ger ? 'var(--text-muted)' : 'var(--green)'}">${ger ? 'ger' : 'mercado'}</td>`;
+    return `<tr>${tipoTd}
       ${vis.map(c => c === 'Quantity'
         ? `<td class="num" style="${_hedgeCor(b[c])}">${_hedgeQty(b[c])}</td>`
         : `<td${c === 'Price' ? ' class="num"' : ''}>${b[c] == null ? '' : b[c]}</td>`).join('')}</tr>`;
   }).join('');
 
+  const resumo = prev
+    ? `${lista.length} boleta — ${p.prev.instrument} @ ${_hedgeNum(p.prev.price, 3)} · Deal Date ${p.deal_date}`
+    : `${lista.length} boletas — ${p.n_gerencial} gerenciais · ${p.n_mercado} a mercado ·
+       ${p.instrument} @ ${_hedgeNum(p.price, 3)} · Deal Date ${p.deal_date}`;
+
   el.innerHTML = `<div class="card" style="display:flex;flex-direction:column;gap:10px">
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-secondary" onclick="copyHedgeTSV()" style="padding:5px 14px;font-size:12px">Copiar (TSV)</button>
-      <button class="btn btn-secondary" onclick="downloadHedgeCSV()" style="padding:5px 14px;font-size:12px">Baixar CSV</button>
-      <span style="font-size:12px;color:var(--text-muted)">
-        ${p.boletas.length} boletas — ${p.n_gerencial} gerenciais · ${p.n_mercado} a mercado ·
-        ${p.instrument} @ ${_hedgeNum(p.price, 3)} · Deal Date ${p.deal_date}</span>
+      <button class="btn btn-secondary" onclick="copyHedgeTSV('${escopo}')" style="padding:5px 14px;font-size:12px">Copiar ${prev ? 'Prev' : 'traders'} (TSV)</button>
+      <button class="btn btn-secondary" onclick="downloadHedgeCSV('${escopo}')" style="padding:5px 14px;font-size:12px">Baixar CSV</button>
+      <span style="font-size:12px;color:var(--text-muted)">${resumo}</span>
     </div>
-    <div style="overflow-x:auto;max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+    <div style="overflow-x:auto;${prev ? '' : 'max-height:420px;overflow-y:auto;'}border:1px solid var(--border);border-radius:6px">
       <table class="data-table" style="font-size:11px"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
     <div style="font-size:11px;color:var(--text-muted)">
       As ${_HEDGE_HIDE_COLS.size} colunas sempre-vazias do layout JDS não aparecem aqui, mas
@@ -849,7 +1142,7 @@ function _hedgeRenderBoletas() {
 }
 
 // Mesmo contrato de export da Rolagem: datas em mm/dd/aaaa, todas as colunas na ordem.
-function _hedgeMatrix(includeHeader) {
+function _hedgeMatrix(includeHeader, escopo) {
   const cols = hedgePlano.columns;
   const DATE_COLS = new Set(['Deal Date', 'Value date', 'Fixing date']);
   const dd2mm = s => {
@@ -857,7 +1150,7 @@ function _hedgeMatrix(includeHeader) {
     return m ? `${m[2]}/${m[1]}/${m[3]}` : s;
   };
   const lines = includeHeader ? [cols.slice()] : [];
-  hedgePlano.boletas.forEach(b => {
+  _hedgeBoletasDo(escopo).forEach(b => {
     lines.push(cols.map(c => {
       const v = b[c] == null ? '' : b[c];
       return DATE_COLS.has(c) ? dd2mm(v) : v;
@@ -865,17 +1158,19 @@ function _hedgeMatrix(includeHeader) {
   });
   return lines;
 }
-function copyHedgeTSV() {
-  if (!hedgePlano?.boletas?.length) return;
-  const tsv = _hedgeMatrix(false).map(r => r.join('\t')).join('\n');
+function copyHedgeTSV(escopo) {
+  const lista = _hedgeBoletasDo(escopo);
+  if (!lista.length) return;
+  const tsv = _hedgeMatrix(false, escopo).map(r => r.join('\t')).join('\n');
   const st = document.getElementById('refStatus');
+  const quem = escopo === 'prev' ? 'dos fundos Prev' : 'dos traders';
   navigator.clipboard.writeText(tsv).then(() => {
-    if (st) { st.textContent = 'Boletas de hedge copiadas (TSV)'; st.style.color = 'var(--text-muted)'; }
+    if (st) { st.textContent = `${lista.length} boleta(s) ${quem} copiada(s) (TSV)`; st.style.color = 'var(--text-muted)'; }
   }).catch(e => { if (st) { st.textContent = 'Erro ao copiar: ' + e.message; st.style.color = 'var(--red)'; } });
 }
-function downloadHedgeCSV() {
-  if (!hedgePlano?.boletas?.length) return;
-  const csv = _hedgeMatrix(true).map(r => r.map(v => {
+function downloadHedgeCSV(escopo) {
+  if (!_hedgeBoletasDo(escopo).length) return;
+  const csv = _hedgeMatrix(true, escopo).map(r => r.map(v => {
     const s = String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }).join(',')).join('\r\n');
@@ -883,7 +1178,9 @@ function downloadHedgeCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `hedge_cambial_boletas_${(hedgePlano.ref_date || '').replace(/-/g, '')}.csv`;
+  // ⚠️ O nome do arquivo leva o escopo: dois CSV do mesmo dia na pasta de Downloads, com
+  // o mesmo nome, viram "(1)" e ninguém sabe qual é qual.
+  a.download = `hedge_cambial_${escopo === 'prev' ? 'prev' : 'traders'}_${(hedgePlano.ref_date || '').replace(/-/g, '')}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }

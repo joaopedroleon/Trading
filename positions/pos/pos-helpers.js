@@ -224,8 +224,12 @@ function _hiddenForTab(tabId) {
   return hiddenRows[tabId];
 }
 
+/* ⚠️ `currentRenderTab()` e não `activeTraderTab` em TODOS os pontos que leem/escrevem as
+   ocultas: fora de um render os dois são iguais, mas o prefetch desenha outras abas em
+   background e ali `activeTraderTab` aponta para a aba errada. É a mesma família do id
+   duplicado documentada no CLAUDE.md ("a aba DESENHADA não é a aba ATIVA"). */
 function hideRow(key) {
-  _hiddenForTab(activeTraderTab).add(key);
+  _hiddenForTab(currentRenderTab()).add(key);
   rerenderTables(key);   // só re-renderiza o tbody da seção da linha ocultada
   renderRestoreBtn();
 }
@@ -283,7 +287,7 @@ function syncHideZeroBtn(tbodyId, visibleRows) {
 function hideZeroRowsInSection(tbodyId) {
   const keys = _zeroKeysBySection.get(tbodyId) ?? [];
   if (!keys.length) return;
-  const hid = _hiddenForTab(activeTraderTab);
+  const hid = _hiddenForTab(currentRenderTab());
   for (const k of keys) hid.add(k);
   rerenderTables(keys[0]);   // só o tbody desta seção (a chave carrega group||trader)
   renderRestoreBtn();
@@ -292,22 +296,37 @@ function hideZeroRowsInSection(tbodyId) {
 /* ── "↩ Restaurar ocultas" POR SEÇÃO (set/2026, pedido da mesa) ────────────────────────
    O restaurar GLOBAL da toolbar saiu: quem oculta numa tabela restaura NAQUELA tabela. O
    `hiddenRows` continua UM Set por aba (o ✕ de linha, o "Ocultar zeradas" e o restaurar do
-   snapshot dependem dele) — a seção é lida da PRÓPRIA chave: o `rowKey` começa por
-   `group||trader||…`, então o prefixo diz a que tabela a linha pertence, sem estado novo.
-   `_sectionPrefixByBody` guarda o prefixo por tbody (o `renderTable` o carimba a partir das
-   linhas que recebe), para o clique e a contagem não precisarem de uma linha exibida. */
-const _sectionPrefixByBody = new Map();   // tbodyId → 'group||trader||'
+   snapshot dependem dele) — o que muda por seção é QUAIS chaves pertencem a ela.
+
+   ☠️ **A seção é o CONJUNTO de chaves que ela desenhou, não um PREFIXO da chave.** A 1ª
+   versão guardava `${rows[0].group}||${rows[0].trader}||` e filtrava as ocultas por ele, na
+   premissa de que uma seção tem um trader só. **Desde que o sleeve do PAbinader passou a
+   aparecer intercalado na tabela do PortfolioRF (out/2026), a premissa é falsa** — e o
+   efeito era perder linha: medido em 27/10/2026, ocultar o `USD/MXN` do PAbinader na aba do
+   PortfolioRF (prefixo gravado `Todos||PortfolioRF||`) deixava o botão em **"(0)" e
+   INVISÍVEL**, com a linha fora da tela e sem nenhum caminho de volta — nem o "Restaurar"
+   daquela seção a trazia, porque ela não casava o prefixo. A mesa pegou.
+
+   ⭐ Hoje `_sectionKeysByBody` guarda o Set das chaves que o `renderTable` recebeu para
+   aquele tbody, e a conta é a interseção com as ocultas da aba. Não depende do FORMATO da
+   chave, nem de quantos traders ou grupos a seção mistura.
+   ⚠️ `rows` chega já filtrado pelos chips, então uma linha oculta que um chip também esconde
+   sai da conta enquanto o chip estiver ligado — e volta a ser restaurável quando ele sair.
+   É o comportamento certo: o botão fala do que aquela tabela mostraria. */
+const _sectionKeysByBody = new Map();   // tbodyId → Set<rowKey> desenhadas na seção
 
 function _hiddenKeysOfSection(tbodyId) {
-  const pfx = _sectionPrefixByBody.get(tbodyId);
-  if (!pfx) return [];
-  return [..._hiddenForTab(activeTraderTab)].filter(k => k.startsWith(pfx));
+  const doSec = _sectionKeysByBody.get(tbodyId);
+  if (!doSec || !doSec.size) return [];
+  return [..._hiddenForTab(currentRenderTab())].filter(k => doSec.has(k));
 }
 
-// Chamado pelo renderTable: carimba o prefixo da seção e atualiza o botão (some quando
+// Chamado pelo renderTable: carimba as chaves da seção e atualiza o botão (some quando
 // não há oculta; diz quantas quando há).
+// ⚠️ `rows` é a lista COMPLETA da seção (antes de tirar as ocultas) — é o que permite a
+// linha oculta continuar pertencendo à seção e poder voltar.
 function syncRestoreBtn(tbodyId, rows) {
-  if (rows.length) _sectionPrefixByBody.set(tbodyId, `${rows[0].group}||${rows[0].trader}||`);
+  _sectionKeysByBody.set(tbodyId, new Set(rows.map(rowKey)));
   const btn = document.getElementById(tbodyId.replace(/^body_/, 'restore_'));
   if (!btn) return;
   const n = _hiddenKeysOfSection(tbodyId).length;
@@ -318,7 +337,7 @@ function syncRestoreBtn(tbodyId, rows) {
 function restoreHiddenInSection(tbodyId) {
   const keys = _hiddenKeysOfSection(tbodyId);
   if (!keys.length) return;
-  const hid = _hiddenForTab(activeTraderTab);
+  const hid = _hiddenForTab(currentRenderTab());
   for (const k of keys) hid.delete(k);
   rerenderTables(keys[0]);   // só esta seção
   renderRestoreBtn();        // o global (snapshot) — no positions.html não há botão e ela sai cedo
@@ -327,7 +346,7 @@ function restoreHiddenInSection(tbodyId) {
 function renderRestoreBtn() {
   const btn = document.getElementById('restoreBtn');
   if (!btn) return;
-  const count = _hiddenForTab(activeTraderTab).size;
+  const count = _hiddenForTab(currentRenderTab()).size;
   if (count > 0) {
     btn.textContent = `↩ Restaurar ocultas (${count})`;
     btn.style.display = '';

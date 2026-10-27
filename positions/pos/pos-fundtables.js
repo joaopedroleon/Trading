@@ -542,6 +542,21 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
   // montado, e aí a régua volta a ser a quantidade da linha (que dirá "nada no RF").
   if (row?.is_fx && cfg?.ccy_check?.linhas?.length) {
     const c = cfg?.ccy_check;
+    /* ☠️ **Moeda sem spot CONTAMINA moeda que tem** (27/10/2026). O
+       `ccy_exposure_usd` pula a LINHA inteira quando falta o spot da base — e pular um
+       cross some com as DUAS pernas. Medido na aba do PortfolioRF: sem o spot do EUR, o
+       `EUR/MXN` do MM saiu do agregado e o MXN do MM foi de −2,82 MM para −8,82 MM USD,
+       com esta coluna marcando 3,4 % (vermelho) numa linha cuja quantidade estava certa.
+       Ou seja: o nome que falta no `sem_spot` não é o da moeda afetada, e por isso o
+       guard é do AGREGADO INTEIRO, não das pernas deste par. Vermelho errado é pior que
+       veredito nenhum. */
+    if (c?.sem_spot?.length) {
+      return muted('—', 'Câmbio linear: o check é por MOEDA, no agregado — e hoje ele está '
+        + `incompleto.\n\nSem spot de: ${c.sem_spot.join(', ')}. Cada linha sem spot é pulada `
+        + 'inteira, e um CROSS pulado tira as duas pernas dele da conta — inclusive de uma '
+        + 'moeda que tem spot. O agregado não é afirmado enquanto faltar spot.\n\n'
+        + 'Ver a tabela "Exposição por moeda" no topo da aba.');
+    }
     const pair = String(row.instrument_name ?? '').toUpperCase();
     const [base, quote] = pair.split('/').map(x => (x || '').trim());
     const legs = (c?.linhas ?? []).filter(l => l.ccy === base || l.ccy === quote);
@@ -833,9 +848,15 @@ function renderRfCcyCheck(cfg, tabId) {
       + `nas colunas do sleeve à direita da tabela de posição — o nocional de uma opção é `
       + `nocional × delta e não é somável como exposição de moeda.</div>`
     : '';
+  /* ☠️ Não é "uma perna omitida": a linha sem spot é pulada INTEIRA, então um cross
+     (`EUR/MXN`) tira também a perna da moeda que TEM spot — e aí a razão de uma moeda
+     listada aqui sai errada sem nada marcando a célula. Enquanto houver `sem_spot`, as
+     colunas de check das linhas de câmbio saem como "—" (ver `rfCheckCell`). */
   const semSpot = c.sem_spot?.length
-    ? `<div style="font-size:11px;color:var(--yellow);margin-top:4px">⚠ sem spot: `
-      + `${c.sem_spot.join(', ')} — perna omitida, não zerada.</div>`
+    ? `<div style="font-size:11px;color:var(--red);margin-top:4px">⚠ <b>agregado incompleto</b> — `
+      + `sem spot de ${c.sem_spot.join(', ')}: a linha inteira é pulada, e um cross pulado `
+      + `tira da conta também a perna da outra moeda. As razões acima podem estar erradas em `
+      + `moeda que nem aparece nesta lista.</div>`
     : '';
 
   const veredito = g.ratio == null ? ''

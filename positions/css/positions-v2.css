@@ -139,6 +139,38 @@ html.theme-v2 .tabbtn {
 }
 html.theme-v2 .tabbtn:hover { color: var(--text); }
 html.theme-v2 .tabbtn.on { color: var(--text); border-bottom: 2px solid var(--green); }
+
+/* ═══ Cor por NATUREZA da aba (mesa, 27/10/2026) ═══════════════════════════════
+   A barra misturava três coisas sob o mesmo visual: posição de livro da JGP, os fundos
+   PESSOA FÍSICA dos traders e as ferramentas de controle. Quem chega na tela não tem como
+   saber que "Boletas do Dia" não é um livro e que "Impar / Vista" não é da JGP — a cor
+   passa a dizer isso antes do clique.
+
+   ⚠️ **Fundo tênue, não cor de texto.** A cor do texto já carrega estado (`--text-muted`
+   apagado × `--text` na ativa), e o sublinhado verde já marca a ativa; mexer no texto
+   brigaria com os dois. Uma lavada de fundo no topo do botão separa os grupos sem disputar
+   com nada — e some atrás da aba ativa, que continua branca.
+   ⚠️ Os tons são **de-saturados de propósito** (6-9% de alfa): é uma barra de navegação, não
+   um semáforo. Três blocos distinguíveis bastam; cor forte aqui competiria com o vermelho de
+   chamada de margem e com o verde de sobra, que são os sinais que de fato importam.
+   ⚠️ A classe vai no HTML (`positions.html`), uma por botão, e o id continua sendo o contrato
+   de DOM com o `_showPanel`/PosBusy — a cor não é funcional. */
+html.theme-v2 .tabbtn.tb-pf,
+html.theme-v2 .tabbtn.tb-bol,
+html.theme-v2 .tabbtn.tb-tool { border-radius: 4px 4px 0 0; }
+
+/* Fundo pessoa física dos traders (Impar / Vista) — âmbar */
+html.theme-v2 .tabbtn.tb-pf    { background: rgba(190, 140,  30, .09); }
+html.theme-v2 .tabbtn.tb-pf:hover { background: rgba(190, 140,  30, .16); }
+/* Conferência do dia (Boletas) — azul */
+html.theme-v2 .tabbtn.tb-bol   { background: rgba( 50, 110, 190, .09); }
+html.theme-v2 .tabbtn.tb-bol:hover { background: rgba( 50, 110, 190, .16); }
+/* Ferramentas de controle (Análise de Opções · Check Enquadramento · Hedge Cambial) — cinza */
+html.theme-v2 .tabbtn.tb-tool  { background: rgba(110, 120, 135, .09); }
+html.theme-v2 .tabbtn.tb-tool:hover { background: rgba(110, 120, 135, .16); }
+/* A aba ATIVA volta ao branco do papel: o grupo já foi comunicado no caminho até o clique,
+   e manter o tom atrás dela enfraqueceria o sublinhado verde, que é quem diz "é esta". */
+html.theme-v2 .tabbtn.on { background: none; }
 html.theme-v2 #tab-btn-other, html.theme-v2 #tab-btn-pabinader { position: relative; }
 html.theme-v2 #tab-btn-other .tab-chevron, html.theme-v2 #tab-btn-pabinader .tab-chevron { margin-left: 6px; }
 html.theme-v2 #tab-btn-hedge .tab-chevron { margin-left: 6px; }

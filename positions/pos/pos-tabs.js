@@ -18,6 +18,7 @@ function activateTab(key) {
     case 'rolagem':     showRolagemTab();     break;
     case 'controle':    showControleTab();    break;   // Hedge Cambial → Controle (pos-hedge.js)
     case 'boletas':     showBoletasTab();     break;
+    case 'margem':      showMargemTab();      break;   // IMPAR / VISTA (pos-margem.js)
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
   // Chip do USD/BRL: só nas abas que saem do /reference (trader + Análise de Opções).
