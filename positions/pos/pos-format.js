@@ -1,3 +1,24 @@
+/* ── `_escHtml` — o ÚNICO escapador de HTML da tela ───────────────────────────
+   ☠️ Eram QUATRO, um por módulo: um no pos-fundtables, um no pos-fxlegs, um no pos-render e
+   um no pos-margem. Os TRÊS primeiros eram byte-idênticos; o do pos-margem era o único CERTO
+   — escapava também `>` e tratava `null`/`undefined`. Ou seja a duplicação não era só feia:
+   um deles fazia mais do que os outros, e qualquer correção de escapagem teria de ser
+   lembrada em quatro lugares. Unificados em 28/10/2026 na versão mais estrita (a do margem),
+   com 151 call sites renomeados.
+   ⚠️ `String(s ?? '')` e não `String(s)`: com o segundo, passar `undefined` imprimia o texto
+   **"undefined"** dentro do `title=` — e tooltip é exatamente onde ninguém repara.
+   ⚠️ Renomear em massa mexe no COMENTÁRIO também: a 1ª passada trocou os quatro nomes citados
+   aqui por `_escHtml` e apagou a própria explicação. Por isso este bloco não cita mais os
+   nomes antigos — se voltarem a aparecer, é regex rodando sobre documentação.
+   ⚠️ Mora aqui, no pos-format.js, porque é um módulo que o SNAPSHOT publicado também carrega
+   (ver `snapshot/viewer/index.html`). Pôr um helper compartilhado num módulo fora daquela
+   lista quebraria a página pública — é a armadilha que o `snapshot/deps_viewer.py` vigia.
+   ⚠️ E vem ANTES de quem usa, na ordem de carga de `positions.html`: pos-format é o 4º, e os
+   consumidores (fundtables, fundsplit, render, fxlegs, margem) vêm todos depois. */
+const _escHtml = s => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 /* ── Marcas de EDIÇÃO: ficam na TELA, somem do PRINT ──────────────────────────
    A ★ (marreta manual de preço/delta/quantidade/#PL), o ⚡ (linha adicionada à mão, que não
    está na carteira) e o ✕ (excluir/ocultar a linha) são sinalização para QUEM OPERA a tela —
@@ -114,6 +135,26 @@ function fmtFinalQty(v, dec = 0) {
   if (v < 0) return `<span style="color:var(--red)">(${s})</span>`;
   if (v === 0) return `<span style="color:var(--text-muted)">—</span>`;
   return s;
+}
+
+/* ── `…Txt`: os mesmos números, SEM markup — para `title=` ─────────────────────
+   ☠️ **`title=` não renderiza HTML: imprime a tag como texto.** Os formatadores acima
+   devolvem `<span style="color:…">`, o que é certo numa célula e vira lixo visível num
+   tooltip — a mesa lê `MM <span style="color:var(--green)">+1,234</span>`. O CLAUDE.md já
+   registrava a armadilha desde o `fmtFinalQty`, e mesmo assim havia **4 ocorrências vivas**
+   no pos-fundtables.js em 28/10/2026 (duas delas aparecendo na tela, medidas no browser).
+   ⭐ A saída é ter o par explícito em vez de confiar na lembrança: quem escreve tooltip usa
+   o `…Txt`, e a varredura "nenhum `title` do DOM contém `<tag`" fecha a conta. */
+function fmtFinalQtyTxt(v, dec = 0) {
+  if (v == null || v === 0) return '—';
+  const s = fmtQty(Math.abs(v), dec);
+  return v < 0 ? `(${s})` : s;
+}
+
+function fmtMoneyTxt(v) {
+  if (v == null || !isFinite(v) || v === 0) return '—';
+  const s = Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  return v < 0 ? `(${s})` : `+${s}`;
 }
 
 /* Vencimento de OPÇÃO já marcando o que veio DERIVADO do nome (ver `optMaturity`).

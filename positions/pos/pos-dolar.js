@@ -1,4 +1,4 @@
-const DOLAR_CONSOL_TAB_ID = 'dolarconsol';
+/* `DOLAR_CONSOL_TAB_ID` mora no pos-state.js (registro único de ids de aba). */
 const UC_FACE_USD = 50_000;   // face do contrato de dólar cheio (UC)
 const dolarConsolData = {};   // trader → API response (cache próprio, não conflita com posDataByTab)
 

@@ -141,6 +141,23 @@ html.theme-v2 .data-table tbody tr.fs-head .net-summary.fs-head-net .net-chip {
   padding: 1px 8px 2px; font-size: 11px;
 }
 
+/* ═══ Modo "Por fundo": cada bloco é uma TABELA à parte ═══ (28/10/2026, pedido da mesa)
+   A sequência de um bloco é **resumo (`fs-head`) → cabeçalho de coluna (`fs-colhead`) →
+   dados**. Antes o único cabeçalho era o `<thead>` da tabela e as duas linhas de resumo
+   caíam no meio dos dados, entre o cabeçalho e a informação — a mesa leu como confuso.
+   O `<thead>` real continua no DOM (o `_alignAuxTables` precisa dele para medir; ver o ⚠️
+   no `renderFundSplitAuxInline`) e some por aqui — senão apareceria sozinho acima do 1º
+   resumo, repetindo o cabeçalho do 1º bloco. */
+html.theme-v2 .data-table.fs-split > thead { display: none; }
+/* O `<th>` já herda a faixa verde de `.data-table th` (a regra não é escopada em `thead`),
+   então aqui só se desfaz o que é de linha de CORPO: o hover verde-claro das `tbody tr`,
+   que num cabeçalho se lê como linha selecionável. */
+html.theme-v2 .data-table tbody tr.fs-colhead:hover > th { background: var(--green); }
+/* Respiro entre um bloco e o seguinte: a faixa verde do cabeçalho encostada na última
+   linha do bloco anterior cola as duas "tabelas". O 1º bloco não leva (`~` só pega os
+   seguintes) — ali o espaço vem do card. */
+html.theme-v2 .data-table tbody tr.fs-head ~ tr.fs-head > td { padding-top: 16px; }
+
 html.theme-v2 .data-table td { border-bottom: 1px solid var(--border); }
 
 /* resultado/total em destaque — ajuda a bater o olho */

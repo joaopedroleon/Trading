@@ -165,6 +165,24 @@ const _posInFlight = new Set();   // tabIds com carga em voo (o prefetch não du
 //    persiste entre re-renders.
 const optPrintSel = new Map();
 
+/* ── IDS DE ABA — registro único ──────────────────────────────────────────────
+   ☠️ Estes `const` moraram, cada um, no módulo da sua aba (`BOLETAS_TAB_ID` no
+   pos-boletas, `HEDGE_TAB_ID` no pos-hedge, e assim por diante) até 28/10/2026 — e isso
+   criava uma dependência do DESPACHANTE (`pos-tabs.js`, que precisa de todos eles para
+   rotear, limpar cache e comparar chave) para cada módulo de feature. No app completo
+   não aparece, porque tudo carrega; no SNAPSHOT publicado, que carrega um subconjunto
+   (ver `snapshot/viewer/index.html`), virava `ReferenceError` — e num script clássico
+   isso **aborta o arquivo inteiro**, não só a linha.
+   ⭐ Um id de aba é um rótulo, não comportamento: o lugar dele é aqui, junto do resto do
+   estado, e aí o despachante funciona com qualquer subconjunto de features carregado.
+   ⚠️ NÃO redeclarar nos módulos de feature — `const` duplicado no mesmo escopo global é
+   `SyntaxError`, e aí o módulo inteiro não carrega. */
+const DOLAR_CONSOL_TAB_ID = 'dolarconsol';   // Análise de Opções   (pos-dolar.js)
+const ROLAGEM_TAB_ID      = 'rolagem';       // Hedge Cambial → Rolagem Dol (pos-rolagem.js)
+const HEDGE_TAB_ID        = 'controle';      // Hedge Cambial → Controle    (pos-hedge.js)
+const BOLETAS_TAB_ID      = 'boletas';       // Boletas do Dia      (pos-boletas.js)
+const MARGEM_TAB_ID       = 'margem';        // Impar / Vista       (pos-margem.js)
+
 /* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */
 const DOLAR_TAB_ID        = 'dolar';
 const ENQ_RF_TAB_KEY      = 'enqrf';    // chave de cache do check de derivativos RF (não é aba nova)

@@ -333,8 +333,10 @@ function showDolarTab() {
   if (!posDataByTab[DOLAR_TAB_ID]) loadDolarExposure();
   else { _dirtyTabs.delete(DOLAR_TAB_ID); renderDolarTable(posDataByTab[DOLAR_TAB_ID]); }
   // Exposição direcional com look-through do offshore (endpoint e container próprios).
-  if (!posDataByTab[DOLAR_DIR_KEY]) loadDolarDirecional();
-  else renderDolarDirecional(posDataByTab[DOLAR_DIR_KEY]);
+  if (typeof loadDolarDirecional === 'function') {          // pos-dolardir.js, fora do snapshot
+    if (!posDataByTab[DOLAR_DIR_KEY]) loadDolarDirecional();
+    else renderDolarDirecional(posDataByTab[DOLAR_DIR_KEY]);
+  }
   // Terceiro check da aba: enquadramento de derivativos dos fundos RF (container próprio).
   if (!posDataByTab[ENQ_RF_TAB_KEY]) loadEnquadramentoRF();
   else renderEnquadramentoRF(posDataByTab[ENQ_RF_TAB_KEY]);

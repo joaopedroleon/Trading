@@ -16,14 +16,14 @@ function allocCheckId(trader) {
    se fosse outra coisa (pedido da mesa, 08/10/2026). Sem fundo, de propósito — ela não é um
    veredito. */
 function _checkVazio(txt, tip) {
-  const t = tip ? ` title="${_rfEsc(tip)}"` : '';
+  const t = tip ? ` title="${_escHtml(tip)}"` : '';
   return `<td class="num" style="text-align:right;color:var(--text-muted)"${t}>${txt ?? '—'}</td>`;
 }
 
 function _checkCell(v, delta, tip) {
   const txt = (typeof v === 'string') ? v : fmtPct(_semZeroNegativo(v));
   const cls = allocClass(delta);
-  const t   = tip ? ` title="${_rfEsc(tip)}"` : '';
+  const t   = tip ? ` title="${_escHtml(tip)}"` : '';
   return cls ? `<td class="check-cell ${cls}"${t}>${txt}</td>` : _checkVazio(txt, tip);
 }
 
@@ -342,12 +342,12 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
       + 'regra — a restrição é de bolsa ONSHORE.';
 
     const shortMark = isShortBr
-      ? ` <span class="alloc-short-br" title="${_rfEsc('SHORT DE BOLSA BR ONSHORE — alvo reduzido.\n\n'
+      ? ` <span class="alloc-short-br" title="${_escHtml('SHORT DE BOLSA BR ONSHORE — alvo reduzido.\n\n'
           + (shortFactor != null ? _notaCurta
              : 'NAV do grupo Prev indisponível: o check está usando o alvo CHEIO de '
                + fmtPct(target) + ', que é mais exigente do que deveria.'))}">↓</span>`
       : isAmbBr
-      ? ` <span class="alloc-short-br" title="${_rfEsc('DAYTRADE DE BOLSA BR QUE FECHOU ZERADO — '
+      ? ` <span class="alloc-short-br" title="${_escHtml('DAYTRADE DE BOLSA BR QUE FECHOU ZERADO — '
           + 'direção indeterminável.\n\nComprou-e-vendeu e vendeu-e-recomprou produzem os MESMOS '
           + 'campos no payload (quantidade e preço médio de cada lado, sem ordem nem horário), '
           + 'então não dá para saber se houve short.\n\nPor isso esta linha aceita a FAIXA entre '
@@ -405,7 +405,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
         dealCell = (bk && bk.opPct != null)
           ? _checkCell(bk.opPct, dAlvo(bk.opPct),
               'DÓLAR — boleta do dia com futuro e NDF JUNTOS, em USD:\n'
-              + '  MM   ' + fmtMoney(bk.opMm) + '\n  Prev ' + fmtMoney(bk.opPv) + '\n'
+              + '  MM   ' + fmtMoneyTxt(bk.opMm) + '\n  Prev ' + fmtMoneyTxt(bk.opPv) + '\n'
               + '  Prev ÷ MM = ' + fmtPct(bk.opPct)
               + (rowTarget != null ? '  ·  alvo ' + fmtPct(rowTarget) : ''))
           : _checkCell(dealPct, dealDelta);
@@ -511,7 +511,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
      • **opção e o resto** → linha a linha, pela **quantidade**, contra o alvo da boleta. */
 function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
   const muted = (txt, tip) =>
-    `<td class="num" style="color:var(--text-muted);text-align:right" title="${_rfEsc(tip)}">${txt}</td>`;
+    `<td class="num" style="color:var(--text-muted);text-align:right" title="${_escHtml(tip)}">${txt}</td>`;
   const alvoExp = cfg?.exposure_ratio;
 
   /* ⭐ **Ativo que NÃO pode ir para o RF: zero lá é o CERTO, e o check diz OK** (pedido da
@@ -529,10 +529,10 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
     const books = areasOk.map(a => ({ Rates: 'juros', Currencies: 'moedas',
                                       Equities: 'bolsa', Commodities: 'commodities' }[a] ?? a)).join(' e ');
     return temRf
-      ? `<td class="check-cell alloc-bad" title="${_rfEsc(
+      ? `<td class="check-cell alloc-bad" title="${_escHtml(
           `⛔ FORA DO ESCOPO: o veículo de RF carrega só os books de ${books}, e esta linha é de `
-          + `${row.area ?? '—'} — mas tem ${fmtFinalQty(rfQty)} lá. Ver a faixa no topo da aba.`)}">⛔</td>`
-      : `<td class="check-cell alloc-ok" title="${_rfEsc(
+          + `${row.area ?? '—'} — mas tem ${fmtFinalQtyTxt(rfQty)} lá. Ver a faixa no topo da aba.`)}">⛔</td>`
+      : `<td class="check-cell alloc-ok" title="${_escHtml(
           `✓ Correto: ${row.area ?? 'este ativo'} não vai para o RF (o veículo carrega só os books `
           + `de ${books}), então zero aqui é o esperado — não é desvio de alocação.`)}">✓</td>`;
   }
@@ -576,7 +576,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
     const tip = `CÂMBIO LINEAR — o check é por MOEDA, não por instrumento: o mesmo ${base} é `
       + `montado com pares diferentes em cada livro.\n\nAlvo: ${fmtPct(alvoExp)}.\n${det}\n\n`
       + 'Tabela completa no topo da aba ("Exposição por moeda").';
-    return `<td class="check-cell ${cls}" title="${_rfEsc(tip)}">${
+    return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
       cls === 'alloc-ok' ? '✓' : '⚠ ' + fmtPct(_semZeroNegativo(pior.ratio))}</td>`;
   }
 
@@ -594,9 +594,9 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
   const expUsd = (row && row.pl != null && row.pl_type === 'pct' && row.nav)
     ? Math.abs(row.pl * row.nav) : null;
   if (!Math.abs(rfQty ?? 0) && expUsd != null && expUsd < minUsd) {
-    return muted('—', `Exposição de ${fmtMoney(expUsd)} no MM — abaixo do piso de `
-      + `${fmtMoney(minUsd)}. Espelhar ${fmtPct(e.allocTarget)} disso seria `
-      + `${fmtMoney(expUsd * (e.allocTarget ?? 0))}: não é afirmado como desvio.`);
+    return muted('—', `Exposição de ${fmtMoneyTxt(expUsd)} no MM — abaixo do piso de `
+      + `${fmtMoneyTxt(minUsd)}. Espelhar ${fmtPct(e.allocTarget)} disso seria `
+      + `${fmtMoneyTxt(expUsd * (e.allocTarget ?? 0))}: não é afirmado como desvio.`);
   }
   const cls = rfAllocClass(e.allocPct, e.allocTarget);
   const dpp = (e.allocPct - e.allocTarget) * 100;
@@ -604,13 +604,13 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
      a conta para saber o tamanho do que está faltando. */
   if (!Math.abs(rfQty ?? 0)) {
     const falta = mmQty * (e.allocTarget ?? 0);
-    return `<td class="check-cell ${cls}" title="${_rfEsc(
-      `⚠ NADA NO RF nesta linha.\n\n  MM: ${fmtFinalQty(mmQty)}\n  RF: zero\n`
-      + `  Pelo alvo de ${fmtPct(e.allocTarget)}, deveria haver ~${fmtFinalQty(falta)}.`
-      + (expUsd != null ? `\n\nExposição no MM: ${fmtMoney(expUsd)}.` : ''))}">⚠ nada no RF</td>`;
+    return `<td class="check-cell ${cls}" title="${_escHtml(
+      `⚠ NADA NO RF nesta linha.\n\n  MM: ${fmtFinalQtyTxt(mmQty)}\n  RF: zero\n`
+      + `  Pelo alvo de ${fmtPct(e.allocTarget)}, deveria haver ~${fmtFinalQtyTxt(falta)}.`
+      + (expUsd != null ? `\n\nExposição no MM: ${fmtMoneyTxt(expUsd)}.` : ''))}">⚠ nada no RF</td>`;
   }
   const tip = `QUANTIDADE, linha a linha (opção e demais instrumentos).\n\n`
-    + `  MM: ${fmtFinalQty(mmQty)}\n  RF: ${fmtFinalQty(rfQty)}\n`
+    + `  MM: ${fmtFinalQtyTxt(mmQty)}\n  RF: ${fmtFinalQtyTxt(rfQty)}\n`
     + `  RF ÷ MM = ${fmtPct(e.allocPct)}  ·  alvo ${fmtPct(e.allocTarget)}`
     + `  (${dpp >= 0 ? '+' : ''}${dpp.toLocaleString('en-US', {maximumFractionDigits: 2})}pp)\n`
     + (e.expRatio != null
@@ -619,7 +619,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
         : '')
     + `\nVerde dentro de ±${(RF_ALLOC_REL_TOL * 100).toFixed(0)}% do alvo, amarelo até o dobro, `
     + 'vermelho além — faixa RELATIVA, porque ±2pp num alvo de 4,4% aceitaria de 2,4% a 6,4%.';
-  return `<td class="check-cell ${cls}" title="${_rfEsc(tip)}">${
+  return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
     cls === 'alloc-ok' ? '✓' : '⚠ ' + fmtPct(_semZeroNegativo(e.allocPct))}</td>`;
 }
 
@@ -651,7 +651,7 @@ function rfCheckHead(cfg, merged, quebra) {
     + 'Opção e demais: linha a linha, pela QUANTIDADE, contra o alvo de boleta de '
     + fmtPct(cfg?.alloc_target) + '.\n\n'
     + '"—" = não afirmado (sem par no MM, ou abaixo do piso de material).';
-  return `<th title="${_rfEsc(tip)}">Check ${lbl}</th>`;
+  return `<th title="${_escHtml(tip)}">Check ${lbl}</th>`;
 }
 
 /* ── DERIVA DO ALVO — o 2º check no agregado ──────────────────────────────────────────
@@ -757,7 +757,7 @@ function renderRfTargetBanner(cfg) {
     + `${cfg.nav_date ? ' · ' + fmtDate(cfg.nav_date) : ''}${cfg.nav_source ? ' · ' + cfg.nav_source : ''})</span>`
     + ` &nbsp;·&nbsp; NAV de MM do ${tr} <b>${usd(navMm)}</b>`
     + (cfg.nav && navMm
-        ? ` &nbsp;·&nbsp; <span style="color:var(--text-muted)" title="${_rfEsc(
+        ? ` &nbsp;·&nbsp; <span style="color:var(--text-muted)" title="${_escHtml(
             'É esta razão que manda no alvo: alvo = ' + fmtPct(e.expTarget) + ' ÷ (NAV_MM/NAV_RF). '
             + 'A razão que sustenta o alvo combinado é ' + (e.expTarget / e.allocTarget).toFixed(3) + '.')
           }">razão ${(navMm / cfg.nav).toLocaleString('en-US', {maximumFractionDigits: 3})} `
@@ -765,7 +765,7 @@ function renderRfTargetBanner(cfg) {
         : '');
 
   const semLinha = !cfg.n_rows
-    ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px" title="${_rfEsc(
+    ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px" title="${_escHtml(
         'Nenhuma posição do ' + tr + ' no ' + (cfg.fund ?? 'veículo') + ' nesta data. O painel acima é '
         + 'sobre os NAVs e vale assim mesmo; as tabelas de check só aparecem quando houver linha.')
       }">· sem linha boletada hoje</span>`
@@ -802,7 +802,7 @@ function renderRfCcyCheck(cfg, tabId) {
     const mutedRow = (l.small || l.numerario) ? ' style="color:var(--text-muted)"' : '';
     const rCls = l.ratio != null ? rfAllocClass(l.ratio, alvo) : '';
     const rTxt = l.ratio != null ? pct(l.ratio)
-      : `<span style="color:var(--text-muted)" title="${_rfEsc(
+      : `<span style="color:var(--text-muted)" title="${_escHtml(
           l.numerario
             ? 'O dólar é o NUMERÁRIO dos dois NAVs — "exposição a USD" não é risco aqui. E ela '
               + 'não pode espelhar: no MM o euro vem de EUR/AUD, que não toca o dólar, e no RF de '
@@ -825,7 +825,7 @@ function renderRfCcyCheck(cfg, tabId) {
   const g = c.gross;
   const gCls = g.ratio != null ? rfAllocClass(g.ratio, alvo) : '';
   const gTr = `<tr style="border-top:2px solid var(--border)">
-    <td><b>Agregado</b> <span style="color:var(--text-muted);font-size:10px" title="${_rfEsc(
+    <td><b>Agregado</b> <span style="color:var(--text-muted);font-size:10px" title="${_escHtml(
       'Soma dos MÓDULOS das moedas, SEM o dólar. Somar com sinal faria as pernas de um par se '
       + 'cancelarem e o total sairia ~0 dos dois lados, dizendo nada; e o dólar é o numerário '
       + 'dos dois NAVs, não risco.')}">módulos, ex-USD</span></td>
@@ -884,7 +884,7 @@ function renderRfCcyCheck(cfg, tabId) {
       })(this.querySelector('.rfCcyArrow'),document.getElementById('${wrapId}'))">
       <div class="section-title" style="padding:4px 0 8px 0;font-size:12px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
         <span>Exposição por moeda — RF × ${c.trader}
-          <span style="font-weight:400;color:var(--text-muted);font-size:11px" title="${_rfEsc(
+          <span style="font-weight:400;color:var(--text-muted);font-size:11px" title="${_escHtml(
             'Cada par decomposto em pernas CONTRA O DÓLAR (EUR/AUD = +EUR −AUD) e somado por moeda. '
             + 'É a régua do câmbio: a mesma exposição é montada com contratos diferentes em cada livro, '
             + 'então instrumento contra instrumento não compara nada.')}">câmbio linear · spot · NDF · forward</span>
@@ -899,11 +899,11 @@ function renderRfCcyCheck(cfg, tabId) {
       <table class="data-table alloc-table" style="white-space:nowrap;width:auto">
         <thead><tr>
           <th>Moeda</th>
-          <th title="${_rfEsc('Exposição do book de MM do ' + c.trader + ' naquela moeda, em USD ao spot.')}">MM (USD)</th>
-          <th title="${_rfEsc('Sobre o NAV de MM do trader: USD ' + Number(c.nav_mm ?? 0).toLocaleString('en-US', {maximumFractionDigits:0}))}">% NAV MM</th>
-          <th title="${_rfEsc('Exposição do sleeve naquela moeda, em USD ao spot.')}">RF (USD)</th>
-          <th title="${_rfEsc('Sobre o NAV do fundo que detém o veículo: USD ' + Number(c.nav_rf ?? 0).toLocaleString('en-US', {maximumFractionDigits:0}))}">% NAV RF</th>
-          <th title="${_rfEsc('% NAV RF ÷ % NAV MM. É O CHECK: o RF tem de carregar ' + (alvo*100).toFixed(0)
+          <th title="${_escHtml('Exposição do book de MM do ' + c.trader + ' naquela moeda, em USD ao spot.')}">MM (USD)</th>
+          <th title="${_escHtml('Sobre o NAV de MM do trader: USD ' + Number(c.nav_mm ?? 0).toLocaleString('en-US', {maximumFractionDigits:0}))}">% NAV MM</th>
+          <th title="${_escHtml('Exposição do sleeve naquela moeda, em USD ao spot.')}">RF (USD)</th>
+          <th title="${_escHtml('Sobre o NAV do fundo que detém o veículo: USD ' + Number(c.nav_rf ?? 0).toLocaleString('en-US', {maximumFractionDigits:0}))}">% NAV RF</th>
+          <th title="${_escHtml('% NAV RF ÷ % NAV MM. É O CHECK: o RF tem de carregar ' + (alvo*100).toFixed(0)
             + '% do que o MM carrega. Verde dentro de ±' + (RF_ALLOC_REL_TOL*100).toFixed(0)
             + '% do alvo, amarelo até o dobro, vermelho além.')}">RF ÷ MM · alvo ${pct(alvo)}</th>
         </tr></thead>
@@ -930,7 +930,6 @@ function rfTargetNote(cfg) {
        + `pelos NAVs de hoje <b>${fmtPct(e.navTarget)}</b> — ${fim}</span>`;
 }
 
-const _rfEsc = t => String(t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 /* ⚰️ **`renderRfSleeveCheck` foi REMOVIDA (08/10/2026) — era inalcançável.** Ela existia como
    auxiliar autônoma para o caso "sleeve presente, mas sem break por fundo". Esse caso não
@@ -1008,7 +1007,7 @@ Ficam de fora o caixa/carry (LFT), o `
       + `tem posição em nenhum deles.`);
   }
   if (e.caso === 'so_rf') {
-    return `<td class="check-cell alloc-bad" title="${_rfEsc(
+    return `<td class="check-cell alloc-bad" title="${_escHtml(
       `⚠ O ${tr} NÃO TEM esta linha.
 
 ${qtd}
@@ -1017,7 +1016,7 @@ Toda a exposição ${escopo ? 'do ' + esc : 'do RF'} aqui `
       + `(${_mirrorExpTxt(e.expRf, row.pl_type)} ${un}) está sem par no book dele.`)}">⚠ sem par</td>`;
   }
   if (e.caso === 'zerado_rf') {
-    return `<td class="check-cell alloc-bad" title="${_rfEsc(
+    return `<td class="check-cell alloc-bad" title="${_escHtml(
       `⚠ ZERADO ${escopo ? 'NO ' + esc.toUpperCase() : 'NO RF'}, e o ${tr} carrega.
 
 ${qtd}
@@ -1027,7 +1026,7 @@ ${qtd}
       + `~${_mirrorQtyTxt(e.qEq)}.`)}">⚠ zerado ${escopo ? 'aqui' : 'no RF'}</td>`;
   }
   if (e.caso === 'oposto') {
-    return `<td class="check-cell alloc-bad" title="${_rfEsc(
+    return `<td class="check-cell alloc-bad" title="${_escHtml(
       `⛔ LADOS OPOSTOS — ${escopo ? 'o ' + esc : 'o RF'} está de um lado e o ${tr} do outro.
 
 ${qtd}
@@ -1058,7 +1057,7 @@ Não existe `
           + `${((cfg.rel_tol ?? RF_MIRROR_REL_TOL) * 100).toFixed(0)}%, e abaixo disso a boleta não desce.`
         : '.');
   const cls = rfMirrorClass(e);
-  return `<td class="check-cell ${cls}" title="${_rfEsc(tip)}">${
+  return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
     e.caso === 'ok' ? '✓'
       : (e.diff != null ? '⚠ ' + _mirrorDiffTxt(e.diff, row.pl_type)
                         : '⚠ ' + fmtPct(e.ratio))}</td>`;
@@ -1091,7 +1090,7 @@ function mirrorCheckHead(cfg, extraTip) {
     + (extraTip ? `
 
 ${extraTip}` : '');
-  return `<th title="${_rfEsc(tip)}">Check ${tr}</th>`;
+  return `<th title="${_escHtml(tip)}">Check ${tr}</th>`;
 }
 
 /* ── Fund breakdown table (portfoliorf) ───────────────────────────────────
@@ -1165,12 +1164,12 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       const mmRf = lookupMmRf ? lookupMmRf(r) : null;
       // Mesmo tom da linha na tabela principal: as duas se leem como um par. O dono vai no
       // `title` da linha, não em texto ao lado do nome (a mesa pediu a cor, não o selo).
-      return `<tr class="${rowClass} ${areaClass} sleeve-row" title="${_rfEsc(
+      return `<tr class="${rowClass} ${areaClass} sleeve-row" title="${_escHtml(
         'Linha do sleeve de RF — ' + (r.trader ?? '—') + ', 100% no ' +
         (rfCfg?.fund ?? 'veículo offshore') + '. Não entra no rateio entre os dois Masters.')}">
         <td>${r.instrument_name ?? '—'}</td>
         ${dash.repeat(2 * fundLabels.length)}
-        <td style="color:var(--text-muted);text-align:right;font-size:11px" title="${_rfEsc(
+        <td style="color:var(--text-muted);text-align:right;font-size:11px" title="${_escHtml(
           'Rateio entre os dois Masters não se aplica: a linha é do sleeve.')}">sleeve</td>
         ${mirrorCols ? _checkVazio('—', 'Linha do sleeve de RF: o espelho de juros confere o '
             + 'livro do PortfolioRF contra o EMota, e esta linha é do outro trader — o check '
@@ -1326,8 +1325,14 @@ function _alignAuxTables(tabId) {
    entraria na medida do seguinte. */
 function _alignFsHeads(mainBody, auxBody) {
   if (!mainBody || !auxBody) return;
-  const a = [...mainBody.querySelectorAll('tr.fs-head')];
-  const b = [...auxBody.querySelectorAll('tr.fs-head')];
+  /* ⚠️ As DUAS linhas de cada bloco (resumo + cabeçalho de coluna), na ordem do documento:
+     desde 28/10/2026 cada bloco é uma "tabela" com cabeçalho próprio, e o cabeçalho também
+     sai de alturas diferentes nas duas — na principal há `th` de duas linhas ("Qtd<br>
+     Abertura"), na auxiliar nem sempre. Igualar só o resumo deixaria o desvio do cabeçalho
+     se acumulando bloco a bloco, que é exatamente o que esta função existe para evitar. */
+  const _SEL = 'tr.fs-head, tr.fs-colhead';
+  const a = [...mainBody.querySelectorAll(_SEL)];
+  const b = [...auxBody.querySelectorAll(_SEL)];
   if (!a.length || a.length !== b.length) return;
   for (const tr of [...a, ...b]) tr.style.height = '';
   const hs = a.map((tr, i) => Math.max(tr.getBoundingClientRect().height,

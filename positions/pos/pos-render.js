@@ -38,7 +38,7 @@ function rerenderTables(onlyKey) {
     }
     if (hasFundBreak && s.group === 'Todos') {
       const el = document.getElementById('fund_break_portfoliorf');
-      if (el) el.innerHTML = expandido
+      if (el) el.innerHTML = (expandido && typeof renderFundSplitAuxInline === 'function')
         ? renderFundSplitAuxInline(data, blocos, data.rf_sleeve,
             (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(activeTraderTab) : null)
         : renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows,
@@ -827,7 +827,6 @@ function netByAssetGroup(rows) {
     || String(x.sub).localeCompare(String(y.sub)));
 }
 
-const _netEsc = t => String(t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 /* Igual ao `fmtPL`, com UMA diferença: zero imprime `0.00`, não `—`. No corpo da tabela o
    traço quer dizer "não há número"; num NET diria a mesma coisa e estaria errado. Só chega
@@ -860,9 +859,10 @@ const _netFlat = a =>
 function renderNetSummary(rows) {
   /* ☠️ **#PL só soma com #PL do MESMO denominador** — e é só por isso que o sleeve tem balde
      próprio (ver `netByAssetGroup`), NÃO porque ele deva sumir da tira. A exposição dele é
-     fração do NAV do fundo que detém o veículo offshore (US$ 32,5 MM) e a do trader da aba,
-     do NAV dela (US$ 43,0 MM): jogar os dois no mesmo chip somaria frações de denominadores
-     diferentes. Em chips separados, cada número é verdadeiro sobre o seu patrimônio — e o
+     fração do NAV do fundo que detém o veículo offshore, e a do trader da aba é fração do
+     NAV dela — são **denominadores diferentes**, e da mesma ordem de grandeza, o que torna a
+     soma errada *e* plausível. Jogar os dois no mesmo chip somaria frações de bases
+     distintas. Em chips separados, cada número é verdadeiro sobre o seu patrimônio — e o
      chip diz de quem é. */
   const rfc = (posDataByTab[currentRenderTab()] ?? positionsData)?.rf_sleeve ?? null;
   const chips = netByAssetGroup(rows).filter(a => !_netFlat(a)).map(a => {
@@ -871,7 +871,7 @@ function renderNetSummary(rows) {
     if (a.nNom) { parts.push(_netNum(a.nom, 'nominal')); unid.push('PL por 100bp (DV01 × 10.000 / NAV)'); }
     if (!parts.length) parts.push('<span style="color:var(--text-muted)">n/d</span>');
     const warn = a.missing.length
-      ? ` <span class="net-warn" title="${_netEsc(
+      ? ` <span class="net-warn" title="${_escHtml(
           `${a.missing.length} linha(s) sem #PL calculável — FORA desta soma:\n· ` +
           a.missing.join('\n· '))}">⚠</span>`
       : '';
@@ -887,7 +887,7 @@ function renderNetSummary(rows) {
     // dele na tabela, e repetir o nome em todo chip só encompridava a tira. Quem é fica no
     // hover, junto com o NAV sobre o qual aquele % foi medido.
     const lbl = a.sub;
-    return `<span class="net-chip${a.owner ? ' net-chip-sleeve' : ''}" title="${_netEsc(tip)}"><span class="net-chip-lbl">${lbl}</span> ${parts.join(' <span class="net-sep">·</span> ')}${warn}</span>`;
+    return `<span class="net-chip${a.owner ? ' net-chip-sleeve' : ''}" title="${_escHtml(tip)}"><span class="net-chip-lbl">${lbl}</span> ${parts.join(' <span class="net-sep">·</span> ')}${warn}</span>`;
   });
   if (!chips.length) return '';
   return `<span class="net-lbl" title="Soma da coluna #PL das linhas EXIBIDAS acima, por grupo de ativo, na mesma ordem de área da tabela (juros → bolsa → moedas → commodities). Moedas em pares CONTRA O DÓLAR (USDBRL, USDMXN, EURUSD…): um cross vira dois pares (EURBRL = EURUSD + USDBRL). Com % = exposição sobre o NAV; sem % = PL por 100bp. Balde zerado não aparece.&#10;&#10;Chip com nome de trader é do SLEEVE DE RF: o % dele é fração do NAV do fundo que detém o veículo offshore, não do NAV desta aba — por isso vem separado, não somado.">Net</span>${chips.join('')}`;

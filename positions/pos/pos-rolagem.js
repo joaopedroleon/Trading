@@ -1,4 +1,4 @@
-const ROLAGEM_TAB_ID = 'rolagem';
+/* `ROLAGEM_TAB_ID` mora no pos-state.js (registro único de ids de aba). */
 const ROLAGEM_FILTER_DIMS = [
   { key: 'fund',     label: 'Fundo'      },
   { key: 'trader',   label: 'Trader'     },

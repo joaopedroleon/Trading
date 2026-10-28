@@ -48,13 +48,38 @@
   }
   window.renderRestoreBtn = updateRestoreBtn;  // caso positions.js a chame internamente
 
-  window.hideRow = function (key) {
-    const trader = String(key).split('||')[1];
-    const id = _tabIdForTrader(trader) || activeTraderTab;
-    activeTraderTab = id;                 // aponta o estado global p/ o trader da linha…
+  /* ☠️ **O TRADER DA LINHA NÃO É A ABA DELA** (28/10/2026). Esta função resolvia a aba pelo
+     nome do trader na `rowKey` (`grupo||trader||…`) — e isso quebra nas linhas do **sleeve de
+     RF**, que moram na tabela do PortfolioRF mas têm `trader = PAbinader`, que não é aba aqui.
+     `_tabIdForTrader('PAbinader')` dava `undefined`, caía no `|| activeTraderTab` e a chave ia
+     parar no `hiddenRows` de QUALQUER aba que tivesse renderizado por último: a linha não
+     sumia e o contador do botão subia. Medido no snapshot — a seção `body_Todos_PortfolioRF`
+     mandava a chave para `ecotrim`. É a mesma família do defeito que a mesa reportou no
+     `positions.html` (ocultar e não conseguir restaurar), lá resolvido pelo
+     `_sectionKeysByBody`.
+     ⭐ A fonte certa é o DADO, não o nome: a aba é aquela cujo payload contém a linha. Só
+     quando isso não decide (chave que não está em payload nenhum) é que o nome do trader
+     serve de palpite. */
+  function _tabIdForKey(key) {
+    for (const [id] of TRADERS) {
+      const data = posDataByTab[id];
+      if (data && data.rows && data.rows.some((r) => rowKey(r) === key)) return id;
+    }
+    return _tabIdForTrader(String(key).split('||')[1]) || activeTraderTab;
+  }
+
+  function _withTabOfKey(key, fn) {
+    const id = _tabIdForKey(key);
+    activeTraderTab = id;                 // aponta o estado global p/ a aba da linha…
     positionsData = posDataByTab[id];     // …antes de ocultar/re-renderizar
-    _hiddenForTab(id).add(key);
-    rerenderTables(key);                  // re-render só do tbody da seção da linha
+    fn(id);
+  }
+
+  window.hideRow = function (key) {
+    _withTabOfKey(key, (id) => {
+      _hiddenForTab(id).add(key);
+      rerenderTables(key);                // re-render só do tbody da seção da linha
+    });
     updateRestoreBtn();
   };
 
@@ -76,6 +101,52 @@
     };
     requestAnimationFrame(() => requestAnimationFrame(realign));
   };
+
+  /* ⭐ As DUAS ferramentas de SEÇÃO precisam do mesmo tratamento que o `hideRow` acima,
+     e faltavam (achado na revisão de 28/10/2026). `hideZeroRowsInSection` e
+     `restoreHiddenInSection` resolvem a aba por `currentRenderTab()`, que fora de um render
+     cai no `activeTraderTab` — e aqui os TRÊS traders estão empilhados na mesma página, com
+     essa global parada no último que renderizou. Resultado: o `✕ Ocultar zeradas` de duas das
+     três seções escondia a linha na aba ERRADA — a chave entrava no `hiddenRows` de outro
+     trader, a seção clicada não mudava, e o contador do botão subia sem nada sumir.
+     ⚠️ A aba certa sai da PRÓPRIA CHAVE (`group||trader||…`), como no `hideRow`: é o único
+     dado confiável aqui, porque a seção não sabe de quem ela é. */
+  const _origHideZero = window.hideZeroRowsInSection;
+  if (typeof _origHideZero === 'function') {
+    window.hideZeroRowsInSection = function (tbodyId) {
+      const keys = (typeof _zeroKeysBySection !== 'undefined'
+        ? _zeroKeysBySection.get(tbodyId) : null) || [];
+      if (!keys.length) return;
+      _withTabOfKey(keys[0], (id) => {
+        const hid = _hiddenForTab(id);
+        for (const k of keys) hid.add(k);
+        rerenderTables(keys[0]);
+      });
+      updateRestoreBtn();
+    };
+  }
+
+  const _origRestoreSec = window.restoreHiddenInSection;
+  if (typeof _origRestoreSec === 'function') {
+    window.restoreHiddenInSection = function (tbodyId) {
+      /* ⚠️ Não dá para usar o `_hiddenKeysOfSection` original: ele cruza as chaves desenhadas
+         na seção com o `_hiddenForTab(currentRenderTab())` — a aba errada, o mesmo defeito.
+         Aqui a interseção é feita contra o `hiddenRows` do trader DONO da seção. */
+      const desenhadas = (typeof _sectionKeysByBody !== 'undefined'
+        ? _sectionKeysByBody.get(tbodyId) : null);
+      if (!desenhadas || !desenhadas.size) return;
+      const alguma = desenhadas.values().next().value;
+      const id = _tabIdForKey(alguma);
+      const hid = _hiddenForTab(id);
+      const keys = [...desenhadas].filter((k) => hid.has(k));
+      if (!keys.length) return;
+      _withTabOfKey(alguma, () => {
+        for (const k of keys) hid.delete(k);
+        rerenderTables(keys[0]);
+      });
+      updateRestoreBtn();
+    };
+  }
 
   /* ── WebCrypto: PBKDF2 → AES-GCM ──────────────────────────────────────────── */
   function b64ToBytes(b64) {

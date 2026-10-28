@@ -679,9 +679,9 @@ const FILTERS = [
   },
   {
     /* ⭐ Irmão RELATIVO do `no_fx_small` (pedido da mesa, 08/10/2026). O corte de 200k é
-       absoluto e foi calibrado para os livros grandes; num veículo de US$ 32 MM ele deixa
-       passar resíduo de rolagem que ali já é material, e num livro maior esconderia posição
-       que não é. 0,10% do NAV é a mesma régua em qualquer fundo.
+       absoluto e foi calibrado para os livros grandes; num veículo pequeno ele deixa passar
+       resíduo de rolagem que ali já é material, e num livro maior esconderia posição que não
+       é. 0,10% do NAV é a mesma régua em qualquer fundo.
        ⚠️ Mede o **#PL** (exposição, fração do NAV), não a quantidade — é o que torna o corte
        comparável entre moedas: 50 AUD e 50 JPY não são a mesma coisa.
        ⚠️ Linha SEM #PL calculável não é cortada: "não sei" não é "é pequeno" (seria sumir com

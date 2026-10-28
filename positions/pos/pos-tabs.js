@@ -17,9 +17,19 @@ function activateTab(key) {
     case 'dolarconsol': showDolarConsolTab(); break;
     case 'dolar':       showDolarTab();       break;
     case 'rolagem':     showRolagemTab();     break;
-    case 'controle':    showControleTab();    break;   // Hedge Cambial → Controle (pos-hedge.js)
-    case 'boletas':     showBoletasTab();     break;
-    case 'margem':      showMargemTab();      break;   // IMPAR / VISTA (pos-margem.js)
+    /* ⚠️ As 3 abaixo vivem em módulos que o SNAPSHOT publicado não carrega (ele leva um
+       subconjunto — ver `snapshot/viewer/index.html` e `snapshot/deps_viewer.py`). Sem a
+       guarda, clicar num botão que lá não existe daria `ReferenceError`; com ela, o
+       despachante simplesmente não conhece aquela aba, que é a verdade. */
+    case HEDGE_TAB_ID:
+      if (typeof showControleTab === 'function') showControleTab();   // pos-hedge.js
+      break;
+    case BOLETAS_TAB_ID:
+      if (typeof showBoletasTab === 'function') showBoletasTab();     // pos-boletas.js
+      break;
+    case MARGEM_TAB_ID:
+      if (typeof showMargemTab === 'function') showMargemTab();       // IMPAR / VISTA (pos-margem.js)
+      break;
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
   // Chip do USD/BRL: só nas abas que saem do /reference (trader + Análise de Opções).
@@ -130,7 +140,10 @@ function _invalidateStaleTabs() {
   }
   if (posDataByTab[DOLAR_TAB_ID]   && _tabFetchSig[DOLAR_TAB_ID]   !== sig) _dropTabCache(DOLAR_TAB_ID);
   if (posDataByTab[ROLAGEM_TAB_ID] && _tabFetchSig[ROLAGEM_TAB_ID] !== sig) _dropTabCache(ROLAGEM_TAB_ID);
-  if (hedgeContexto && _tabFetchSig[HEDGE_TAB_ID] !== sig) _dropTabCache(HEDGE_TAB_ID);
+  // ⚠️ `typeof` e não `hedgeContexto &&`: LER um nome não declarado estoura (ao contrário
+  //    de atribuir), e o pos-hedge.js não vai no snapshot.
+  if (typeof hedgeContexto !== 'undefined' && hedgeContexto
+      && _tabFetchSig[HEDGE_TAB_ID] !== sig) _dropTabCache(HEDGE_TAB_ID);
   if (posDataByTab[BOLETAS_TAB_ID] && _tabFetchSig[BOLETAS_TAB_ID] !== sig) _dropTabCache(BOLETAS_TAB_ID);
 }
 
@@ -214,7 +227,7 @@ function reloadActiveTab(opts = {}) {
     // "Atualizar tudo" = foto do mercado AGORA → fresh, como o loadDolarConsol abaixo.
     // (A carga preguiçosa ao abrir a aba, em showDolarTab, segue usando o cache.)
     loadDolarExposure({ fresh: true });
-    loadDolarDirecional({ fresh: true });
+    if (typeof loadDolarDirecional === 'function') loadDolarDirecional({ fresh: true });
     loadEnquadramentoRF({ fresh: true });
     return;
   }
@@ -227,7 +240,7 @@ function reloadActiveTab(opts = {}) {
     return;
   }
   if (activeTraderTab === BOLETAS_TAB_ID) {
-    loadBoletas();
+    if (typeof loadBoletas === 'function') loadBoletas();
     return;
   }
   loadPositionsForTab(activeTraderTab, { fresh: true, prefetch });   // "Atualizar tudo" → preços ao vivo
@@ -424,7 +437,8 @@ async function loadFxDealsForTab(tabId) {
     // A 1ª versão substituía o payload da aba — o que trocava a fonte da tabela principal,
     // que é justamente o que a mesa NÃO quer.
     fxDealsByTab[tabId] = data;
-    renderFxSectionsForTab(tabId);            // pinta SÓ a seção de câmbio + a conferência
+    // pinta SÓ a seção de câmbio + a conferência (pos-fxlegs.js, fora do snapshot)
+    if (typeof renderFxSectionsForTab === 'function') renderFxSectionsForTab(tabId);
   } catch (e) {
     // Posição e PnL já estão na tela e seguem válidos — o erro é SÓ do câmbio. Mas as duas
     // seções podem estar com a tabela da carga ANTERIOR (outra data, outro trader), e o véu
@@ -560,7 +574,7 @@ function _renderSectionsForTab(tabId, allRows) {
   sections.forEach((s, _i) => {
     const isRfSleeve = s.group === rfGroupId;
     // ☠️ O NAV do card do sleeve NÃO é o do trader (o `navMap` traria o NAV de MM dele, ~2×
-    // maior) nem o do veículo (US$ 0,39 MM, ~80× menor): é o do FUNDO que detém o veículo,
+    // maior) nem o do veículo (duas ordens de grandeza menor): é o do FUNDO que detém o veículo,
     // o mesmo denominador que o backend usou no #PL daquelas linhas. Ver funds.RF_SLEEVE_*.
     const nav      = isRfSleeve ? (rfCfg?.nav ?? null) : navMap[s.trader];
     const effDate  = isRfSleeve ? (rfCfg?.nav_date ?? null)
@@ -699,7 +713,7 @@ function _renderSectionsForTab(tabId, allRows) {
       const el = document.getElementById('fund_break_portfoliorf');
       // ⚠️ MESMA lista de linhas da tabela principal (sleeve incluído quando mesclado) —
       // é o que mantém as duas alinhadas linha a linha sem JS de medição.
-      if (el) el.innerHTML = expandido
+      if (el) el.innerHTML = (expandido && typeof renderFundSplitAuxInline === 'function')
         ? renderFundSplitAuxInline(data, blocos, rfCfg,
             (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(tabId) : null)
         : renderFundBreakTable(rows, data.fund_rows, data.fund_navs, filterRows,
