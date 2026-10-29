@@ -217,9 +217,9 @@
 
 <!-- Ordem importa: shim neutraliza a máquina ao vivo ANTES de positions.js;
      data.js (gerado pelo build) traz os blobs criptografados; boot faz a fiação. -->
-<script src="static-shim.js?v=291020261845"></script>
+<script src="static-shim.js?v=291020262000"></script>
 <!-- positions.js dividido em módulos (ver REFACTOR.md); ordem = boot por último, antes do pnl.js -->
-<script src="pos/pos-state.js?v=291020261845"></script>
+<script src="pos/pos-state.js?v=291020262000"></script>
 <!-- ⚠️ `pos-busy.js` É NECESSÁRIO AQUI, não é extra: 4 dos módulos publicados (pos-tabs,
      pos-dolar, pos-rolagem, pos-state) chamam `PosBusy` sem guarda. Até 27/10/2026 ele
      chegava por acidente — o build copiava a pasta `pos/` INTEIRA —, e quando a allowlist
@@ -229,20 +229,20 @@
      `TRADER_TABS` no topo do arquivo. Pondo-o antes, ele estoura e NÃO define `PosBusy`:
      o sintoma volta idêntico, agora por outro motivo (medido em 28/10, as duas vezes).
      A ordem canônica é a do `positions.html`. -->
-<script src="pos/pos-busy.js?v=291020261845"></script>
-<script src="pos/pos-helpers.js?v=291020261845"></script>
-<script src="pos/pos-format.js?v=291020261845"></script>
-<script src="pos/pos-edit.js?v=291020261845"></script>
-<script src="pos/pos-fundtables.js?v=291020261845"></script>
-<script src="pos/pos-tabs.js?v=291020261845"></script>
-<script src="pos/pos-render.js?v=291020261845"></script>
-<script src="pos/pos-misc.js?v=291020261845"></script>
-<script src="pos/pos-rolagem.js?v=291020261845"></script>
-<script src="pos/pos-dolar.js?v=291020261845"></script>
-<script src="pos/pos-boot.js?v=291020261845"></script>
-<script src="pnl.js?v=291020261845"></script>
-<script src="data.js?v=291020261845"></script>
-<script src="data_pnl.js?v=291020261845"></script>
-<script src="static-boot.js?v=291020261845"></script>
+<script src="pos/pos-busy.js?v=291020262000"></script>
+<script src="pos/pos-helpers.js?v=291020262000"></script>
+<script src="pos/pos-format.js?v=291020262000"></script>
+<script src="pos/pos-edit.js?v=291020262000"></script>
+<script src="pos/pos-fundtables.js?v=291020262000"></script>
+<script src="pos/pos-tabs.js?v=291020262000"></script>
+<script src="pos/pos-render.js?v=291020262000"></script>
+<script src="pos/pos-misc.js?v=291020262000"></script>
+<script src="pos/pos-rolagem.js?v=291020262000"></script>
+<script src="pos/pos-dolar.js?v=291020262000"></script>
+<script src="pos/pos-boot.js?v=291020262000"></script>
+<script src="pnl.js?v=291020262000"></script>
+<script src="data.js?v=291020262000"></script>
+<script src="data_pnl.js?v=291020262000"></script>
+<script src="static-boot.js?v=291020262000"></script>
 </body>
 </html>
