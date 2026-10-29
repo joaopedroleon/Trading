@@ -1093,6 +1093,105 @@ ${extraTip}` : '');
   return `<th title="${_escHtml(tip)}">Check ${tr}</th>`;
 }
 
+/* ── ⛔ DÓLAR NO FUNDO ERRADO — regra do veículo (29/10/2026, pedido da mesa) ────────────
+   *"Quando é dólar direcional, ele só pode estar no RF Juros e Moeda, o que tem offshore —
+   então precisa acusar como ERRO quando tiver algo no Institucional."*
+
+   O backend JÁ trata essas linhas como 100% do fundo offshore (`alloc_offshore_only`): é o
+   NAV dele que vira denominador do #PL e é ele o alvo do check de alocação. O que faltava
+   era conferir a PREMISSA — que o fundo Local não carregue dólar nenhum.
+
+   ☠️ **O `Check #PL` ao lado NÃO pega isto, e não é caso de borda.** Ele mede o desvio em
+   **pp de NAV**, e a faixa verde vai até `ALLOC_TOL` (2pp): uma linha de dólar de −0,5 % do
+   NAV com METADE dela no fundo errado dá 0,25pp de desvio e imprime **✓** — posição num
+   fundo que não pode tê-la, lida como alocação em dia. O que decide aqui é a PRESENÇA de
+   quantidade onde ela não pode existir, não o tamanho dela; por isso não há faixa de
+   tolerância e o veredito é **ERRO**, não ⚠.
+   ⚠️ Quantidade ZERADA não acusa: a linha pode ter existido no fundo e sido zerada no dia (o
+   break imprime "—" nela), e acusar o que já não está lá treina a mesa a ignorar a coluna.
+   ⚠️ Vale também para a linha `is_offshore`, cujo check hoje é só o rótulo "offshore": ela
+   mora no veículo offshore, que é justamente o que faz o dólar ser do Juros e Moeda. */
+const _DOLAR_FUNDO_EPS = 1e-9;
+/* O mesmo teste na unidade do modo "por fundo" (pos-fundsplit.js), onde o que se tem é a
+   FATIA da linha naquele bloco e não a quantidade de cada fundo. Folga maior porque a fatia
+   é uma divisão (`q_fundo / q_livro`) e não uma quantidade crua — 1e-6 é 0,0001 % da linha,
+   ordens de grandeza abaixo de qualquer posição de verdade. */
+const _DOLAR_SHARE_EPS = 1e-6;
+
+/* Fundos (que não o offshore) com quantidade nesta linha de dólar. `null` = nada errado. */
+function dolarFundoErrado(byFund, fundLabels, offFund) {
+  if (!offFund) return null;
+  const errs = fundLabels
+    .filter(fl => fl !== offFund)
+    .map(fl => ({ fund: fl, qty: byFund?.[fl]?.final_qty ?? 0 }))
+    .filter(x => Math.abs(x.qty) > _DOLAR_FUNDO_EPS);
+  return errs.length ? errs : null;
+}
+
+function _dolarErroTip(errs, offFund) {
+  const lista = errs.map(x => `${fundLabelMesa(x.fund, true)} ${fmtFinalQtyTxt(x.qty)}`).join(' · ');
+  return 'ERRO — dólar fora do fundo certo.\n\n'
+    + `Dólar direcional só pode estar no ${fundLabelMesa(offFund, true)}, que é o fundo com o `
+    + 'veículo offshore. Há posição em: ' + lista + '.\n\n'
+    + 'Não é desvio de rateio, é posição num fundo que não opera dólar — não há faixa de '
+    + 'tolerância aqui. ⚠️ E enquanto durar, a exposição (#PL) da tabela principal também '
+    + `está errada: ela é calculada sobre o NAV do ${fundLabelMesa(offFund, true)}.`;
+}
+
+/* As linhas de dólar com quantidade em fundo que não pode tê-la, para o alerta do topo da
+   aba. Varre o livro INTEIRO — não a lista filtrada/visível: filtro e "✕ Ocultar zeradas"
+   são escolha de leitura, e posição no fundo errado não pode sumir da tela por causa delas. */
+function dolarFundoErros(mainRows, fundRows, fundNavs, offshoreFund) {
+  if (!mainRows?.length || !fundRows?.length || !fundNavs) return [];
+  const offFund = (offshoreFund && fundNavs[offshoreFund] != null) ? offshoreFund : null;
+  if (!offFund) return [];
+  const fundLabels = Object.keys(fundNavs);
+  const fundIndex  = {};
+  for (const fr of fundRows) {
+    const k = `${fr.instrument_reference}||${fr.area}||${fr.subarea}||${fr.strategy}||${fr.maturity ?? ''}`;
+    (fundIndex[k] ??= {})[fr.fund_label] = fr;
+  }
+  const out = [];
+  for (const r of mainRows) {
+    if (!r.alloc_offshore_only || r.is_rf_sleeve) continue;
+    const k    = `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
+    const errs = dolarFundoErrado(fundIndex[k] ?? {}, fundLabels, offFund);
+    if (errs) out.push({ row: r, errs });
+  }
+  return out;
+}
+
+/* ⛔ FAIXA VERMELHA no topo da aba. Mesma forma do alerta de escopo do sleeve, e pelo mesmo
+   motivo: não é desvio de proporção, é posição que não deveria existir naquele fundo — a
+   célula pintada na auxiliar não basta, porque a auxiliar pode estar filtrada ou o livro
+   pode estar no modo "por fundo".
+   ⭐ **Silêncio é o estado certo**: sem erro isto não renderiza nada. Um painel verde diário
+   dizendo "o dólar está no fundo certo" treinaria a mesa a não ler a faixa no dia em que ela
+   aparecesse. */
+function renderDolarFundoAlerta(data, mainRows) {
+  const erros = dolarFundoErros(mainRows, data?.fund_rows, data?.fund_navs,
+                                data?.portfoliorf_offshore_fund);
+  if (!erros.length) return '';
+  const off = fundLabelMesa(data?.portfoliorf_offshore_fund, true);
+  const li = erros.map(({ row, errs }) => {
+    const onde = errs.map(x => `<b>${fundLabelMesa(x.fund, true)}</b> ${fmtFinalQty(x.qty, qtyDec(row))}`).join(' · ');
+    return `<li style="margin:1px 0"><b>${row.instrument_name ?? '—'}</b>`
+      + ` <span style="color:var(--text-muted)">— ${row.area ?? '—'}`
+      + `${row.subarea ? ' · ' + row.subarea : ''}</span> · ${onde}</li>`;
+  }).join('');
+  return `<div class="card" style="border-left:4px solid var(--red);background:color-mix(in srgb, var(--red) 7%, var(--bg-card));flex:0 0 auto">
+    <div style="font-size:12px;line-height:1.7">
+      <b style="color:var(--red);font-size:13px">⛔ ${erros.length} posição(ões) de DÓLAR NO FUNDO ERRADO</b>
+      <div style="margin-top:2px">Dólar direcional só pode estar no <b>${off}</b>, que é o fundo
+        com o veículo offshore. Estas linhas têm quantidade em fundo que não opera dólar:</div>
+      <ul style="margin:4px 0 0 18px;padding:0">${li}</ul>
+      <div style="margin-top:4px;color:var(--text-muted)">⚠️ Enquanto durar, a exposição (#PL)
+        destas linhas na tabela principal também está errada — ela é calculada sobre o NAV do
+        ${off}, não sobre a soma dos fundos.</div>
+    </div>
+  </div>`;
+}
+
 /* ── Fund breakdown table (portfoliorf) ───────────────────────────────────
    ⭐ É a ÚNICA auxiliar da aba, e desde 08/10/2026 ela também carrega os 2 checks do sleeve
    de RF: as linhas do outro trader passaram a viver na MESMA tabela principal (pedido da
@@ -1112,7 +1211,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   const lookupMmRf   = rfSleeveCols ? makeMirrorLookup(rfCfg.mm_rows) : null;
 
   const fundLabels = Object.keys(fundNavs).sort();
-  const shortLabel = fl => fl.replace('JGP RF Ativa ', '').replace('-A', '');
+  const shortLabel = fl => fundLabelMesa(fl, true);
   // Fundo que recebe 100% do dólar (backend: `portfoliorf_offshore_fund`). Sem ele —
   // payload antigo / snapshot estático — o check cai no comportamento anterior.
   const offFund  = (offshoreFund && fundNavs[offshoreFund] != null) ? offshoreFund : null;
@@ -1151,6 +1250,12 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     // O sleeve offshore (`is_offshore`) segue no ramo próprio, sem check.
     const offOnly     = !!r.alloc_offshore_only && !r.is_offshore && !!offFund;
     if (offOnly) usedOffOnly = true;
+    /* ⛔ Dólar com quantidade em fundo que não opera dólar — ver `dolarFundoErrado` acima.
+       Avaliado para TODA linha `alloc_offshore_only` (a `is_offshore` inclusive, cujo check
+       hoje é só o rótulo "offshore") e tem precedência sobre os dois ramos de check: é regra
+       do veículo, não rateio. */
+    const dolarErro   = (r.alloc_offshore_only && offFund)
+      ? dolarFundoErrado(byFund, fundLabels, offFund) : null;
     // NAV contra o qual o backend calculou o #PL desta linha (`r.nav`): o consolidado nas
     // linhas rateadas, o NAV do fundo offshore nas de dólar. Usar `totalNavSum` fixo
     // reescalaria o #PL por fundo da linha de dólar (29,5/25,1 ≈ +17%).
@@ -1204,7 +1309,10 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     // Check #PL: #PL individual de cada fundo vs #PL do grupo
     // (o "Check Qtd" que ficava aqui saiu em 27/10/2026 — ver a nota no `cells` acima)
     let checkPlCell = '<td></td>';
-    if (r.is_offshore) {
+    if (dolarErro) {
+      checkPlCell = `<td class="check-cell alloc-bad" title="${_escHtml(
+        _dolarErroTip(dolarErro, offFund))}">⛔ ERRO</td>`;
+    } else if (r.is_offshore) {
       checkPlCell = '<td style="color:var(--text-muted);text-align:right;font-size:11px">offshore</td>';
     } else if (offOnly) {
       // Só o fundo offshore entra: os demais não carregam a posição por desenho, então
@@ -1258,7 +1366,9 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--text-muted)"><div>`
       + `US$ dólar (WDO/UC, opção DOL/USDBRL, spot-fwd USD/BRL): alocação vai 100% para `
       + `${shortLabel(offFund)} — o check usa esse alvo, não o rateio por NAV, e a exposição `
-      + `(#PL) da tabela principal é calculada sobre o NAV desse fundo.</div></td></tr>`
+      + `(#PL) da tabela principal é calculada sobre o NAV desse fundo. `
+      + `Quantidade em qualquer outro fundo é ⛔ <b>ERRO</b>, não desvio de rateio — `
+      + `só esse fundo tem o veículo offshore.</div></td></tr>`
     : '';
   const rfFootTr = rfSleeveCols
     ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px"><div>${rfTargetNote(rfCfg)}</div></td></tr>`

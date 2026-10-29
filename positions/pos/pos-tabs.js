@@ -342,6 +342,9 @@ async function loadPositionsForTab(tabId, opts = {}) {
     // Linhas simuladas da aba: repreça e reinjeta ANTES do render (ver pos-simular.js).
     if (typeof simAfterLoad === 'function') await simAfterLoad(tabId);
     noteBbgSource(data);   // estado global (BBG viva/cache) — vale p/ toda a página
+    // Apelido da mesa por fundo — global como o acima, e pelo mesmo motivo: o Check
+    // Enquadramento é outra aba e pode carregar antes do PortfolioRF. Ver pos-format.js.
+    if (typeof rememberFundLabels === 'function') rememberFundLabels(data);
     if (tabId === activeTraderTab) {
       positionsData = data;
       status.textContent = '';
@@ -554,7 +557,14 @@ function _renderSectionsForTab(tabId, allRows) {
      da 1ª boleta, ou num dia parado), quando a mesa pergunta se a proporção ainda vale. */
   /* ⛔ Alerta de ESCOPO primeiro — posição que não deveria existir vem antes de qualquer
      conversa sobre proporção. Silencioso quando não há nada fora. */
-  const rfBanner = ((typeof renderRfEscopoAlerta === 'function') ? renderRfEscopoAlerta(rfCfg) : '')
+  /* ⛔ E antes de tudo o DÓLAR NO FUNDO ERRADO (29/10/2026): dólar direcional só pode estar
+     no fundo que tem o veículo offshore, e quantidade dele no Local é posição no fundo
+     errado — não desvio de rateio. Fica no topo, e não só na célula da auxiliar, porque a
+     auxiliar pode estar filtrada ou a seção pode estar no modo "por fundo". Silencioso
+     quando não há nada fora. Ver `renderDolarFundoAlerta` (pos-fundtables.js). */
+  const rfBanner = ((typeof renderDolarFundoAlerta === 'function' && hasFundBreak)
+                      ? renderDolarFundoAlerta(data, displayRows) : '')
+    + ((typeof renderRfEscopoAlerta === 'function') ? renderRfEscopoAlerta(rfCfg) : '')
     + ((typeof renderRfTargetBanner === 'function') ? renderRfTargetBanner(rfCfg) : '');
   /* Check do câmbio LINEAR, por moeda. Vai no FIM da aba e COLAPSADO (pedido da mesa):
      a leitura do dia a dia é a tabela de posição. O veredito fica no título do card, que

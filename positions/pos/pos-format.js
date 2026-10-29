@@ -100,6 +100,35 @@ function fmtDv01(v) {
   return s;
 }
 
+/* ── O NOME DO FUNDO COMO A MESA FALA — fonte única da tela ──────────────────────────────
+   "Juros e Moeda" e "Local" são os apelidos da mesa para o `JGP RF Ativa Master-A` e o
+   `JGP RF Ativa Inst Master-A` (23/10/2026). O mapa é do BACKEND
+   (`funds.FUND_LABELS_MESA`, servido em `fund_labels_mesa`), e **é propriedade do FUNDO, não
+   de uma tabela**: é isso que faz o nome valer em toda a tela (29/10/2026, pedido do JLeon:
+   *"prefiro manter o Juros e Moeda e Local como o nome em todos os locais da tela"*).
+   ☠️ **Enquanto ele morava só no `label` do `pnl_fund_tables`, a mesma tela dava TRÊS nomes
+   ao mesmo fundo**: "Juros e Moeda" na seção 2, "Master" na auxiliar do break por fundo e
+   "JGP RF Ativa Master-A" no Check Enquadramento — que lista exatamente estes dois fundos.
+   ⛔ Fundo FORA do mapa mantém o label do JRS: isto é curadoria da mesa, não tradução
+   automática. Por isso a função é segura em qualquer tabela de fundos da tela (Prev, MM,
+   hedge): ali ela é um no-op.
+   ⚠️ O mapa é ACUMULADO de qualquer payload que o traga (`rememberFundLabels`), e não lido
+   da aba corrente: o Check Enquadramento é uma aba à parte e pode ser a primeira a carregar. */
+const _FUND_LABELS_MESA = {};
+
+function rememberFundLabels(data) {
+  if (data?.fund_labels_mesa) Object.assign(_FUND_LABELS_MESA, data.fund_labels_mesa);
+}
+
+/* `fallbackJrs`: sem o mapa (payload antigo / snapshot estático), encurta o nome do JRS como
+   a auxiliar do break por fundo sempre fez — "JGP RF Ativa Inst Master-A" → "Inst Master". */
+function fundLabelMesa(fl, fallbackJrs = false) {
+  const s = String(fl ?? '').trim();
+  if (!s) return '—';
+  return _FUND_LABELS_MESA[s]
+      ?? (fallbackJrs ? s.replace('JGP RF Ativa ', '').replace(/-[A-Z]$/, '') : s);
+}
+
 function fmtNav(v, navDate, openingDate) {
   if (v == null) return '';
   const base = `NAV: USD ${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;

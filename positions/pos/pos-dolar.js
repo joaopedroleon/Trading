@@ -649,7 +649,7 @@ function renderDolarTable(data) {
     const fimieCell = `<td class="num" style="border-left:1px solid var(--border)" title="Rateio proporcional do FIM IE">${_fmtBrl(fimie)}<br><span style="font-size:11px;color:var(--text-muted)">${(fimie != null && nav) ? fmtPct(fimie / nav) : '—'}</span></td>`;
 
     return `<tr>
-      <td>${fund.fund_label} ${regimeTag}</td>
+      <td>${fundLabelMesa(fund.fund_label)} ${regimeTag}</td>
       <td class="num">${navStr}</td>
       ${_expCell(sums.mini.eo, nav, sums.mini.qo, true)}${_expCell(sums.mini.et, nav, sums.mini.qt)}${_expCell(sums.mini.ef, nav, sums.mini.qf)}
       ${_expCell(sums.cheio.eo, nav, sums.cheio.qo, true)}${_expCell(sums.cheio.et, nav, sums.cheio.qt)}${_expCell(sums.cheio.ef, nav, sums.cheio.qf)}
@@ -1004,9 +1004,9 @@ function _enqDiAdjust(fund, front) {
   const nav = fund.nav;
   const curPctStr = (di && di.pct != null) ? fmtPct(di.pct) : '—';
   if (!di || nav == null)
-    return `<tr><td>${fund.fund_label}</td><td class="num" colspan="3" style="color:var(--text-muted)">—</td></tr>`;
+    return `<tr><td>${fundLabelMesa(fund.fund_label)}</td><td class="num" colspan="3" style="color:var(--text-muted)">—</td></tr>`;
   if (!front || !front.pu)
-    return `<tr><td>${fund.fund_label}</td><td class="num" style="${_enqLimitStyle(di.pct)}">${curPctStr}</td>
+    return `<tr><td>${fundLabelMesa(fund.fund_label)}</td><td class="num" style="${_enqLimitStyle(di.pct)}">${curPctStr}</td>
       <td colspan="2" style="color:var(--text-muted)">front de DI indisponível</td></tr>`;
 
   const net       = di.net_exp || 0;
@@ -1024,7 +1024,7 @@ function _enqDiAdjust(fund, front) {
     const n = Math.floor(Math.abs(diff) / pu);
     action = `<span style="color:var(--green)">dentro do target · folga ${n.toLocaleString('pt-BR')}</span>`;
   }
-  return `<tr><td>${fund.fund_label}</td>
+  return `<tr><td>${fundLabelMesa(fund.fund_label)}</td>
     <td class="num" style="${_enqLimitStyle(di.pct)}">${curPctStr}</td>
     <td class="num">${_fmtBrl(targetExp)}<br><span style="font-size:11px;color:var(--text-muted)">${fmtPct(enqDiTarget)}</span></td>
     <td class="num">${action}</td></tr>`;
@@ -1079,7 +1079,7 @@ function renderEnquadramentoRF(data) {
     const status = totOver
       ? '<td class="num" style="color:#fff;background:var(--alert-4);font-weight:700">ESTOURO</td>'
       : (totPct != null ? '<td class="num" style="color:var(--green)">OK</td>' : '<td class="num" style="color:var(--text-muted)">—</td>');
-    return `<tr><td>${f.fund_label}</td><td class="num">${navStr}</td>${groupCells}${totalGeral}${status}</tr>`;
+    return `<tr><td>${fundLabelMesa(f.fund_label)}</td><td class="num">${navStr}</td>${groupCells}${totalGeral}${status}</tr>`;
   }).join('');
 
   container.innerHTML = `<div class="card">
