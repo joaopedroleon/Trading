@@ -868,7 +868,7 @@ function renderPnlSummaryByFund(mainRows) {
     ? `<span style="color:${/^JDS \(/.test(navSrcLabel) ? 'var(--text-muted)' : 'var(--yellow)'};font-size:11px" title="NAV de cota ${navDate ?? ''}. JDS = NAV oficial + movimentações do dia (o que o sistema de boletas usa p/ alocar); JRS = NAV de abertura, usado enquanto o JDS não gravou o dia (~16h).">NAV: ${navSrcLabel}</span>`
     : '';
   const orphanWarn = orphans.length
-    ? `<span style="color:var(--yellow);font-size:11px" title="${[...new Set(orphans.map(r => r.instrument_name))].join(', ')}">⚠ ${orphans.length} posição(ões) sem break por fundo (${fmtUSD(orphanUsd)}) — fora das duas tabelas</span>`
+    ? `<span style="color:var(--yellow);font-size:11px" title="${[...new Set(orphans.map(r => r.instrument_name))].join(', ')}">⚠ ${orphans.length} posição(ões) sem break por fundo (${fmtUSD(orphanUsd)}) — fora das tabelas por fundo</span>`
     : '';
   const simWarn = simCount
     ? `<span style="color:var(--yellow);font-size:11px" title="Linha hipotética, sem fundo — aparece só no resumo consolidado e na tabela de Posição">⚡ ${simCount} linha(s) simulada(s) fora do split por fundo</span>`

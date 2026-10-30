@@ -562,8 +562,13 @@ function _renderSectionsForTab(tabId, allRows) {
      errado — não desvio de rateio. Fica no topo, e não só na célula da auxiliar, porque a
      auxiliar pode estar filtrada ou a seção pode estar no modo "por fundo". Silencioso
      quando não há nada fora. Ver `renderDolarFundoAlerta` (pos-fundtables.js). */
+  /* ⛔ E o ESCOPO POR FUNDO (30/10/2026), do mesmo naipe: com o `Juros Global` na aba, que
+     só opera juros, câmbio ali — e bolsa em qualquer um dos três — é posição que não
+     deveria existir. Vem logo depois do dólar porque o backend já tira daqui o que a faixa
+     do dólar cobre: as duas nunca falam da mesma linha. Ver `renderPrfEscopoAlerta`. */
   const rfBanner = ((typeof renderDolarFundoAlerta === 'function' && hasFundBreak)
                       ? renderDolarFundoAlerta(data, displayRows) : '')
+    + ((typeof renderPrfEscopoAlerta === 'function') ? renderPrfEscopoAlerta(data) : '')
     + ((typeof renderRfEscopoAlerta === 'function') ? renderRfEscopoAlerta(rfCfg) : '')
     + ((typeof renderRfTargetBanner === 'function') ? renderRfTargetBanner(rfCfg) : '');
   /* Check do câmbio LINEAR, por moeda. Vai no FIM da aba e COLAPSADO (pedido da mesa):

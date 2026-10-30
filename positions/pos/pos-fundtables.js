@@ -1153,12 +1153,76 @@ function dolarFundoErros(mainRows, fundRows, fundNavs, offshoreFund) {
   }
   const out = [];
   for (const r of mainRows) {
-    if (!r.alloc_offshore_only || r.is_rf_sleeve) continue;
+    /* ⚠️ **Só linha de DÓLAR** (`dollar_kind`), não toda `alloc_offshore_only` (30/10/2026).
+       A condição era a segunda, e funcionava enquanto o offshore fosse de um fundo só: as
+       linhas de veículo têm `fund_label` da classe offshore, que não está em `fundNavs`, e
+       por isso nunca acusavam. Com o `Juros Global` podendo carregar juros em moeda forte
+       DIRETO no fundo (sem passar pelo veículo), aquela linha passaria a casar com um
+       `fundLabels` e sairia na faixa como "dólar no fundo errado" — sendo juros, e estando
+       no fundo certo. A regra da mesa é sobre dólar; o resto é o check de ESCOPO ao lado. */
+    if (!r.dollar_kind || r.is_rf_sleeve) continue;
     const k    = `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
     const errs = dolarFundoErrado(fundIndex[k] ?? {}, fundLabels, offFund);
     if (errs) out.push({ row: r, errs });
   }
   return out;
+}
+
+/* ── ⛔ ESCOPO POR FUNDO — o que cada fundo do RF pode carregar (30/10/2026) ─────────────
+   Regra da mesa, com a entrada do `JGP RF Ativa Global-A`: *"só pode operar juros, não terá
+   FX ... nem em equities (como todos os outros)"*. O backend decide (uma regra, em
+   `funds.PORTFOLIORF_AREAS_OK`) e manda a lista pronta em `portfoliorf_escopo.fora`; aqui só
+   se desenha.
+
+   ☠️ **Câmbio não se identifica pela `area`.** O dólar do book de RF mora tanto em
+   `Currencies - Directional BRL` quanto em `Rates - Cash` (o mini de carry) e
+   `Rates - Hedge_Cambial` — medido em 30/10/2026. Por isso a classificação é por
+   INSTRUMENTO (`portfoliorf_risk_kind`, no backend), e o que a faixa imprime ao lado do nome
+   é a área CRUA do JRS, que é onde a mesa vai procurar a linha. Os dois números juntos é que
+   contam a história: "Rates · Cash" + "conta como câmbio".
+   ⭐ Silêncio é o estado certo — sem nada fora, nada é renderizado. */
+function _escopoErroTip(row, fundos) {
+  const quais = fundos.map(f => fundLabelMesa(f, true)).join(' · ');
+  const rk    = row.prf_risk_kind ?? row.risk_kind ?? row.area;
+  const kind  = _BOOK_PT[rk] ?? (rk ?? '—');
+  return 'ERRO — book que este fundo não pode carregar.\n\n'
+    + `Há posição desta linha em: ${quais}. Para efeito da regra ela conta como `
+    + `${kind}${row.area && rk && rk !== row.area
+        ? ` (a área no JRS é "${row.area}${row.subarea ? ' · ' + row.subarea : ''}")` : ''}.\n\n`
+    + 'Não é desvio de rateio, é posição num fundo que não opera esse book — não há faixa de '
+    + 'tolerância aqui.';
+}
+
+const _BOOK_PT = { Rates: 'juros', Currencies: 'câmbio', Equities: 'bolsa',
+                   Commodities: 'commodities' };
+
+function renderPrfEscopoAlerta(data) {
+  const fora = data?.portfoliorf_escopo?.fora;
+  if (!fora?.length) return '';
+  const okMap = data.portfoliorf_escopo.areas_ok || {};
+  const li = fora.map(x => {
+    const onde = (x.funds || []).map(f =>
+      `<b>${fundLabelMesa(f.fund, true)}</b> ${fmtFinalQty(f.qty)}`).join(' · ');
+    const kind = _BOOK_PT[x.risk_kind] ?? x.risk_kind ?? '—';
+    /* A área crua vai junto SEMPRE que diferir da classificação — é a diferença entre
+       "procure na linha de câmbio" e "procure no Rates · Cash", que é onde ela de fato
+       está na tela. Omiti-la manda a mesa procurar no lugar errado. */
+    const org = (x.area && x.risk_kind !== x.area)
+      ? `${x.area}${x.subarea ? ' · ' + x.subarea : ''} → conta como ${kind}`
+      : `${x.area ?? '—'}${x.subarea ? ' · ' + x.subarea : ''}`;
+    return `<li style="margin:1px 0"><b>${x.instrument_name ?? '—'}</b>`
+      + ` <span style="color:var(--text-muted)">— ${org}</span> · ${onde}</li>`;
+  }).join('');
+  const regras = Object.entries(okMap).map(([f, areas]) =>
+    `<b>${fundLabelMesa(f, true)}</b>: ${areas.map(a => _BOOK_PT[a] ?? a).join(' e ')}`
+  ).join(' &nbsp;·&nbsp; ');
+  return `<div class="card" style="border-left:4px solid var(--red);background:color-mix(in srgb, var(--red) 7%, var(--bg-card));flex:0 0 auto">
+    <div style="font-size:12px;line-height:1.7">
+      <b style="color:var(--red);font-size:13px">⛔ ${fora.length} posição(ões) em FUNDO QUE NÃO PODE CARREGÁ-LA</b>
+      <div style="margin-top:2px">${regras}. Estas linhas estão fora disso:</div>
+      <ul style="margin:4px 0 0 18px;padding:0">${li}</ul>
+    </div>
+  </div>`;
 }
 
 /* ⛔ FAIXA VERMELHA no topo da aba. Mesma forma do alerta de escopo do sleeve, e pelo mesmo
@@ -1192,6 +1256,14 @@ function renderDolarFundoAlerta(data, mainRows) {
   </div>`;
 }
 
+/* Config das tabelas por fundo da aba corrente — o `renderFundBreakTable` recebe só as
+   linhas e os NAVs, e precisa saber se algum fundo da aba ficou de fora por não ter NAV. */
+function _pnlTablesForTab() {
+  const d = (typeof posDataByTab !== 'undefined')
+    ? (posDataByTab[currentRenderTab()] ?? positionsData) : null;
+  return d?.pnl_fund_tables ?? null;
+}
+
 /* ── Fund breakdown table (portfoliorf) ───────────────────────────────────
    ⭐ É a ÚNICA auxiliar da aba, e desde 08/10/2026 ela também carrega os 2 checks do sleeve
    de RF: as linhas do outro trader passaram a viver na MESMA tabela principal (pedido da
@@ -1210,7 +1282,16 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   const mirrorCols = !!mirrorCfg;
   const lookupMmRf   = rfSleeveCols ? makeMirrorLookup(rfCfg.mm_rows) : null;
 
-  const fundLabels = Object.keys(fundNavs).sort();
+  /* ⚠️ **A ordem das colunas é a do `pnl_fund_tables`, não alfabética** (30/10/2026). Com
+     DOIS fundos o `sort()` por acaso dava a mesma ordem dos blocos do modo "Por fundo"; com
+     o `Juros Global` entrando, passaria a dar outra (`Global` < `Inst Master` < `Master`) — a
+     auxiliar numa ordem e os blocos ao lado noutra, sem erro nenhum e com tudo parecendo
+     certo. Fundo inesperado (fora da config) entra no fim, para não sumir. */
+  const _tabsCfg   = _pnlTablesForTab();
+  const fundLabels = _tabsCfg
+    ? _tabsCfg.map(t => t.fund).filter(f => fundNavs[f] != null)
+        .concat(Object.keys(fundNavs).filter(f => !_tabsCfg.some(t => t.fund === f)).sort())
+    : Object.keys(fundNavs).sort();
   const shortLabel = fl => fundLabelMesa(fl, true);
   // Fundo que recebe 100% do dólar (backend: `portfoliorf_offshore_fund`). Sem ele —
   // payload antigo / snapshot estático — o check cai no comportamento anterior.
@@ -1254,8 +1335,12 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
        Avaliado para TODA linha `alloc_offshore_only` (a `is_offshore` inclusive, cujo check
        hoje é só o rótulo "offshore") e tem precedência sobre os dois ramos de check: é regra
        do veículo, não rateio. */
-    const dolarErro   = (r.alloc_offshore_only && offFund)
+    const dolarErro   = (r.dollar_kind && offFund)
       ? dolarFundoErrado(byFund, fundLabels, offFund) : null;
+    /* ⛔ Escopo por fundo (backend, `funds.PORTFOLIORF_AREAS_OK`): câmbio no Juros Global,
+       bolsa em qualquer um. Vem depois do dólar na precedência porque o backend já tira
+       daqui o que a faixa do dólar cobre — as duas nunca falam da mesma linha. */
+    const escopoErro  = r.prf_fora_escopo?.length ? r.prf_fora_escopo : null;
     // NAV contra o qual o backend calculou o #PL desta linha (`r.nav`): o consolidado nas
     // linhas rateadas, o NAV do fundo offshore nas de dólar. Usar `totalNavSum` fixo
     // reescalaria o #PL por fundo da linha de dólar (29,5/25,1 ≈ +17%).
@@ -1271,11 +1356,11 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       // `title` da linha, não em texto ao lado do nome (a mesa pediu a cor, não o selo).
       return `<tr class="${rowClass} ${areaClass} sleeve-row" title="${_escHtml(
         'Linha do sleeve de RF — ' + (r.trader ?? '—') + ', 100% no ' +
-        (rfCfg?.fund ?? 'veículo offshore') + '. Não entra no rateio entre os dois Masters.')}">
+        (rfCfg?.fund ?? 'veículo offshore') + '. Não entra no rateio entre os fundos do RF.')}">
         <td>${r.instrument_name ?? '—'}</td>
         ${dash.repeat(2 * fundLabels.length)}
         <td style="color:var(--text-muted);text-align:right;font-size:11px" title="${_escHtml(
-          'Rateio entre os dois Masters não se aplica: a linha é do sleeve.')}">sleeve</td>
+          'Rateio entre os fundos do RF não se aplica: a linha é do sleeve.')}">sleeve</td>
         ${mirrorCols ? _checkVazio('—', 'Linha do sleeve de RF: o espelho de juros confere o '
             + 'livro do PortfolioRF contra o EMota, e esta linha é do outro trader — o check '
             + 'dela é a coluna ao lado.') : ''}
@@ -1312,8 +1397,17 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     if (dolarErro) {
       checkPlCell = `<td class="check-cell alloc-bad" title="${_escHtml(
         _dolarErroTip(dolarErro, offFund))}">⛔ ERRO</td>`;
+    } else if (escopoErro) {
+      checkPlCell = `<td class="check-cell alloc-bad" title="${_escHtml(
+        _escopoErroTip(r, escopoErro))}">⛔ ERRO</td>`;
     } else if (r.is_offshore) {
-      checkPlCell = '<td style="color:var(--text-muted);text-align:right;font-size:11px">offshore</td>';
+      /* ⭐ O rótulo nomeia o FUNDO desde 30/10/2026: com dois veículos offshore na aba
+         (Segregated-N do Juros e Moeda, Segregated-I do Juros Global), "offshore" sozinho
+         deixou de dizer de quem é o NAV que está no denominador do #PL ao lado. */
+      checkPlCell = `<td style="color:var(--text-muted);text-align:right;font-size:11px"${
+        r.alloc_fund ? ` title="${_escHtml('Linha offshore — 100% no ' + fundLabelMesa(r.alloc_fund, true)
+          + '. O #PL é calculado sobre o NAV desse fundo, não sobre a soma dos três.')}"` : ''
+        }>offshore${r.alloc_fund ? ' · ' + fundLabelMesa(r.alloc_fund, true) : ''}</td>`;
     } else if (offOnly) {
       // Só o fundo offshore entra: os demais não carregam a posição por desenho, então
       // compará-los com o #PL do grupo acusaria a ausência esperada.
@@ -1373,13 +1467,29 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   const rfFootTr = rfSleeveCols
     ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px"><div>${rfTargetNote(rfCfg)}</div></td></tr>`
     : '';
+  /* ⚠️ **Fundo da aba SEM NAV não vira coluna aqui — e a posição dele não pode sumir calada.**
+     As colunas saem do `fund_navs` de propósito: sem NAV não há `#PL`, e uma coluna a mais
+     com "—" apagaria o `Check #PL` de TODAS as linhas (ele exige `#PL` em todos os fundos).
+     Mas a quantidade continua existindo — ela aparece no modo "Por fundo" e no card de PnL
+     daquele fundo —, então aqui vai dito, com o número, em vez de a soma das colunas
+     simplesmente não fechar 100 %. Caso real: o `Juros Global` boletou no dia 30/10/2026 e o
+     NAV dele só nasce ~16h de D+1. */
+  const semNav = (_pnlTablesForTab() || [])
+    .map(t => t.fund).filter(f => fundNavs[f] == null);
+  const navFootTr = semNav.length
+    ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--yellow)"><div>`
+      + `⚠ ${semNav.map(f => fundLabelMesa(f, true)).join(' · ')} sem NAV nesta data — fica fora `
+      + `desta tabela (sem NAV não há #PL, e uma coluna vazia apagaria o Check #PL das demais). `
+      + `A posição dele está no modo <b>▤ Por fundo</b> e no card de PnL do fundo.`
+      + `</div></td></tr>`
+    : '';
 
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead>
       <tr><th rowspan="2">Instrumento</th>${headers}<th rowspan="2">Check #PL</th>${mirrorCols ? mirrorCheckHead(mirrorCfg).replace('<th ', '<th rowspan="2" ') : ''}${rfSleeveCols ? rfCheckHead(rfCfg, true).replace('<th ', '<th rowspan="2" ') : ''}</tr>
       <tr>${subHeaders}</tr>
     </thead>
-    <tbody>${rows}${footTr}${rfFootTr}</tbody>
+    <tbody>${rows}${footTr}${rfFootTr}${navFootTr}</tbody>
   </table>`;
 }
 

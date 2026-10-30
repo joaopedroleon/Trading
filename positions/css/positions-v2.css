@@ -99,6 +99,20 @@ html.theme-v2 .data-table tbody tr.sleeve-row.sleeve-fora-escopo > td:first-chil
   border-left: 3px solid color-mix(in srgb, var(--red) 60%, var(--bg-card));
 }
 
+/* ⛔ **Linha do PRÓPRIO PortfolioRF num fundo que não pode carregá-la** (30/10/2026,
+   `funds.PORTFOLIORF_AREAS_OK`): câmbio no `Juros Global`, bolsa em qualquer um dos três.
+   ⚠️ Regra SEPARADA da do sleeve acima, e não é duplicação: aquela exige `.sleeve-row`
+   junto (é linha de outro trader, que já vem tingida de verde), e esta vale para a linha
+   comum da aba, que não tem classe nenhuma. Encostar as duas numa só apagaria uma das duas
+   — a de sleeve perderia o verde ou esta não pintaria. Mesma cor, mesma forma, de propósito:
+   o que a mesa precisa ver é "esta linha não deveria existir", não qual regra disparou. */
+html.theme-v2 .data-table tbody tr.prf-fora-escopo {
+  background: color-mix(in srgb, var(--red) 7%, var(--bg-card));
+}
+html.theme-v2 .data-table tbody tr.prf-fora-escopo > td:first-child {
+  border-left: 3px solid color-mix(in srgb, var(--red) 60%, var(--bg-card));
+}
+
 /* Chip da tira NET que é do sleeve — mesmo tom da linha na tabela, para o olho ligar os dois. */
 html.theme-v2 .net-chip.net-chip-sleeve {
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
@@ -236,13 +250,18 @@ html.theme-v2 .tab.on { display: block; }
 html.theme-v2 .data-table th,
 html.theme-v2 .data-table td { padding: 8px 12px; }
 
-/* ═══ PnL quebrado por FUNDO (PortfolioRF) — duas tabelas lado a lado ═══
+/* ═══ PnL quebrado por FUNDO (PortfolioRF) — uma tabela por fundo, lado a lado ═══
    Duas tabelas de 8 colunas só cabem na largura da página com densidade menor, então a
    compactação (fonte + padding) é ESCOPADA nesta seção — o resto da tela segue no respiro
    padrão. O `overflow-x:auto` da linha é a rede de segurança em tela estreita: rola DENTRO
-   da seção em vez de estourar a página (o container ganha `max-width:100%` no pnl.js). */
+   da seção em vez de estourar a página (o container ganha `max-width:100%` no pnl.js).
+   ⭐ **`flex-wrap` entrou com o 3º fundo** (30/10/2026, `Juros Global`): com duas tabelas o
+   overflow era rede de segurança e quase nunca disparava; com três ele vira o estado normal
+   a 1920, e ler PnL rolando a seção de lado é pior do que ler a 3ª tabela numa 2ª linha. O
+   `overflow-x` fica como rede para a tela estreita, onde nem UMA cabe. */
 .pnl-fund-row {
   display: flex; gap: 12px; align-items: flex-start;
+  flex-wrap: wrap; row-gap: 10px;
   overflow-x: auto; max-width: 100%;
 }
 .pnl-fund-split .card { padding: 10px 12px; }

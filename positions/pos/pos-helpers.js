@@ -435,8 +435,14 @@ function isMergedSleeveRow(r) {
 function sleeveRowClass(r) {
   // ⛔ Fora do escopo do veículo (não é juros nem moeda) → marcação PRÓPRIA, vermelha: a
   // faixa do topo nomeia, e aqui a linha se identifica no meio das outras.
+  // ⭐ São DUAS regras de escopo, e a marcação é a mesma de propósito: a do SLEEVE
+  // (`rf_fora_escopo`, o book do outro trader dentro do veículo) e a do próprio livro do
+  // PortfolioRF por FUNDO (`prf_fora_escopo`, 30/10/2026 — o `Juros Global` só opera juros,
+  // e bolsa nenhum dos três pode). Quem lê a tela não precisa saber qual das duas disparou;
+  // precisa ver que AQUELA linha não deveria existir. O título diz qual é.
   return (isMergedSleeveRow(r) ? ' sleeve-row' : '')
-       + (r?.rf_fora_escopo && (r.final_qty || r.traded_qty) ? ' sleeve-fora-escopo' : '');
+       + (r?.rf_fora_escopo && (r.final_qty || r.traded_qty) ? ' sleeve-fora-escopo' : '')
+       + (r?.prf_fora_escopo?.length ? ' prf-fora-escopo' : '');
 }
 
 
