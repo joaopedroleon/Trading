@@ -101,7 +101,9 @@ function fmtDv01(v) {
 }
 
 /* ── O NOME DO FUNDO COMO A MESA FALA — fonte única da tela ──────────────────────────────
-   "Juros e Moeda" e "Local" são os apelidos da mesa para o `JGP RF Ativa Master-A` e o
+   "Juros e Moeda", "Juros Local" e "Juros Global" são os apelidos da mesa para o
+   `JGP RF Ativa Master-A`, o `Inst Master-A` e o `Global-A` — o "Local" virou "Juros Local"
+   em 03/11/2026, quando a mesa enunciou o mandato dos três. O do meio é o
    `JGP RF Ativa Inst Master-A` (23/10/2026). O mapa é do BACKEND
    (`funds.FUND_LABELS_MESA`, servido em `fund_labels_mesa`), e **é propriedade do FUNDO, não
    de uma tabela**: é isso que faz o nome valer em toda a tela (29/10/2026, pedido do JLeon:

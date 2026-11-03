@@ -233,7 +233,8 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
   const prevRows = allRows.filter(r => r.group === 'MM Prev' && r.trader === trader);
 
   /* ── Sleeve de RF (out/2026) — a coluna `Check RF`, no mesmo espelho do Prev ──────
-     O trader boleta ~4,4 % do ticket TAMBÉM no veículo do RF. */
+     O trader boleta uma fração do ticket TAMBÉM no veículo do RF — a fração é derivada
+     dos NAVs do dia (`funds.rf_sleeve_alloc_target`), não é constante. */
   /* Baldes de ativo p/ o check do DÓLAR (ver `_allocBuckets`).
      ☠️ **Com os MESMOS filtros da aba, não com o livro cru.** A 1ª versão somava tudo, com o
      argumento de que "um filtro de exibição não pode mudar o veredito" — e estava errada: o
@@ -582,6 +583,14 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
 
   // ── o resto (opção incluída): linha a linha, pela QUANTIDADE ─────────────────────
   const e = rfAllocEval(mmQty, rfQty, cfg);
+  /* ⚠️ **O alvo é derivado dos dois NAVs** (03/11/2026) — sem um deles não existe alvo a
+     afirmar, e medir contra o número de outro dia seria pior do que não medir. */
+  if (e.allocTarget == null) {
+    return muted('—', 'Alvo não afirmado hoje: ele é derivado dos NAVs ('
+      + fmtPct(cfg?.exposure_ratio) + ' da exposição do MM ⇒ NAV do '
+      + rfSleeveFundLabel(cfg) + ' ÷ NAV de MM do ' + (cfg?.traders?.[0] ?? 'trader')
+      + '), e falta um dos dois nesta data.');
+  }
   if (e.allocPct == null) {
     return muted('—', 'Sem posição no book de MM do trader para comparar — o check não é '
       + 'afirmado. Pode ser perna que só existe no RF, ou casamento por instrumento que não fechou.');
@@ -618,7 +627,8 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
           + `pela razão dos NAVs ${e.navRatio.toLocaleString('en-US', {maximumFractionDigits: 3})}.\n`
         : '')
     + `\nVerde dentro de ±${(RF_ALLOC_REL_TOL * 100).toFixed(0)}% do alvo, amarelo até o dobro, `
-    + 'vermelho além — faixa RELATIVA, porque ±2pp num alvo de 4,4% aceitaria de 2,4% a 6,4%.';
+    + `vermelho além — faixa RELATIVA ao alvo, porque ±2pp num alvo de ${fmtPct(e.allocTarget)} `
+    + 'aceitaria quase o dobro e quase a metade dele.';
   return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
     cls === 'alloc-ok' ? '✓' : '⚠ ' + fmtPct(_semZeroNegativo(e.allocPct))}</td>`;
 }
@@ -637,41 +647,53 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
    Quem passar `quebra` numa auxiliar nova tem de garantir o alinhamento medido. */
 function rfCheckHead(cfg, merged, quebra) {
   const tr  = cfg?.traders?.[0];
-  /* ⭐ O ALVO vai no rótulo (pedido da mesa, 08/10/2026): é o número fixo que a mesa troca
-     de tempos em tempos, e tê-lo no cabeçalho poupa abrir o hover para lembrar contra o quê
-     a coluna está medindo — do mesmo jeito que o check do Prev já mostra os 30 %. */
-  const alvo = cfg?.alloc_target != null ? ' ' + fmtPct(cfg.alloc_target) : '';
+  /* ⭐ O ALVO vai no rótulo (pedido da mesa, 08/10/2026): poupa abrir o hover para lembrar
+     contra o quê a coluna está medindo — do mesmo jeito que o check do Prev mostra os 30 %.
+     ☠️ **E é o alvo de HOJE, não uma constante** (03/11/2026, pedido da mesa: *"não chame de
+     4,4%, chame do percentual que é o necessário para estar de acordo com a proporção
+     correta dos NAVs"*). Ele muda quando um dos dois NAVs anda — é esse o ponto. */
+  const _alvoHoje = rfAllocTarget(cfg);
+  const alvo = _alvoHoje != null ? ' ' + fmtPct(_alvoHoje) : '';
   // Duas linhas: "Check RF" em cima, o alvo embaixo — ver o comentário do cabeçalho da
   // auxiliar. O rótulo é o mais largo da coluna (as células são ✓ ou "⚠ 9,9%").
   const nome = merged ? (cfg?.labels?.[tr] ?? tr ?? 'sleeve') : 'RF';
   const lbl  = nome + (quebra && alvo ? '<br>' + alvo.trim() : alvo);
+  const _fundo = rfSleeveFundLabel(cfg);
   const tip = 'Veredito do sleeve de RF nesta linha — o detalhe está no hover de cada célula.\n\n'
+    + 'FUNDO CONFERIDO: ' + _fundo + ' — é o NAV dele que entra na conta; os outros fundos '
+    + 'de RF da aba não recebem sleeve.\n\n'
     + 'Câmbio LINEAR (spot · NDF · forward): vem do agregado por MOEDA, contra o alvo de '
     + fmtPct(cfg?.exposure_ratio) + ' da exposição do MM.\n'
     + 'Opção e demais: linha a linha, pela QUANTIDADE, contra o alvo de boleta de '
-    + fmtPct(cfg?.alloc_target) + '.\n\n'
-    + '"—" = não afirmado (sem par no MM, ou abaixo do piso de material).';
+    + (_alvoHoje != null ? fmtPct(_alvoHoje) : '—') + '.\n\n'
+    + 'O alvo de boleta NÃO é constante: é ' + fmtPct(cfg?.exposure_ratio)
+    + ' × NAV do ' + _fundo + ' ÷ NAV de MM do ' + (tr ?? 'trader')
+    + ', refeito a cada carga. A regra combinada é a de EXPOSIÇÃO; a proporção de '
+    + 'quantidade é o que a executa, e ela anda com os NAVs.\n\n'
+    + '"—" = não afirmado (sem par no MM, abaixo do piso de material, ou falta um NAV).';
   return `<th title="${_escHtml(tip)}">Check ${lbl}</th>`;
 }
 
-/* ── DERIVA DO ALVO — o 2º check no agregado ──────────────────────────────────────────
-   ⭐ **É este o número que diz se a proporção fixa precisa ser trocada**, e por quanto
-   (pedido da mesa: "se o NAV do Abinader ou do RF mudarem significativamente, o check deve
-   apontar para quanto deve ir essa nova proporção").
-
-   O alvo COMBINADO (`alloc_target`, 4,4%) contra o alvo que os NAVs de HOJE pedem para a
-   exposição dar exatamente 1/10 (`navTarget = exposure_ratio × NAV_RF / NAV_MM`). Eles
-   coincidem no dia em que foram combinados e vão se afastando conforme um dos dois NAVs
-   anda — captação, resgate, resultado.
-   ⛔ A tela PROPÕE o número novo; quem troca o `RF_SLEEVE_ALLOC_TARGET` é a mesa. Atualizar
-   sozinho calaria exatamente este aviso. */
+/* ── DE ONDE SAI O ALVO DE HOJE ───────────────────────────────────────────────────────
+   ☠️ **Este bloco era um CHECK e virou uma DECLARAÇÃO** (03/11/2026). Ele comparava a
+   constante que a mesa boletava (4,4%) com o alvo que os NAVs do dia pediam, e mandava
+   trocar a constante quando os dois se afastassem. A mesa resolveu a montante: *"faça de
+   forma que seja dinâmico, dentro do target que combinamos dos 10%, ajustando pelo NAV
+   atualizado"*. Com o alvo derivado a cada carga não há nada a atualizar — então o painel
+   deixou de propor um número e passou a **dizer qual é o alvo de hoje e de onde ele saiu**.
+   ⚠️ O que ele ainda informa é a DERIVA contra o dia do acordo (`alloc_target_ref`): não é
+   alarme — é a deixa de que o ticket que a mesa boleta na mão mudou de tamanho desde então.
+   ⛔ Sem um dos NAVs não há alvo: `semnav`, e a tela diz isso em vez de medir contra o
+   número de outro dia. */
 function _rfDrift(cfg) {
   const e   = rfAllocEval(null, null, cfg);
   const tol = cfg?.drift_tol ?? 0.05;
-  if (e.navTarget == null || e.allocTarget == null) return { e, tol, rel: null, nivel: 'semnav' };
-  const rel = e.allocTarget / e.navTarget - 1;   // COM sinal: + = boletando demais
+  if (e.allocTarget == null) return { e, tol, rel: null, nivel: 'semnav' };
+  if (e.allocTargetRef == null) return { e, tol, rel: null, nivel: 'ok' };
+  // COM sinal: + = o alvo de hoje está ACIMA do que foi combinado em out/2026.
+  const rel = e.allocTarget / e.allocTargetRef - 1;
   const a   = Math.abs(rel);
-  return { e, tol, rel, nivel: a <= tol ? 'ok' : a <= 2 * tol ? 'atencao' : 'trocar' };
+  return { e, tol, rel, nivel: a <= tol ? 'ok' : a <= 2 * tol ? 'atencao' : 'longe' };
 }
 
 /* ── ⛔ ALERTA DE ESCOPO: ativo que o RF não pode carregar ────────────────────────────
@@ -712,57 +734,255 @@ function renderRfEscopoAlerta(cfg) {
 /* Painel do sleeve, no topo da aba. ⚠️ Sai MESMO SEM LINHA BOLETADA: ele é sobre os NAVs, e
    é justamente antes da 1ª boleta (ou num dia parado) que a mesa pergunta se a proporção
    ainda vale. */
-function renderRfTargetBanner(cfg) {
+/* ⓘ padrão da casa: glifo discreto + `title`. Usado ao longo do painel de regras para abrir
+   a conta (os NAVs daquela parte, a fórmula do alvo) sem pôr parágrafo na tela. */
+function _rfInfo(tip) {
+  return `<span style="cursor:help;color:var(--text-muted);font-size:11px" title="${
+    _escHtml(tip)}">ⓘ</span>`;
+}
+
+const _rfUsd = v => v == null ? '—'
+  : 'USD ' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+/* ── PAINEL DE REGRAS DOS FUNDOS DE RF (03/11/2026) ───────────────────────────────────
+   Pedido da mesa: *"bote as regras gerais de cada RF, de forma bem sucinta mas com tudo que
+   precisamos saber de bate pronto... as informações extras você bota em um ⓘ ao longo do
+   texto"*. Uma LINHA por fundo e nada de parágrafo: o que não cabe numa célula vai no ⓘ.
+
+   ⛔ **Nenhuma regra é escrita aqui** — todas vêm de `funds.PORTFOLIORF_REGRAS` pelo payload
+   (`portfoliorf_regras`). Um painel que soubesse as regras por conta própria seria o 2º lugar
+   de onde elas podem divergir do que o check de fato aplica.
+   ⚠️ **`local` × `global` é mandato DECLARADO, não conferido** — a `area` do JRS separa
+   juros/câmbio/bolsa, e distinguir juros do Brasil de juros lá fora exige a `subarea`. O que
+   o código acusa sozinho é bolsa/commodities em qualquer um e câmbio onde não pode; o resto é
+   regra escrita. O ⓘ do mandato diz isso, para ninguém ler o painel como se fosse check. */
+function renderRfRegrasPanel(data, cfg) {
+  const regras = data?.portfoliorf_regras;
+  if (!regras?.length) return '';
+  const tr     = cfg?.traders?.[0] ?? null;
+  const navMm  = tr ? cfg?.mm_nav?.[tr] : null;
+  const expR   = cfg?.exposure_ratio;
+  const navTot = regras.reduce((a, r) => a + (r.nav ?? 0), 0) || null;
+  const sim = '<span style="color:var(--green);font-weight:600">sim</span>';
+  const nao = '<span style="color:var(--red);font-weight:600">não</span>';
+  const bk  = { Rates: 'juros', Currencies: 'câmbio', Equities: 'bolsa', Commodities: 'commodities' };
+  const NL  = '\n';
+
+  const linhas = regras.map(r => {
+    /* ⓘ do alvo do espelho: é aqui que a conta se abre, com os DOIS NAVs daquela linha —
+       pedido explícito da mesa ("mostrando os navs relevantes para aquela parte"). */
+    const escopo = (r.sleeve_escopo || []).map(a => bk[a] ?? a).join(' e ');
+    const alvoTip = r.sleeve_alvo == null
+      ? (r.sleeve_escopo?.length
+          ? `Falta o NAV do ${r.label} ou o de MM do ${tr ?? 'trader'} nesta data — sem os dois `
+            + 'não há alvo a afirmar.'
+          : `O ${r.label} não recebe espelho do ${tr ?? 'trader'}.`)
+      : `${fmtPct(expR)} da exposição do ${tr} em ${escopo}, medida em % do NAV de cada fundo.`
+        + NL + NL
+        + `  NAV do ${r.label}:  ${_rfUsd(r.nav)}` + NL
+        + `  NAV de MM do ${tr}: ${_rfUsd(navMm)}` + NL
+        + `  alvo = ${fmtPct(expR)} × ${_rfUsd(r.nav)} ÷ ${_rfUsd(navMm)} = ${fmtPct(r.sleeve_alvo)}`
+        + NL + NL
+        + 'É a fração do TICKET de MM que a boleta tem de replicar aqui. Muda com os dois '
+        + 'NAVs — não é constante.';
+    const alvoCel = r.sleeve_escopo?.length
+      ? `<b>${r.sleeve_alvo != null ? fmtPct(r.sleeve_alvo) : '—'}</b>`
+        + ` <span style="color:var(--text-muted)">de ${escopo}</span> ${_rfInfo(alvoTip)}`
+      : '<span style="color:var(--text-muted)">—</span>';
+
+    const pr = r.pracas_ok || [];
+    const mandTip = `O ${r.label} carrega ${(r.areas_ok || []).map(a => bk[a] ?? a).join(' e ')}`
+      + `${pr.length === 1 ? ', só de praça ' + pr[0] : ', local e global'}.` + NL + NL
+      + 'A PRAÇA sai da subárea do JRS: "Fixed Rates Brazil" é local, o resto é global '
+      + '(G7, Emerging Markets, External Debt).' + NL
+      + '⚠️ "global" INCLUI o local — fundo global também carrega Brasil. Quem tem corte de '
+      + 'praça é só o Juros Local.' + NL + NL
+      + '⛔ CAIXA fica fora deste check: Rates · Cash e Hedge_Cambial são tesouraria (LFT, '
+      + 'mini dólar de carry, hedge do caixa), não posição de mandato — todo fundo tem caixa '
+      + 'em BRL e todo caixa precisa de hedge, inclusive o que só opera juros. A estratégia '
+      + '"Directional" dentro de Rates · Cash é nome de cadastro, não posição direcional.';
+    const dtTip = `O ${r.label} ${r.daytrade ? 'pode' : 'NÃO pode'} girar no dia.` + NL + NL
+      + '⚠️ Regra DECLARADA, não conferida aqui: quem trava o daytrade é o próprio JDS na '
+      + 'boleta (mesa, 03/11/2026), então um check na tela não acrescentaria nada.';
+    const navTip = `NAV usado em todo % desta aba para o ${r.label}.` + NL + NL
+      + `  ${_rfUsd(r.nav)}` + (navTot ? `  (${fmtPct((r.nav ?? 0) / navTot)} do livro)` : '')
+      + NL + NL + `Fonte: ${data?.fund_navs_meta?.nav_sources?.[r.fund] ?? '—'}`
+      + `${data?.portfoliorf_nav_date ? ' · cota de ' + fmtDate(data.portfoliorf_nav_date) : ''}.`;
+
+    return `<tr>
+      <td style="font-weight:600;white-space:nowrap">${r.label}
+        <div style="font-weight:400;color:var(--text-muted);font-size:10px">
+          ${_rfUsd(r.nav)} ${_rfInfo(navTip)}</div></td>
+      <td style="white-space:nowrap">${r.mandato ?? '—'} ${_rfInfo(mandTip)}</td>
+      <td class="num" title="${_escHtml(dtTip)}">${
+          r.daytrade == null ? '—' : r.daytrade ? sim : nao}</td>
+      <td class="num" style="white-space:nowrap">${
+          r.limite_deriv == null ? '—' : r.limite_deriv ? sim : nao}
+        <span id="${_rfLimId(r.fund)}" style="color:var(--text-muted);font-size:11px"></span></td>
+      <td class="num" style="white-space:nowrap">${r.veiculo_classe
+          ? `classe <b>${r.veiculo_classe}</b> ${_rfInfo('Veículo offshore do ' + r.label
+              + ': ' + r.veiculo + '. É por ele que o fundo toma risco lá fora; o NAV do check '
+              + 'é SEMPRE o do fundo-cabeça, nunca o da classe.')}`
+          : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="white-space:nowrap">${alvoCel}</td>
+    </tr>`;
+  }).join('');
+
+  /* Regras que valem para o CONJUNTO — uma linha só, cada uma com o seu ⓘ. */
+  const tipBolsa = 'Regra do veículo de RF: nenhum dos fundos carrega bolsa nem commodities. '
+    + 'Posição fora disso não é desvio de proporção, é o que não deveria existir — abre faixa '
+    + 'vermelha no topo da aba e a célula de check sai em ⛔ ERRO, sem faixa de tolerância.';
+  const tipDolar = 'Dólar direcional só pode estar no Juros e Moeda, que é quem tem câmbio no '
+    + 'mandato. Quantidade de dólar em qualquer outro fundo é ERRO (faixa própria no topo da '
+    + 'aba), e por isso o #PL dessas linhas é calculado sobre o NAV dele, não sobre a soma dos '
+    + 'três.';
+  const tipJuros = 'Duas afirmações, as duas conferidas na auxiliar:' + NL + NL
+    + '  1. os TRÊS fundos carregam a mesma alocação de juros entre si — é o Check #PL, fundo '
+    + 'contra livro;' + NL
+    + '  2. e o livro inteiro espelha o EMota 1:1, cada um em % do NAV do seu fundo — é o '
+    + 'Check EMota.' + NL + NL
+    + '⚠️ Câmbio NÃO tem esse propósito: ele só existe no Juros e Moeda, então não há rateio '
+    + 'a conferir. E o caixa (Rates · Cash, Hedge_Cambial) fica fora dos dois: é tesouraria, '
+    + 'não alocação.';
+  const tipAbi = tr
+    ? `Os trades de ${tr} seguem o padrão dele: ${fmtPct(expR)} da exposição que ele carrega no `
+      + 'MM, em cada fundo que recebe espelho, medida em % do NAV de cada um.' + NL + NL
+      + 'Os de JUROS vão para o Juros e Moeda E para o Juros Global (ele costuma operar fora do '
+      + 'Brasil, então não entram no Juros Local); os de CÂMBIO só para o Juros e Moeda.' + NL + NL
+      + `NAV de MM do ${tr}: ${_rfUsd(navMm)} — é o denominador do lado dele em todos os alvos.`
+    : 'Sem trader de espelho configurado.';
+
+  /* ⚠️ O HTML é devolvido como STRING e inserido pelo chamador — os spans do % só existem
+     no DOM no próximo tick. Daí o `setTimeout(0)`: ele é o primeiro momento em que
+     `getElementById` acha o que preencher. */
+  setTimeout(_rfPreencheLimites, 0);
+
+  return `<div class="card" style="flex:0 0 auto">
+    <div style="font-size:12px;line-height:1.6">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <b>Regras dos fundos de RF</b>
+        <span style="color:var(--text-muted);font-size:11px">NAV do livro <b>${_rfUsd(navTot)}</b>
+          ${_rfInfo('Soma dos NAVs dos fundos da aba — é o denominador do #PL das linhas '
+            + 'rateadas. As linhas de dólar e as offshore usam o NAV de UM fundo só.')}</span>
+      </div>
+      <table class="data-table" style="width:auto;margin-top:6px;white-space:nowrap">
+        <thead><tr>
+          <th>Fundo</th><th>Mandato</th><th>Daytrade</th>
+          <th>Limite 100%<br>NAV deriv.</th><th>Offshore</th>
+          <th>Espelho ${tr ?? 'MM'} (${fmtPct(expR)} da exp.)</th>
+        </tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+      <div style="margin-top:6px;color:var(--text-muted);font-size:11px">
+        Nos três: <b>bolsa e commodities não entram</b> ${_rfInfo(tipBolsa)}
+        &nbsp;·&nbsp; dólar direcional só no <b>Juros e Moeda</b> ${_rfInfo(tipDolar)}
+        &nbsp;·&nbsp; juros <b>alinhados entre os três</b> e espelhando o <b>EMota 1:1</b> ${_rfInfo(tipJuros)}
+        &nbsp;·&nbsp; trades do <b>${tr ?? 'MM'}</b> no padrão dos ${fmtPct(expR)} ${_rfInfo(tipAbi)}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ── O % que está BOLETADO hoje, ao lado do "tem limite?" ─────────────────────────────
+   Pedido da mesa (03/11/2026): *"na regra dos derivativos, mostre entre parênteses, além do
+   sim ou não, qual é o % atual pelo que tá boletado — nós temos a regra na aba Check
+   Enquadramento"*.
+
+   ⛔ **O número NÃO é recalculado aqui.** Ele sai do MESMO payload que a aba Check
+   Enquadramento usa (`/enquadramento-rf`, cacheado em `posDataByTab[ENQ_RF_TAB_KEY]`), que é
+   onde moram o PU ao vivo do DI, o nocional do dólar e o delta das opções. Refazer a conta
+   neste painel seria um 2º lugar de onde o enquadramento pode divergir de si mesmo — e as
+   duas telas ficariam dizendo números diferentes sobre a mesma regra.
+   ⚠️ Por isso o painel desenha o espaço e PREENCHE depois: se a outra aba ainda não carregou,
+   dispara UMA vez a mesma função que ela usa (o resultado fica no cache compartilhado, então
+   abrir a aba depois não paga de novo) e escreve nos spans quando chegar. Sem o dado, o
+   espaço fica vazio — nunca um número estimado. */
+function _rfLimId(fund) {
+  return 'rf_lim_' + String(fund || '').replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+let _rfLimPedido = false;
+
+function _rfPreencheLimites() {
+  const d = (typeof ENQ_RF_TAB_KEY !== 'undefined') ? posDataByTab[ENQ_RF_TAB_KEY] : null;
+  if (!d?.funds?.length) {
+    // Uma tentativa só: a aba de enquadramento é cara (BBG + Oracle) e um retry em loop
+    // numa tela que re-renderiza a cada ⟳ viraria tráfego de fundo permanente.
+    if (!_rfLimPedido && typeof loadEnquadramentoRF === 'function') {
+      _rfLimPedido = true;
+      Promise.resolve(loadEnquadramentoRF()).then(_rfPreencheLimites).catch(() => {});
+    }
+    return;
+  }
+  for (const f of d.funds) {
+    const el = document.getElementById(_rfLimId(f.fund_label));
+    if (!el) continue;
+    /* ⚠️ **"Nada boletado" e "ainda não carregou" não podem desenhar igual.** Enquanto o
+       payload não chega o span fica VAZIO; chegando e sem derivativo no fundo, ele diz isso.
+       Sem a distinção, `sim` sozinho se lê como falha de carga. */
+    if (f.max_pct == null) {
+      el.innerHTML = ' <span title="' + _escHtml('Nenhum derivativo boletado neste fundo '
+        + 'nesta data (nem DI nem dólar) — não há % a mostrar.') + '">(sem derivativo)</span>';
+      continue;
+    }
+    /* O que vai entre parênteses é a caixinha MAIOR — é ela que encosta no teto primeiro.
+       O detalhe por caixinha vai no ⓘ, que é onde a mesa confere de onde veio. */
+    const det = (f.buckets || []).filter(b => b.pct != null)
+      .map(b => `${b.label}: ${fmtPct(b.pct)}`).join(' · ');
+    const over = (f.buckets || []).some(b => b.over);
+    el.innerHTML = ` (<b style="color:${over ? 'var(--red)' : 'var(--text-muted)'}">${
+      fmtPct(f.max_pct)}</b>) ` + _rfInfo(
+      `Quanto está BOLETADO hoje, em % do NAV do ${fundLabelMesa(f.fund_label, true)}, por `
+      + `caixinha de derivativo:` + '\n\n  ' + (det || '—') + '\n\n'
+      + `O número entre parênteses é a maior delas${f.limite_deriv === false
+          ? ' — este fundo não tem teto, o % está aqui só como leitura.'
+          : ' — é ela que encosta no limite de 100% primeiro.'}` + '\n\n'
+      + 'Vem da aba Check Enquadramento (mesmo payload, mesma conta): PU ao vivo no DI, '
+      + 'nocional × delta no dólar. As caixinhas não se compensam entre si.');
+  }
+}
+
+/* ── O alvo do espelho, para a aba do PRÓPRIO trader de MM ────────────────────────────
+   Lá não há painel de regras (os NAVs dos fundos de RF não são carregados naquela aba), e o
+   que ele precisa saber é só: qual fundo recebe o espelho dele e em que proporção hoje. */
+function renderRfTargetBanner(cfg, data) {
   if (!cfg) return '';
+  const painel = renderRfRegrasPanel(data, cfg);
+  if (painel) return painel;
+
   const { e, tol, rel, nivel } = _rfDrift(cfg);
-  const usd = v => v == null ? '—'
-    : 'USD ' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
   const tr    = cfg.traders?.[0] ?? 'trader';
   const navMm = cfg.mm_nav?.[tr];
-
+  const fundo = rfSleeveFundLabel(cfg);
   const COR = { semnav: 'var(--yellow)', ok: 'var(--green)',
-                atencao: 'var(--yellow)', trocar: 'var(--red)' }[nivel];
+                atencao: 'var(--text-muted)', longe: 'var(--text-muted)' }[nivel];
 
   let veredito, detalhe;
   if (nivel === 'semnav') {
-    veredito = '⚠ sem os dois NAVs — não dá para conferir';
-    detalhe  = `Falta ${cfg.nav == null ? 'o NAV do ' + (cfg.nav_fund ?? 'RF') : 'o NAV de MM do ' + tr}`
-             + ' nesta data. O alvo da boleta segue valendo, mas hoje ele não está sendo conferido.';
+    veredito = '⚠ sem os dois NAVs — alvo não afirmado hoje';
+    detalhe  = `Falta ${cfg.nav == null ? 'o NAV do ' + fundo : 'o NAV de MM do ' + tr}`
+             + ' nesta data, e o alvo é derivado dos dois — a coluna de check sai em "—" em vez'
+             + ' de medir contra o número de outro dia.';
   } else {
-    const dpp  = (e.allocTarget - e.navTarget) * 100;
-    const sinal = rel > 0 ? 'ACIMA' : 'abaixo';
-    veredito = nivel === 'ok'
-      ? `✓ em dia — os NAVs de hoje pedem ${fmtPct(e.navTarget)}`
-      : nivel === 'atencao'
-        ? `⚠ começando a divergir — os NAVs de hoje pedem ${fmtPct(e.navTarget)}`
-        : `⚠ ATUALIZAR PARA ${fmtPct(e.navTarget)}`;
-    /* O desvio só é enunciado quando EXISTE: num dia em dia a frase "está 0pp abaixo disso
-       (-0%)" é ruído, e pior, treina a mesa a não ler a linha. */
-    const temDesvio = Math.abs(dpp) >= 0.01;
-    detalhe = `Para o RF carregar <b>${fmtPct(e.expTarget)}</b> da exposição do ${tr} `
-      + `(cada uma em % do NAV do seu fundo), a boleta precisa sair em `
-      + `<b>${fmtPct(e.navTarget)}</b> do ticket de MM.`
-      + (temDesvio
-          ? ` O alvo combinado está ${Math.abs(dpp).toLocaleString('en-US', {maximumFractionDigits: 2})}pp `
-            + `${sinal} disso (${rel > 0 ? '+' : '−'}${Math.abs(rel * 100).toLocaleString('en-US', {maximumFractionDigits: 1})}%).`
-          : ' É onde ele está.')
-      + (nivel === 'trocar'
-          ? ` <b>Trocar com a mesa</b> — e, combinado, <code>RF_SLEEVE_ALLOC_TARGET</code> em `
-            + `<code>positions/funds.py</code> para <code>${e.navTarget.toFixed(4)}</code>.`
+    veredito = `alvo de hoje ${fmtPct(e.allocTarget)} do ticket de MM`;
+    const dppRef = (e.allocTargetRef != null) ? (e.allocTarget - e.allocTargetRef) * 100 : null;
+    detalhe = `Para o <b>${fundo}</b> carregar <b>${fmtPct(e.expTarget)}</b> da exposição do `
+      + `${tr} (cada uma em % do NAV do seu fundo), a boleta tem de sair em `
+      + `<b>${fmtPct(e.allocTarget)}</b> do ticket de MM. O número vem dos NAVs abaixo e `
+      + '<b>muda com eles</b> — não é constante. '
+      + _rfInfo(`alvo = ${fmtPct(e.expTarget)} × NAV do ${fundo} ÷ NAV de MM do ${tr}`
+          + '\n\n' + `  NAV do ${fundo}:  ${_rfUsd(cfg.nav)}` + '\n'
+          + `  NAV de MM do ${tr}: ${_rfUsd(navMm)}`)
+      + (dppRef != null && Math.abs(rel ?? 0) > tol
+          ? ' <span style="color:var(--text-muted)">Em out/2026, quando a regra foi combinada, '
+            + `isto dava ${fmtPct(e.allocTargetRef)}.</span>`
           : '');
   }
 
-  const navLinha = `NAV do RF <b>${usd(cfg.nav)}</b> `
+  const navLinha = `NAV do ${fundo} <b>${_rfUsd(cfg.nav)}</b> `
     + `<span style="color:var(--text-muted)">(${(cfg.nav_fund ?? '—').replace(/^JGP /, '')}`
     + `${cfg.nav_date ? ' · ' + fmtDate(cfg.nav_date) : ''}${cfg.nav_source ? ' · ' + cfg.nav_source : ''})</span>`
-    + ` &nbsp;·&nbsp; NAV de MM do ${tr} <b>${usd(navMm)}</b>`
-    + (cfg.nav && navMm
-        ? ` &nbsp;·&nbsp; <span style="color:var(--text-muted)" title="${_escHtml(
-            'É esta razão que manda no alvo: alvo = ' + fmtPct(e.expTarget) + ' ÷ (NAV_MM/NAV_RF). '
-            + 'A razão que sustenta o alvo combinado é ' + (e.expTarget / e.allocTarget).toFixed(3) + '.')
-          }">razão ${(navMm / cfg.nav).toLocaleString('en-US', {maximumFractionDigits: 3})} `
-          + `(sustenta o alvo combinado: ${(e.expTarget / e.allocTarget).toLocaleString('en-US', {maximumFractionDigits: 3})})</span>`
-        : '');
+    + ` &nbsp;·&nbsp; NAV de MM do ${tr} <b>${_rfUsd(navMm)}</b>`;
 
   const semLinha = !cfg.n_rows
     ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px" title="${_escHtml(
@@ -773,7 +993,7 @@ function renderRfTargetBanner(cfg) {
 
   return `<div class="card" style="border-left:3px solid ${COR};flex:0 0 auto">
     <div style="font-size:12px;line-height:1.7">
-      <b>Sleeve de RF — alvo da boleta ${fmtPct(e.allocTarget)}</b>
+      <b>Sleeve de RF no ${fundo} — ${fmtPct(e.expTarget)} da exposição do ${tr}</b>
       <span style="color:${COR};font-weight:600">&nbsp;&nbsp;${veredito}</span>${semLinha}
       <div style="color:var(--text);margin-top:2px">${detalhe}</div>
       <div style="margin-top:2px">${navLinha}</div>
@@ -915,19 +1135,20 @@ function renderRfCcyCheck(cfg, tabId) {
   </div>`;
 }
 
-/* Resumo de UMA linha para o rodapé das tabelas de check — o recado longo mora no painel. */
+/* Resumo de UMA linha para o rodapé das tabelas de check — o recado longo mora no painel.
+   ⚠️ Diz **qual RF** está sendo conferido: a aba tem três fundos de RF desde 30/10/2026 e o
+   sleeve mora só no `RF_SLEEVE_NAV_FUND`; "o RF" sozinho deixou de identificar alguma coisa. */
 function rfTargetNote(cfg) {
   const { e, nivel } = _rfDrift(cfg);
+  const fundo = rfSleeveFundLabel(cfg);
+  const tr    = cfg?.traders?.[0] ?? 'trader';
   if (nivel === 'semnav') {
-    return `<span style="color:var(--yellow)">Alvo da boleta `
-         + `${e.allocTarget != null ? fmtPct(e.allocTarget) : '—'} — sem os dois NAVs, não conferido hoje.</span>`;
+    return `<span style="color:var(--yellow)">Alvo não afirmado hoje — falta o NAV do `
+         + `${fundo} ou o de MM do ${tr}, e o alvo é derivado dos dois.</span>`;
   }
-  const cor = { ok: 'var(--text-muted)', atencao: 'var(--yellow)', trocar: 'var(--red)' }[nivel];
-  const fim = nivel === 'ok' ? 'os dois dizem a mesma coisa.'
-            : `<b>os ${fmtPct(e.allocTarget)} deixaram de ser ${fmtPct(e.expTarget)} de exposição `
-              + `— ver o painel no topo da aba.</b>`;
-  return `<span style="color:${cor}">Alvo da boleta <b>${fmtPct(e.allocTarget)}</b> · `
-       + `pelos NAVs de hoje <b>${fmtPct(e.navTarget)}</b> — ${fim}</span>`;
+  return `<span style="color:var(--text-muted)">Alvo de hoje <b>${fmtPct(e.allocTarget)}</b> do `
+       + `ticket de ${tr} — é o que põe o <b>${fundo}</b> em ${fmtPct(e.expTarget)} da exposição `
+       + `dele, pela razão dos NAVs do dia. Não é constante: muda com os NAVs.</span>`;
 }
 
 
@@ -1065,7 +1286,7 @@ Não existe `
 
 /* Cabeçalho da coluna do espelho.
    ⚠️ **O rótulo é só "Check EMota"** (pedido da mesa, 23/10/2026). Ele nasceu com o alvo
-   embaixo ("1:1"), como o `rfCheckHead` faz com os 4,4% do sleeve — mas ali o número é o que a
+   embaixo ("1:1"), como o `rfCheckHead` faz com o alvo do sleeve — mas ali o número é o que a
    mesa troca de tempos em tempos, e aqui ele é fixo por definição (a mesma alocação é a mesma
    alocação). O que o alvo explicava continua no `title`, que é onde a dúvida nasce.
    `extraTip` acrescenta uma linha ao tooltip — é por onde o modo "Por fundo" diz que o veredito
@@ -1099,7 +1320,7 @@ ${extraTip}` : '');
 
    O backend JÁ trata essas linhas como 100% do fundo offshore (`alloc_offshore_only`): é o
    NAV dele que vira denominador do #PL e é ele o alvo do check de alocação. O que faltava
-   era conferir a PREMISSA — que o fundo Local não carregue dólar nenhum.
+   era conferir a PREMISSA — que o fundo Juros Local não carregue dólar nenhum.
 
    ☠️ **O `Check #PL` ao lado NÃO pega isto, e não é caso de borda.** Ele mede o desvio em
    **pp de NAV**, e a faixa verde vai até `ALLOC_TOL` (2pp): uma linha de dólar de −0,5 % do
@@ -1160,7 +1381,11 @@ function dolarFundoErros(mainRows, fundRows, fundNavs, offshoreFund) {
        DIRETO no fundo (sem passar pelo veículo), aquela linha passaria a casar com um
        `fundLabels` e sairia na faixa como "dólar no fundo errado" — sendo juros, e estando
        no fundo certo. A regra da mesa é sobre dólar; o resto é o check de ESCOPO ao lado. */
-    if (!r.dollar_kind || r.is_rf_sleeve) continue;
+    /* ☠️ **Caixa fica de fora** (03/11/2026): `Rates - Cash` é onde mora o dólar do hedge
+       cambial, e a `strategy` "Directional" ali é nome de cadastro, não posição direcional.
+       Todo fundo tem caixa em BRL e todo caixa precisa de hedge — acusar isso seria uma
+       faixa vermelha diária sobre o que está certo. Ver `funds.PORTFOLIORF_SUBAREAS_CAIXA`. */
+    if (!r.dollar_kind || r.is_rf_sleeve || r.dolar_caixa) continue;
     const k    = `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
     const errs = dolarFundoErrado(fundIndex[k] ?? {}, fundLabels, offFund);
     if (errs) out.push({ row: r, errs });
@@ -1185,11 +1410,16 @@ function _escopoErroTip(row, fundos) {
   const quais = fundos.map(f => fundLabelMesa(f, true)).join(' · ');
   const rk    = row.prf_risk_kind ?? row.risk_kind ?? row.area;
   const kind  = _BOOK_PT[rk] ?? (rk ?? '—');
-  return 'ERRO — book que este fundo não pode carregar.\n\n'
+  /* ⚠️ O veredito tem DUAS causas e elas pedem frases diferentes: o BOOK (câmbio/bolsa
+     onde não pode) e a PRAÇA (juros de fora num fundo que só faz Brasil). Dizer só "fora do
+     escopo" manda a mesa procurar a coisa errada. */
+  const praca = row.prf_praca ?? row.praca ?? null;
+  return 'ERRO — fora do mandato deste fundo.\n\n'
     + `Há posição desta linha em: ${quais}. Para efeito da regra ela conta como `
-    + `${kind}${row.area && rk && rk !== row.area
+    + `${kind}${praca ? ' ' + (praca === 'local' ? 'LOCAL (Brasil)' : 'GLOBAL (fora do Brasil)') : ''}`
+    + `${row.area && rk && rk !== row.area
         ? ` (a área no JRS é "${row.area}${row.subarea ? ' · ' + row.subarea : ''}")` : ''}.\n\n`
-    + 'Não é desvio de rateio, é posição num fundo que não opera esse book — não há faixa de '
+    + 'Não é desvio de rateio, é posição num fundo que não a opera — não há faixa de '
     + 'tolerância aqui.';
 }
 
@@ -1203,22 +1433,31 @@ function renderPrfEscopoAlerta(data) {
   const li = fora.map(x => {
     const onde = (x.funds || []).map(f =>
       `<b>${fundLabelMesa(f.fund, true)}</b> ${fmtFinalQty(f.qty)}`).join(' · ');
-    const kind = _BOOK_PT[x.risk_kind] ?? x.risk_kind ?? '—';
+    const kind = (_BOOK_PT[x.risk_kind] ?? x.risk_kind ?? '—')
+      + (x.praca ? ' ' + (x.praca === 'local' ? 'local' : 'global') : '');
     /* A área crua vai junto SEMPRE que diferir da classificação — é a diferença entre
        "procure na linha de câmbio" e "procure no Rates · Cash", que é onde ela de fato
        está na tela. Omiti-la manda a mesa procurar no lugar errado. */
-    const org = (x.area && x.risk_kind !== x.area)
+    /* A área crua vai junto SEMPRE que a classificação difira dela — é a diferença entre
+       "procure na linha de câmbio" e "procure no Rates · Cash", que é onde ela de fato está
+       na tela. E a PRAÇA entra junto, porque com ela o veredito muda de causa. */
+    const org = (x.area && (x.risk_kind !== x.area || x.praca))
       ? `${x.area}${x.subarea ? ' · ' + x.subarea : ''} → conta como ${kind}`
       : `${x.area ?? '—'}${x.subarea ? ' · ' + x.subarea : ''}`;
     return `<li style="margin:1px 0"><b>${x.instrument_name ?? '—'}</b>`
       + ` <span style="color:var(--text-muted)">— ${org}</span> · ${onde}</li>`;
   }).join('');
-  const regras = Object.entries(okMap).map(([f, areas]) =>
-    `<b>${fundLabelMesa(f, true)}</b>: ${areas.map(a => _BOOK_PT[a] ?? a).join(' e ')}`
-  ).join(' &nbsp;·&nbsp; ');
+  const pracaMap = data.portfoliorf_escopo.pracas_ok || {};
+  const regras = Object.entries(okMap).map(([f, areas]) => {
+    const pr = pracaMap[f] || [];
+    /* Só diz a praça quando ela RESTRINGE: "juros local e global" é o estado normal e
+       repeti-lo em duas das três linhas é ruído na faixa que tem de ser lida. */
+    const prTxt = (pr.length === 1) ? ` ${pr[0]}` : '';
+    return `<b>${fundLabelMesa(f, true)}</b>: ${areas.map(a => _BOOK_PT[a] ?? a).join(' e ')}${prTxt}`;
+  }).join(' &nbsp;·&nbsp; ');
   return `<div class="card" style="border-left:4px solid var(--red);background:color-mix(in srgb, var(--red) 7%, var(--bg-card));flex:0 0 auto">
     <div style="font-size:12px;line-height:1.7">
-      <b style="color:var(--red);font-size:13px">⛔ ${fora.length} posição(ões) em FUNDO QUE NÃO PODE CARREGÁ-LA</b>
+      <b style="color:var(--red);font-size:13px">⛔ ${fora.length} posição(ões) FORA DO MANDATO DO FUNDO</b>
       <div style="margin-top:2px">${regras}. Estas linhas estão fora disso:</div>
       <ul style="margin:4px 0 0 18px;padding:0">${li}</ul>
     </div>
@@ -1335,7 +1574,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
        Avaliado para TODA linha `alloc_offshore_only` (a `is_offshore` inclusive, cujo check
        hoje é só o rótulo "offshore") e tem precedência sobre os dois ramos de check: é regra
        do veículo, não rateio. */
-    const dolarErro   = (r.dollar_kind && offFund)
+    const dolarErro   = (r.dollar_kind && !r.dolar_caixa && offFund)
       ? dolarFundoErrado(byFund, fundLabels, offFund) : null;
     /* ⛔ Escopo por fundo (backend, `funds.PORTFOLIORF_AREAS_OK`): câmbio no Juros Global,
        bolsa em qualquer um. Vem depois do dólar na precedência porque o backend já tira
@@ -1408,10 +1647,22 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
         r.alloc_fund ? ` title="${_escHtml('Linha offshore — 100% no ' + fundLabelMesa(r.alloc_fund, true)
           + '. O #PL é calculado sobre o NAV desse fundo, não sobre a soma dos três.')}"` : ''
         }>offshore${r.alloc_fund ? ' · ' + fundLabelMesa(r.alloc_fund, true) : ''}</td>`;
+    } else if (offOnly && r.dolar_caixa) {
+      /* ☠️ **Dólar de CAIXA não tem alvo de rateio** (03/11/2026). Ele é o hedge do caixa em
+         BRL de CADA fundo — medido no dia: −50 no Juros Global e −41 no Juros e Moeda —, e o
+         tamanho certo de cada um sai do caixa daquele fundo, que esta tela não tem. Comparar
+         com o #PL do grupo (ou com o do fundo do dólar) acusaria qualquer repartição. É a
+         mesma razão pela qual o caixa já ficava fora do espelho contra o EMota. */
+      checkPlCell = _checkVazio('caixa',
+        'Hedge do caixa em BRL deste fundo (Rates · Cash / Hedge_Cambial), não posição de '
+        + 'mandato: cada fundo hedgeia o próprio caixa, e o tamanho certo depende do caixa '
+        + 'dele — que esta tela não tem. Sem alvo, não há veredito. '
+        + 'O #PL da tabela principal usa a soma dos NAVs dos fundos que carregam a linha.');
     } else if (offOnly) {
-      // Só o fundo offshore entra: os demais não carregam a posição por desenho, então
+      // Só o fundo dono entra: os demais não carregam a posição por desenho, então
       // compará-los com o #PL do grupo acusaria a ausência esperada.
-      const fpOff  = fundPlArr[fundLabels.indexOf(offFund)];
+      const _alvoFd = r.alloc_fund ?? offFund;
+      const fpOff  = fundPlArr[fundLabels.indexOf(_alvoFd)];
       const devPl  = (groupPl != null && fpOff != null) ? Math.abs(fpOff - groupPl) : null;
       // ⚠️ A cor passou a viver no `<td>` (classe `check-cell …`), não num `<span>` dentro:
       // o fundo tingido é da CÉLULA, e um span colorido por cima dele brigaria com o contraste.
@@ -1430,8 +1681,8 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       checkPlCell = '<td style="color:var(--text-muted);text-align:right">—</td>';
     }
 
-    const offMark = offOnly
-      ? ` <span class="alloc-off-only" title="Dólar — alocação 100% em ${shortLabel(offFund)}. `
+    const offMark = (offOnly && !r.dolar_caixa)
+      ? ` <span class="alloc-off-only" title="Dólar — alocação 100% em ${shortLabel(r.alloc_fund ?? offFund)}. `
         + `Alvo do check e denominador do #PL são o NAV desse fundo, não o consolidado.">US$</span>`
       : '';
 
@@ -1474,15 +1725,25 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
      daquele fundo —, então aqui vai dito, com o número, em vez de a soma das colunas
      simplesmente não fechar 100 %. Caso real: o `Juros Global` boletou no dia 30/10/2026 e o
      NAV dele só nasce ~16h de D+1. */
-  const semNav = (_pnlTablesForTab() || [])
-    .map(t => t.fund).filter(f => fundNavs[f] == null);
-  const navFootTr = semNav.length
+  /* ⚠️ **Dois estados diferentes, e misturá-los é que gera alarme falso** (03/11/2026): o
+     fundo que OPERA e está sem NAV no dia é problema (⚠ amarelo); o que está cadastrado e
+     ainda não nasceu é só informação. O flag vem do backend (`pnl_fund_tables[].ativo`). */
+  const _tabs    = _pnlTablesForTab() || [];
+  const semNav   = _tabs.filter(t => fundNavs[t.fund] == null && t.ativo !== false).map(t => t.fund);
+  const aguarda  = _tabs.filter(t => t.ativo === false).map(t => t.fund);
+  const navFootTr = (semNav.length
     ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--yellow)"><div>`
       + `⚠ ${semNav.map(f => fundLabelMesa(f, true)).join(' · ')} sem NAV nesta data — fica fora `
       + `desta tabela (sem NAV não há #PL, e uma coluna vazia apagaria o Check #PL das demais). `
       + `A posição dele está no modo <b>▤ Por fundo</b> e no card de PnL do fundo.`
       + `</div></td></tr>`
-    : '';
+    : '')
+    + (aguarda.length
+    ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--text-muted)"><div>`
+      + `${aguarda.map(f => fundLabelMesa(f, true)).join(' · ')} — cadastrado no controle, `
+      + `ainda sem NAV e sem posição. Vira coluna aqui quando tiver NAV.`
+      + `</div></td></tr>`
+    : '');
 
   return `<table class="data-table alloc-table" style="white-space:nowrap;width:auto">
     <thead>

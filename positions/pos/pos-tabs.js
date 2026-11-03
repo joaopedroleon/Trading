@@ -558,7 +558,7 @@ function _renderSectionsForTab(tabId, allRows) {
   /* ⛔ Alerta de ESCOPO primeiro — posição que não deveria existir vem antes de qualquer
      conversa sobre proporção. Silencioso quando não há nada fora. */
   /* ⛔ E antes de tudo o DÓLAR NO FUNDO ERRADO (29/10/2026): dólar direcional só pode estar
-     no fundo que tem o veículo offshore, e quantidade dele no Local é posição no fundo
+     no fundo que tem câmbio no mandato, e quantidade dele no Juros Local é posição no fundo
      errado — não desvio de rateio. Fica no topo, e não só na célula da auxiliar, porque a
      auxiliar pode estar filtrada ou a seção pode estar no modo "por fundo". Silencioso
      quando não há nada fora. Ver `renderDolarFundoAlerta` (pos-fundtables.js). */
@@ -566,11 +566,27 @@ function _renderSectionsForTab(tabId, allRows) {
      só opera juros, câmbio ali — e bolsa em qualquer um dos três — é posição que não
      deveria existir. Vem logo depois do dólar porque o backend já tira daqui o que a faixa
      do dólar cobre: as duas nunca falam da mesma linha. Ver `renderPrfEscopoAlerta`. */
+  /* ⭐ **As REGRAS saem da seção 01 e vão para ANTES dela** (03/11/2026, pedido da mesa:
+     *"mostre as regras antes da seção da posição, e não dentro"*). Elas não são parte da
+     Posição — são o contrato dos fundos, pano de fundo de todas as seções da aba —, e dentro
+     da 01 se liam como se fossem. Container próprio no HTML, fora de qualquer `h2.jgp-sec`,
+     para não mexer na numeração do `editorial.js`.
+     ⚠️ Os ALERTAS continuam onde estavam: eles são sobre as LINHAS da posição (dólar no
+     fundo errado, posição fora do mandato), então o lugar deles é em cima da tabela que os
+     originou. A separação é essa — regra acima da seção, alerta dentro dela.
+     ⚠️ Sem o container (a aba do próprio trader de MM, o snapshot estático) o painel volta
+     para o fluxo antigo, junto dos alertas — é o fallback, não um 2º layout a manter. */
+  const _regrasHtml = (typeof renderRfRegrasPanel === 'function')
+    ? renderRfRegrasPanel(data, rfCfg) : '';
+  const _regrasEl = document.getElementById(`rfRegrasContainer-${tabId}`);
+  if (_regrasEl) _regrasEl.innerHTML = _regrasHtml;
+
   const rfBanner = ((typeof renderDolarFundoAlerta === 'function' && hasFundBreak)
                       ? renderDolarFundoAlerta(data, displayRows) : '')
     + ((typeof renderPrfEscopoAlerta === 'function') ? renderPrfEscopoAlerta(data) : '')
     + ((typeof renderRfEscopoAlerta === 'function') ? renderRfEscopoAlerta(rfCfg) : '')
-    + ((typeof renderRfTargetBanner === 'function') ? renderRfTargetBanner(rfCfg) : '');
+    + ((_regrasEl && _regrasHtml) ? ''
+        : (typeof renderRfTargetBanner === 'function') ? renderRfTargetBanner(rfCfg, data) : '');
   /* Check do câmbio LINEAR, por moeda. Vai no FIM da aba e COLAPSADO (pedido da mesa):
      a leitura do dia a dia é a tabela de posição. O veredito fica no título do card, que
      continua visível fechado — ver `renderRfCcyCheck`. */

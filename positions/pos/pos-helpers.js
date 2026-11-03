@@ -461,15 +461,25 @@ function rfAllocClass(v, target) {
   return 'alloc-bad';
 }
 
-/* ── Conta única dos dois checks ──────────────────────────────────────────────────────
+/* ── Conta única do check do sleeve ───────────────────────────────────────────────────
    Devolve tudo o que as duas abas imprimem, para que a matemática não exista em dois
    lugares (a aba do PAbinader mostra os checks ao lado da tabela de MM dele; a do
    PortfolioRF, ao lado do card do sleeve — layouts diferentes, mesma conta).
      allocPct    razão de QUANTIDADE realizada (q_RF / q_MM)
      expRatio    razão de EXPOSIÇÃO realizada (%NAV do RF ÷ %NAV do MM)
-     allocTarget alvo fixo que a mesa boleta (4%)
-     navTarget   alvo que os NAVs de HOJE pedem p/ dar 1/10 — é o 2º check no agregado
-   `null` em qualquer um = não afirmado (a tela imprime "—", nunca um número inventado). */
+     allocTarget ALVO de quantidade de HOJE — `exposure_ratio × NAV_RF / NAV_MM`
+     allocTargetRef o que foi combinado em out/2026 (4,4%), só para referência
+   `null` em qualquer um = não afirmado (a tela imprime "—", nunca um número inventado).
+
+   ☠️ **O alvo é DINÂMICO desde 03/11/2026, e vem PRONTO do backend.** Era a constante
+   `RF_SLEEVE_ALLOC_TARGET` (4,4%), com um 2º check avisando quando ela deixasse de ser 1/10
+   da exposição; a mesa mandou derivá-lo dos NAVs do dia — *"não chame de 4,4%, chame do
+   percentual que é o necessário para estar de acordo com a proporção correta dos NAVs"*.
+   ⛔ A fórmula NÃO é refeita aqui. Ela já viveu nos dois lados (aqui como `navTarget`, lá
+   como a constante) justamente para que um pudesse acusar o outro; com um alvo só, duas
+   cópias da mesma conta é como ela passa a divergir em silêncio. Mora em
+   `funds.rf_sleeve_alloc_target` e chega em `cfg.alloc_target`. O `navRatio` abaixo continua
+   sendo calculado porque é EXIBIÇÃO (o painel mostra a razão), não o alvo. */
 function rfAllocEval(mmQty, rfQty, cfg) {
   const allocTarget = cfg?.alloc_target ?? null;
   const expTarget   = cfg?.exposure_ratio ?? null;
@@ -480,12 +490,31 @@ function rfAllocEval(mmQty, rfQty, cfg) {
   return {
     allocPct,
     allocTarget,
+    allocTargetRef: cfg?.alloc_target_ref ?? null,
     expTarget,
     navRatio,
     expRatio:  (allocPct != null && navRatio != null) ? allocPct * navRatio : null,
-    // Alvo de quantidade que os NAVs de hoje pedem para a exposição dar 1/10.
-    navTarget: (expTarget != null && navRatio) ? expTarget / navRatio : null,
+    // Alias histórico: o "alvo que os NAVs de hoje pedem" passou a SER o alvo. Mantido
+    // porque o painel e a nota o nomeiam assim ao explicar de onde o número sai.
+    navTarget: allocTarget,
   };
+}
+
+/* O alvo de hoje a partir da config, sem precisar de um par de quantidades. Porta única para
+   quem só quer o número (rótulo da coluna, denominador do %NAV em pos-fxlegs): ler
+   `cfg.alloc_target` na mão espalha a suposição de que ele é um número simples, e foi assim
+   que a constante antiga acabou em três lugares. */
+function rfAllocTarget(cfg) {
+  return rfAllocEval(null, null, cfg).allocTarget;
+}
+
+/* Rótulo do fundo de RF que está sendo conferido ("Juros e Moeda"). ⚠️ A aba tem TRÊS fundos
+   de RF desde 30/10/2026 — dizer só "o RF" deixou de identificar qual, e o sleeve mora em um
+   deles só (`funds.RF_SLEEVE_NAV_FUND`). */
+function rfSleeveFundLabel(cfg) {
+  return cfg?.nav_fund_label
+      ?? (typeof fundLabelMesa === 'function' ? fundLabelMesa(cfg?.nav_fund, true) : null)
+      ?? 'RF';
 }
 
 /* ── ESPELHO DE JUROS: PortfolioRF × EMota (23/10/2026) ───────────────────────────────
@@ -673,6 +702,9 @@ const FILTERS = [
   {
     id:    'no_hedge_cambial',
     label: 'Excluir Hedge Cambial',
+    // Escopo, como o `no_cash` abaixo: vale também no PnL.
+    title: 'Esconde o hedge de caixa da tesouraria (subárea Hedge_Cambial). ⚠️ Vale também '
+         + 'para o PnL — é filtro de ESCOPO, não de tamanho.',
     fn:    r => r.subarea !== 'Hedge_Cambial',
   },
   {
@@ -729,8 +761,14 @@ const FILTERS = [
     },
   },
   {
+    /* ⚠️ Filtro de ESCOPO, não de tamanho (não está em `FILTROS_SO_TAMANHO`): ele vale
+       também no **PnL** da seção 02 — ali a linha não é pequena, é de outra natureza. O
+       `title` diz isso porque desde 03/11/2026 a barra mora DENTRO da seção 01 na aba do
+       PortfolioRF, e de lá ela se leria como filtro só da Posição. */
     id:    'no_cash',
     label: 'Excluir Cash',
+    title: 'Esconde a tesouraria (subárea Cash): LFT, mini dólar de carry e o hedge do '
+         + 'caixa. ⚠️ Vale também para o PnL — é filtro de ESCOPO, não de tamanho.',
     fn:    r => r.subarea !== 'Cash',
   },
 ];

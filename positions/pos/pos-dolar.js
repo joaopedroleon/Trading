@@ -1058,6 +1058,13 @@ function renderEnquadramentoRF(data) {
 
   const body = funds.map(f => {
     const nav = f.nav;
+    /* ⛔ **Mostrar ≠ ter limite** (03/11/2026). A aba passou a listar os TRÊS fundos do RF
+       — a mesa reparou que o `Juros Global` não aparecia e o número interessa para todos —,
+       mas ele **não tem** limite de derivativo. Pintar de vermelho, marcar ⚠ ou escrever
+       ESTOURO num fundo sem teto é inventar um enquadramento que não existe. Quem tem teto
+       vem do backend (`limite_deriv`, de `funds.PORTFOLIORF_REGRAS`). */
+    const temLim = f.limite_deriv !== false;
+    const estilo = p => temLim ? _enqLimitStyle(p) : '';
     const navStr = nav != null
       ? `BRL ${nav.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
       : '<span style="color:var(--red)">—</span>';
@@ -1067,18 +1074,23 @@ function renderEnquadramentoRF(data) {
       for (const i of ((bk && bk.instruments) || [])) lut[i.instrument_reference || i.instrument_name] = i;
       const instCells = c.insts.map((ic, j) => _enqMatrixCell(lut[ic.ck], nav, j === 0)).join('');
       const totStr = (bk && bk.pct != null) ? fmtPct(bk.pct) + (bk.over ? ' ⚠' : '') : '—';
-      const totCell = `<td class="num" style="border-left:1px solid var(--border);font-weight:700;${_enqLimitStyle(bk ? bk.pct : null)}">${totStr}</td>`;
+      const totCell = `<td class="num" style="border-left:1px solid var(--border);font-weight:700;${estilo(bk ? bk.pct : null)}">${totStr}</td>`;
       return instCells + totCell;
     }).join('');
     // Total geral = soma dos MÓDULOS das caixinhas (não se compensam) — é a regra dos 100%.
     let totExp = 0, haveAny = false;
     for (const b of (f.buckets || [])) if (b.net_exp != null) { totExp += Math.abs(b.net_exp); haveAny = true; }
     const totPct  = (haveAny && nav) ? totExp / nav : null;
-    const totOver = (totPct != null && totPct > 1.0);
-    const totalGeral = `<td class="num" style="border-left:2px double var(--border);font-weight:700;${_enqLimitStyle(totPct)}">${totPct != null ? fmtPct(totPct) + (totOver ? ' ⚠' : '') : '—'}</td>`;
-    const status = totOver
-      ? '<td class="num" style="color:#fff;background:var(--alert-4);font-weight:700">ESTOURO</td>'
-      : (totPct != null ? '<td class="num" style="color:var(--green)">OK</td>' : '<td class="num" style="color:var(--text-muted)">—</td>');
+    const totOver = (temLim && totPct != null && totPct > 1.0);
+    const totalGeral = `<td class="num" style="border-left:2px double var(--border);font-weight:700;${estilo(totPct)}">${totPct != null ? fmtPct(totPct) + (totOver ? ' ⚠' : '') : '—'}</td>`;
+    const status = !temLim
+      ? `<td class="num" style="color:var(--text-muted)" title="${_escHtml(
+          fundLabelMesa(f.fund_label) + ' não está sujeito ao limite de 100% do NAV por '
+          + 'caixinha (regra da mesa). O % continua aqui porque é o que está boletado — o '
+          + 'que não existe é o teto.')}">sem limite</td>`
+      : totOver
+        ? '<td class="num" style="color:#fff;background:var(--alert-4);font-weight:700">ESTOURO</td>'
+        : (totPct != null ? '<td class="num" style="color:var(--green)">OK</td>' : '<td class="num" style="color:var(--text-muted)">—</td>');
     return `<tr><td>${fundLabelMesa(f.fund_label)}</td><td class="num">${navStr}</td>${groupCells}${totalGeral}${status}</tr>`;
   }).join('');
 

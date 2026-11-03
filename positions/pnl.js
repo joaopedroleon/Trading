@@ -834,6 +834,25 @@ function renderPnlSummaryByFund(mainRows) {
   const cards = cfg.map(t => {
     const nav   = navs[t.fund] ?? null;
     const rows  = _pnlSynthFundRows(mainByKey, idx, t.includes, nav);
+    /* ⭐ **Fundo CADASTRADO e ainda sem nada** (03/11/2026): card em tom neutro, não o
+       "⚠ NAV indisponível" vermelho. O fundo entra no controle antes de nascer — foi pedido
+       assim, para estar à vista no dia 1 — e o ⚠ tem de continuar querendo dizer *problema*:
+       ele fica para o fundo que OPERA e está sem NAV. ⛔ Esconder o card (como a 1ª versão
+       fazia) é pior que as duas coisas: fundo que some não se distingue de fundo que alguém
+       esqueceu de cadastrar, e foi exatamente assim que a mesa reparou. */
+    if (t.ativo === false && nav == null && !rows.length) {
+      return `<div class="card" style="flex:0 0 auto;max-width:360px">
+        <div class="section-title" style="padding:4px 0 8px 0;font-size:12px">
+          <span>${t.label}
+            <span style="font-weight:400;color:var(--text-muted);font-size:11px">— ${t.fund.replace(/-[A-Z]$/, '')}</span>
+          </span>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-muted);line-height:1.6">
+          Cadastrado no controle, <b>ainda sem NAV e sem posição</b> — o fundo não operou
+          nesta data. A tabela aparece sozinha quando ele tiver uma das duas.
+        </div>
+      </div>`;
+    }
     const { tbody, grandUsd } = _pnlSummaryBody(_pnlAggregate(rows, _pnlForFund));
     const navStr = nav != null
       ? `NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}${_pnlNavSourceChip(t.fund)}`
