@@ -810,9 +810,17 @@ function netByAssetGroup(rows) {
        NAV — o do fundo que detém o veículo offshore. O chip diz de quem é e o hover diz sobre
        que patrimônio. */
     const owner = (typeof isMergedSleeveRow === 'function' && isMergedSleeveRow(r)) ? r.trader : null;
+    /* ⛔ O veículo NÃO entra na chave do chip: a linha já chega consolidada do backend
+       (um único `1MX6P` de 26, não 20 + 6), e o #PL dela já é fração da SOMA dos NAVs
+       dos fundos que ela toca. Dois chips aqui seriam a mesma posição contada duas vezes.
+       O rótulo do fundo fica no `title`, que é onde ele cabe sem alargar a tira. */
+    const ownLabel = owner ? (r.rf_sleeve_owner_label ?? null) : null;
+    // O NAV da PRÓPRIA linha — o backend já o entrega somado quando ela vive em dois
+    // veículos; `rfc.nav` é o do fundo de referência e nomearia o errado nesse caso.
+    const ownNav   = owner ? (r.nav ?? null) : null;
     for (const { sub, w } of legs) {
       const k = `${g.id}||${sub}||${owner ?? ''}`;
-      if (!acc.has(k)) acc.set(k, { g, sub, owner, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
+      if (!acc.has(k)) acc.set(k, { g, sub, owner, ownLabel, ownNav, pct: 0, nom: 0, nPct: 0, nNom: 0, missing: [], insts: [] });
       const a = acc.get(k);
       a.insts.push(legs.length > 1 ? `${name} (perna ${legs.find(l => l.sub === sub)?.ccy ?? sub}, ${w > 0 ? '+' : '−'}#PL)` : name);
       if (pl == null || !isFinite(pl)) { a.missing.push(name); continue; }
@@ -875,10 +883,14 @@ function renderNetSummary(rows) {
           `${a.missing.length} linha(s) sem #PL calculável — FORA desta soma:\n· ` +
           a.missing.join('\n· '))}">⚠</span>`
       : '';
+    /* ⚠️ O hover nomeia os fundos DAQUELA posição e cita o NAV DELA — numa linha que vive
+       em dois veículos o denominador é a soma, e o `rfc.nav` de referência nomearia um só. */
+    const _ownTxt = a.ownLabel || (rfc?.nav_fund ?? 'fundo que detém o veículo offshore');
+    const _navNum = a.ownNav ?? rfc?.nav;
     const navTxt = a.owner
       ? `\n\n⚠ Posição do ${a.owner} no sleeve de RF. O % é fração do NAV do `
-        + `${rfc?.nav_fund ?? 'fundo que detém o veículo offshore'}`
-        + (rfc?.nav != null ? ` (USD ${Number(rfc.nav).toLocaleString('en-US', {maximumFractionDigits: 0})})` : '')
+        + `${_ownTxt}`
+        + (_navNum != null ? ` (USD ${Number(_navNum).toLocaleString('en-US', {maximumFractionDigits: 0})})` : '')
         + ` — NÃO do NAV desta aba. Por isso o chip é separado: os dois não se somam.`
       : '';
     const tip = `${a.g.tip}\n\nUnidade: ${unid.join(' · ')}${navTxt}`

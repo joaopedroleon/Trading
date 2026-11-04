@@ -250,19 +250,34 @@ html.theme-v2 .tab.on { display: block; }
 html.theme-v2 .data-table th,
 html.theme-v2 .data-table td { padding: 8px 12px; }
 
-/* ═══ PnL quebrado por FUNDO (PortfolioRF) — uma tabela por fundo, lado a lado ═══
-   Duas tabelas de 8 colunas só cabem na largura da página com densidade menor, então a
-   compactação (fonte + padding) é ESCOPADA nesta seção — o resto da tela segue no respiro
-   padrão. O `overflow-x:auto` da linha é a rede de segurança em tela estreita: rola DENTRO
-   da seção em vez de estourar a página (o container ganha `max-width:100%` no pnl.js).
-   ⭐ **`flex-wrap` entrou com o 3º fundo** (30/10/2026, `Juros Global`): com duas tabelas o
-   overflow era rede de segurança e quase nunca disparava; com três ele vira o estado normal
-   a 1920, e ler PnL rolando a seção de lado é pior do que ler a 3ª tabela numa 2ª linha. O
-   `overflow-x` fica como rede para a tela estreita, onde nem UMA cabe. */
+/* ═══ PnL quebrado por FUNDO (PortfolioRF) — uma tabela por fundo, EMPILHADAS ═══
+   ⭐ **Uma embaixo da outra desde 04/11/2026** (pedido da mesa), na ordem da config
+   (`PORTFOLIORF_PNL_TABLES`: Juros Local → Juros Global → Juros e Moeda).
+   Elas nasceram LADO A LADO, quando eram duas: cabiam na largura da página com densidade
+   menor, e a compactação (fonte + padding) ficou ESCOPADA aqui por causa disso. Com o 3º
+   fundo (`Juros Global`, 30/10/2026) a linha já quebrava sozinha a 1920 — o `flex-wrap`
+   entrou para a 3ª tabela cair numa 2ª linha em vez de a seção rolar de lado —, e aí
+   "lado a lado" virou "duas em cima, uma embaixo", que é pior que as duas opções puras:
+   as tabelas deixam de se ler em coluna e a 3ª parece outra coisa. Empilhadas, as oito
+   colunas de todas ficam alinhadas verticalmente e a comparação entre fundos é direta.
+   ⚠️ A compactação abaixo FICA: ela agora é escolha de densidade da seção, não mais
+   necessidade de caber — trocar junto misturaria duas mudanças numa.
+   ⚠️ `align-items: flex-start` para o card encolher até o conteúdo: sem ele o `stretch`
+   do flex esticaria as três tabelas até a largura da seção. O `overflow-x` continua como
+   rede para a tela estreita, onde nem UMA tabela cabe. */
 .pnl-fund-row {
-  display: flex; gap: 12px; align-items: flex-start;
-  flex-wrap: wrap; row-gap: 10px;
-  overflow-x: auto; max-width: 100%;
+  display: flex; flex-direction: column; gap: 10px;
+  /* ⭐ **Os três cards na MESMA largura, a do maior** (04/11/2026, pedido da mesa). O par
+     `width: fit-content` + `align-items: stretch` é o que entrega isso, e os dois são
+     necessários: o `fit-content` faz o CONTÊINER encolher até o max-content do filho mais
+     largo, e o `stretch` estica os demais até ele.
+     ☠️ `stretch` sozinho esticaria até a largura da SEÇÃO (bem maior que a maior tabela), e
+     `flex-start` sozinho é o que havia: cada card no próprio conteúdo (754 · 958 · 978px
+     medidos), com as colunas desalinhadas de um para o outro.
+     ⚠️ `max-width: 100%` continua na frente do `fit-content` para a seção não estourar a
+     página, e o `overflow-x` segue como rede na tela estreita. */
+  align-items: stretch; width: fit-content; max-width: 100%;
+  overflow-x: auto;
 }
 .pnl-fund-split .card { padding: 10px 12px; }
 html.theme-v2 .pnl-fund-split .data-table th,

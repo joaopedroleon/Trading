@@ -1,3 +1,7 @@
+/* ⛔ **O veículo do sleeve NÃO entra na chave** — a linha consolidada é UMA (04/11/2026).
+   Chegou a entrar, para separar Class N de Class I, e a mesa pediu o contrário: na visão
+   consolidada a posição é uma só e o detalhe por veículo vive na auxiliar. O backend consolida
+   antes (ver `_AGG_KEYS`), então aqui não há duas linhas para distinguir. */
 function rowKey(r) {
   return [r.group, r.trader, r.instrument_reference, r.area, r.subarea, r.strategy, r.maturity].join('||');
 }
@@ -480,10 +484,22 @@ function rfAllocClass(v, target) {
    cópias da mesma conta é como ela passa a divergir em silêncio. Mora em
    `funds.rf_sleeve_alloc_target` e chega em `cfg.alloc_target`. O `navRatio` abaixo continua
    sendo calculado porque é EXIBIÇÃO (o painel mostra a razão), não o alvo. */
-function rfAllocEval(mmQty, rfQty, cfg) {
-  const allocTarget = cfg?.alloc_target ?? null;
+function rfAllocEval(mmQty, rfQty, cfg, row) {
+  /* ⭐ **O alvo é POR VEÍCULO desde 04/11/2026**, e vem carimbado NA LINHA pelo backend
+     (`rf_alloc_target`, de `funds.rf_sleeve_alloc_target` sobre o NAV do fundo DAQUELA linha).
+     ☠️ O sleeve passou a ter dois destinos — Class N (Juros e Moeda) e Class I (Juros
+     Global) — com NAVs de 28,6 MM e 9,1 MM em 04/11, logo alvos de **4,49%** e **1,43%**.
+     Medir a linha do Class I contra o alvo do N acusaria ~−70% de desvio numa boleta certa.
+     ⚠️ Sem `row` (o painel de deriva, o rótulo da coluna) vale o alvo de referência, que é o
+     comportamento de antes — e também quando a linha é a do MM sem contraparte no RF: ali não
+     há veículo a consultar, e o "deveria haver ~X" do tooltip sai contra o fundo de referência. */
+  const allocTarget = (row && row.rf_alloc_target != null)
+    ? row.rf_alloc_target
+    : (cfg?.alloc_target ?? null);
   const expTarget   = cfg?.exposure_ratio ?? null;
-  const navRf       = cfg?.nav ?? null;
+  // O NAV do denominador acompanha o alvo: é o do fundo da linha, não o de referência — senão
+  // a `expRatio` do tooltip (que divide um pelo outro) contaria a história de outro fundo.
+  const navRf       = (row && row.is_rf_sleeve && row.nav) ? row.nav : (cfg?.nav ?? null);
   const navMm       = cfg?.mm_nav?.[cfg?.traders?.[0]] ?? null;
   const navRatio    = (navRf && navMm) ? navMm / navRf : null;   // NAV_MM / NAV_RF
   const allocPct    = (mmQty && Math.abs(mmQty) > 1e-9) ? rfQty / mmQty : null;
@@ -504,8 +520,91 @@ function rfAllocEval(mmQty, rfQty, cfg) {
    quem só quer o número (rótulo da coluna, denominador do %NAV em pos-fxlegs): ler
    `cfg.alloc_target` na mão espalha a suposição de que ele é um número simples, e foi assim
    que a constante antiga acabou em três lugares. */
-function rfAllocTarget(cfg) {
-  return rfAllocEval(null, null, cfg).allocTarget;
+/* ── Alvo AGREGADO de uma linha do book de MM ─────────────────────────────────
+   Na aba de quem BOLETA, a pergunta da coluna é sobre a linha do MM: "do que eu tenho aqui,
+   quanto foi para o RF?". Com dois veículos a resposta é a SOMA — em 04/11/2026 o PAbinader
+   rateou 442 contratos no MM e espelhou 20 no Class N **mais** 6 no Class I, e o alvo contra
+   o qual isso se mede é 4,49% + 1,43% = **5,92%** (26/442 = 5,88% ✅).
+   ☠️ **Mas só dos veículos ELEGÍVEIS para aquela linha**, e eles diferem: o Juros e Moeda
+   recebe juros e câmbio, o Juros Global **só juros**. Somar os dois num par de moedas pediria
+   5,92% onde o certo são 4,49% — e a coluna acusaria desvio de −24% em toda linha de FX do
+   sleeve, que é a maior parte do livro de quem espelha.
+   ⚠️ Sem `escopo_por_veiculo` no payload (snapshot estático antigo) cai no alvo de
+   referência, que é o comportamento de antes. */
+function rfLineTarget(cfg, area) {
+  const porVeic = cfg?.alloc_target_por_veiculo;
+  const escopo  = cfg?.escopo_por_veiculo;
+  if (!porVeic || !escopo) return cfg?.alloc_target ?? null;
+  const a = (area ?? '').trim();
+  let soma = null;
+  for (const [veic, alvo] of Object.entries(porVeic)) {
+    if (alvo == null) continue;
+    if (!(escopo[veic] ?? []).includes(a)) continue;
+    soma = (soma ?? 0) + alvo;
+  }
+  return soma;
+}
+
+/* Os veículos elegíveis para aquela área, por extenso — para o tooltip dizer de onde veio a
+   soma acima em vez de imprimir um número que a mesa não consegue reconstituir. */
+function rfLineTargetParts(cfg, area) {
+  const porVeic = cfg?.alloc_target_por_veiculo ?? {};
+  const escopo  = cfg?.escopo_por_veiculo ?? {};
+  const rot     = cfg?.owner_label_by_fund ?? {};
+  const a = (area ?? '').trim();
+  return Object.entries(porVeic)
+    .filter(([v, alvo]) => alvo != null && (escopo[v] ?? []).includes(a))
+    .map(([v, alvo]) => ({ veiculo: v, label: rot[v] ?? v, alvo }));
+}
+
+/* ── Os alvos POSSÍVEIS, por área — é isto que o rótulo da coluna anuncia ─────────────
+   ☠️ **NÃO existe mais UM alvo** (04/11/2026, pedido da mesa: *"no consolidado não chame o
+   check Abi 4,5%, porque não faz mais sentido — já que tem posição (de juros por ex) que seria
+   dos dois RFs, então é mais 1,5 (ficando uns 6%)"*). O alvo depende do que a linha É: juros
+   espelha nos DOIS fundos (4,5% + 1,4% ≈ 5,9%), câmbio só no Juros e Moeda (4,5%).
+   ⭐ **Derivado, nunca escrito**: sai de `alloc_target_por_veiculo` × `escopo_por_veiculo`,
+   os dois do payload. Um 3º veículo, ou um veículo que passe a aceitar outra área, aparece
+   aqui sozinho — era essa a parte "de forma genérica" do pedido. */
+function rfTargetsByArea(cfg) {
+  const porVeic = cfg?.alloc_target_por_veiculo;
+  const escopo  = cfg?.escopo_por_veiculo;
+  if (!porVeic || !escopo) return [];
+  const rot   = cfg?.owner_label_by_fund ?? {};
+  const areas = [...new Set(Object.values(escopo).flat())];
+  return areas.map(a => {
+    const veics = Object.keys(porVeic)
+      .filter(v => porVeic[v] != null && (escopo[v] ?? []).includes(a));
+    if (!veics.length) return null;
+    return { area: a, alvo: veics.reduce((x, v) => x + porVeic[v], 0),
+             fundos: veics.map(v => rot[v] ?? v) };
+  }).filter(Boolean).sort((x, y) => y.alvo - x.alvo);
+}
+
+/* Nome da área como a mesa fala. Mapa curto e com FALLBACK para o nome cru: uma área nova
+   do JRS aparece com o próprio nome em vez de sumir do rótulo. */
+const _RF_AREA_PT = { Rates: 'juros', Currencies: 'câmbio',
+                      Equities: 'bolsa', Commodities: 'commodities' };
+function rfAreaPt(a) { return _RF_AREA_PT[a] ?? (a || '—'); }
+
+/* A "linha de RF" que o check da aba de quem BOLETA deve usar para uma linha do book de MM.
+   ⭐ Devolve um objeto no formato de row cujo `rf_alloc_target` é a SOMA dos alvos dos
+   veículos elegíveis àquela área — porque do lado do MM a pergunta é "quanto do meu ticket
+   foi espelhado", e o espelho pode ter duas pernas. Não muta nada: com um veículo só, o alvo
+   que sai é exatamente o de antes.
+   ⚠️ Sem perna no RF devolve a PRÓPRIA linha de MM (com o alvo carimbado): é dela que o
+   `rfCheckCell` tira a exposição para o piso de materialidade, e trocar por um objeto
+   sintético tiraria `pl`/`pl_type`/`nav` do caminho e o piso deixaria de valer. */
+function rfLineRow(cfg, mm, rfAll) {
+  const alvo  = rfLineTarget(cfg, mm?.area);
+  const partes = rfLineTargetParts(cfg, mm?.area);
+  const rot = partes.length ? partes.map(x => x.label).join(' + ') : null;
+  const base = (rfAll && rfAll.length) ? rfAll[0] : mm;
+  if (!base) return mm;
+  return { ...base, rf_alloc_target: alvo, rf_sleeve_owner_label: rot };
+}
+
+function rfAllocTarget(cfg, row) {
+  return rfAllocEval(null, null, cfg, row).allocTarget;
 }
 
 /* Rótulo do fundo de RF que está sendo conferido ("Juros e Moeda"). ⚠️ A aba tem TRÊS fundos

@@ -841,7 +841,10 @@ function renderPnlSummaryByFund(mainRows) {
        fazia) é pior que as duas coisas: fundo que some não se distingue de fundo que alguém
        esqueceu de cadastrar, e foi exatamente assim que a mesa reparou. */
     if (t.ativo === false && nav == null && !rows.length) {
-      return `<div class="card" style="flex:0 0 auto;max-width:360px">
+      /* ⚠️ Sem `max-width` aqui: os cards da seção são todos da largura do maior
+         (ver `.pnl-fund-row`), e um teto só neste faria o card neutro — o único que
+         aparece quando um fundo ainda não operou — ser o único fora do alinhamento. */
+      return `<div class="card" style="flex:0 0 auto">
         <div class="section-title" style="padding:4px 0 8px 0;font-size:12px">
           <span>${t.label}
             <span style="font-weight:400;color:var(--text-muted);font-size:11px">— ${t.fund.replace(/-[A-Z]$/, '')}</span>
