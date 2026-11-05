@@ -949,18 +949,176 @@ const _ENQ_DOL_CAT = { mini: 'Mini (WDO)', cheio: 'Cheio (UC)', option: 'Opção
 // Rótulo curto do ativo (cabeçalho de coluna): tira o sufixo " Comdty"/" Curncy".
 function _enqInstLabel(bucketKey, inst) {
   const ref = inst.instrument_reference || '';
+  // ☠️ Opção de IDI tem FIGI no `instrument_reference` (`BBG0210H1210`) — rótulo ilegível.
+  // O nome é que carrega vencimento/tipo/strike, então o rótulo sai dele: `04/27 P566800`.
+  if (inst.category === 'idi_option')
+    return (inst.instrument_name || '').replace(/^IDIX9\s*/i, '').replace(/\s*Index$/i, '') || ref || '—';
   if (bucketKey === 'di') return ref.replace(/\s*Comdty$/i, '') || inst.instrument_name || '—';
   return ref.replace(/\s*Curncy$/i, '') || inst.instrument_name || '—';
 }
 
-// Tooltip com os internos (PU/taxa p/ DI; preço/delta p/ dólar).
-function _enqInstTitle(bucketKey, inst) {
+/* Painel do ⓘ: a CONTA aberta do ativo, linha a linha, até a exposição por unidade.
+   ⚠️ Fica no CABEÇALHO da coluna, então só pode trazer o que é do INSTRUMENTO — quantidade e
+   exposição mudam por fundo e vivem no tooltip da célula (`_enqMatrixCell`).
+   ⚠️ `white-space: pre` no `.jgp-info`, logo o texto já sai quebrado daqui; e vai por
+   `data-info`, que é atributo — HTML dentro imprimiria a tag como texto (o mesmo tropeço que
+   o `title=` do `fmtFinalQty` já deu nesta tela). */
+/* ── Painel do ⓘ num elemento FIXO no <body> ─────────────────────────────────
+   ☠️ O painel em CSS puro (`.jgp-info::after`, `position:absolute`) era **CORTADO**: a matriz
+   vive dentro de um `overflow-x:auto`, que é contexto de recorte, e o painel passou de ~250px
+   para ~450px de altura quando ganhou o bloco "por fundo". Medido em 05/11/2026: ele ia até
+   y=920 com o container terminando em y=655 — o rodapé do painel (justamente o "por fundo")
+   simplesmente não existia na tela, sem erro nenhum.
+   `position: fixed` escapa do recorte, mas aí as coordenadas têm de vir do JS. Daí este
+   elemento único no <body>, posicionado no hover e preso à janela nos dois eixos.
+   ⚠️ Um elemento SÓ, criado uma vez: a matriz é remontada a cada render e um painel por ⓘ
+   vazaria nós a cada atualização. */
+let _enqPop = null;
+function _enqPopEl() {
+  if (_enqPop && document.body.contains(_enqPop)) return _enqPop;
+  _enqPop = document.createElement('div');
+  _enqPop.id = 'enqInfoPop';
+  _enqPop.hidden = true;
+  document.body.appendChild(_enqPop);
+  return _enqPop;
+}
+let _enqPopIcon = null;                    // âncora atual, para reposicionar no scroll
+function _enqPopPlace(icon) {
+  const el = _enqPopEl();
+  const r = icon.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight, M = 8;
+  el.style.left = Math.round(Math.min(Math.max(M, r.left), Math.max(M, innerWidth - w - M))) + 'px';
+  // abre para baixo; se não couber, para cima — e nunca acima do topo da janela
+  const abaixo = r.bottom + 6;
+  el.style.top = Math.round(abaixo + h <= innerHeight - M ? abaixo
+                                                          : Math.max(M, r.top - h - 6)) + 'px';
+}
+function _enqPopShow(icon) {
+  const txt = icon.getAttribute('data-info');
+  if (!txt) return;
+  const el = _enqPopEl();
+  el.textContent = txt;
+  el.hidden = false;                       // mede DEPOIS de visível, senão altura = 0
+  _enqPopIcon = icon;
+  _enqPopPlace(icon);
+}
+function _enqPopHide() { _enqPopIcon = null; if (_enqPop) _enqPop.hidden = true; }
+
+/* ☠️ No scroll, REPOSICIONA — não esconde. Esconder parecia o óbvio (painel `fixed` não pode
+   ficar parado enquanto a âncora anda), e criava uma CORRIDA: o evento de `scroll` é entregue
+   de forma assíncrona, então um scroll imediatamente anterior ao hover chega DEPOIS dele e
+   apagava o painel recém-aberto. Medido: no 1º ⓘ da página isso dava ~50 % de "não abre", com
+   o `left`/`top` já preenchidos (prova de que o show tinha rodado) e `hidden = true`.
+   Reposicionar mata a corrida e ainda é melhor: a janela acompanha o ícone em vez de sumir. */
+function _enqPopFollow() {
+  if (!_enqPopIcon || !_enqPop || _enqPop.hidden) return;
+  if (!document.body.contains(_enqPopIcon)) { _enqPopHide(); return; }   // matriz remontada
+  _enqPopPlace(_enqPopIcon);
+}
+
+/* Delegado no documento: a matriz é remontada a cada render e religar listeners por ⓘ seria
+   um lugar a mais de onde esquecer. `mouseover`/`mouseout` (e não `mouseenter`) porque só
+   estes borbulham. */
+document.addEventListener('mouseover', ev => {
+  const ic = ev.target.closest && ev.target.closest('#enqRfContainer .jgp-info[data-info]');
+  if (ic) _enqPopShow(ic);
+});
+document.addEventListener('mouseout', ev => {
+  if (ev.target.closest && ev.target.closest('#enqRfContainer .jgp-info[data-info]')) _enqPopHide();
+});
+window.addEventListener('scroll', _enqPopFollow, { passive: true });
+
+/* As linhas POR FUNDO, no fim do painel. ⭐ Entraram em 05/11/2026 para o ⓘ virar a ÚNICA
+   janela: antes a quantidade e a exposição daquele fundo só existiam no `title` nativo da
+   célula, e o browser desenhava os DOIS (a janela do ⓘ e o balão do SO por cima dela). São só
+   3 fundos, então cabem no mesmo painel e os `title=` puderam sair da tabela inteira. */
+function _enqPorFundo(L, porFundo) {
+  if (!porFundo || !porFundo.length) return;
+  L.push(''); L.push('  por fundo:');
+  const w = Math.max(...porFundo.map(f => f.label.length));
+  for (const f of porFundo) {
+    L.push(`    ${f.label.padEnd(w)}  ${String(_enqNum(f.qty, 0)).padStart(9)} cts`
+         + `   ${String(_enqNum(f.exp, 0)).padStart(16)}`
+         + `   ${f.pct != null ? fmtPct(f.pct).padStart(8) : '       —'} do NAV`);
+  }
+}
+
+function _enqInfoPanel(bucketKey, inst, porFundo) {
   const venc = inst.maturity ? fmtDate(inst.maturity) : '—';
   const nm = inst.instrument_name || inst.instrument_reference || '';
-  if (bucketKey === 'di')
-    return `${nm} · venc ${venc} · DU ${inst.du ?? '—'} · taxa ${inst.rate != null ? _enqNum(inst.rate, 3) + '%' : '—'} · PU ${_enqNum(inst.pu, 2)}`;
-  return `${nm} · ${_ENQ_DOL_CAT[inst.category] || inst.category || ''} · venc ${venc} · preço ${_enqNum(inst.px, 2)} · delta ${inst.delta != null ? _enqNum(inst.delta, 2) : '—'}`;
+  const L = [];
+  // 15: o rótulo mais longo é `tam. contrato` (13) — com padEnd(13) ele encostava no valor.
+  const push = (k, v) => L.push('  ' + k.padEnd(15) + v);
+
+  if (inst.category === 'idi_option') {
+    const spot = inst.spot, K = inst.strike, bd = inst.bd;
+    L.push(nm);
+    L.push(`Opção de IDI — ${inst.kind === 'call' ? 'CALL' : 'PUT'}`);
+    L.push('');
+    push('vencimento', `${venc}   (1º dia útil do mês — regra da B3)`);
+    push('strike', _enqNum(K, 0) + ' pts');
+    push('Bd', `${inst.bd ?? '—'}   (DU até o vencimento — desconto)`);
+    push('Vd', `${inst.vd ?? '—'}   (pregões até o último fixing — prazo da vol)`);
+    push('IDI spot', _enqNum(spot, 2));
+    L.push('');
+    push('taxa DI', inst.rate != null ? _enqNum(inst.rate * 100, 4) + ' %  (curva DI no Bd)' : '—');
+    if (spot && K && bd)
+      push('strike lin.', `(${_enqNum(K, 0)}/${_enqNum(spot, 2)} − 1) × 252/${bd} = `
+                          + (inst.k_lin != null ? _enqNum(inst.k_lin * 100, 3) + ' %' : '—'));
+    // ⭐ A vol segue a regra da TELA de IDI: prêmio ⇒ implícita; sem prêmio ⇒ SABR da XP.
+    // A da XP aparece ao lado mesmo quando não é a usada — é a conferência que mostra o
+    // quanto o mercado está longe da superfície (medido em 05/11: 4,87 % × 6,57 %).
+    if (inst.price != null) push('prêmio', _enqNum(inst.price, 2) + ' pts');
+    push('vol', inst.vol != null ? `${_enqNum(inst.vol * 100, 3)} %   (${inst.vol_src || '—'})` : '—');
+    if (inst.vol_xp != null && inst.vol_src !== 'SABR XP')
+      push('vol XP', `${_enqNum(inst.vol_xp * 100, 3)} %   (superfície da XP — conferência)`);
+    push('delta', inst.delta != null ? _enqNum(inst.delta, 6) + '   (Black-76 na taxa linear)' : '—');
+    L.push('');
+    L.push('  exposição = delta × IDI spot × qtd de contratos');
+    if (inst.delta != null && spot != null)
+      L.push(`              por contrato: ${_enqNum(inst.delta, 6)} × ${_enqNum(spot, 2)}`
+             + ` = ${_enqNum(inst.delta * spot, 2)}`);
+    if (inst.note) { L.push(''); L.push('  ' + inst.note); }
+    if (inst.warn) { L.push(''); L.push('  ⚠ ' + inst.warn); }
+    _enqPorFundo(L, porFundo);
+    return L.join('\n');
+  }
+
+  if (bucketKey === 'di') {
+    L.push(nm);
+    L.push('Futuro de DI (B3)');
+    L.push('');
+    push('vencimento', venc);
+    push('DU', String(inst.du ?? '—'));
+    push('taxa', inst.rate != null ? _enqNum(inst.rate, 4) + ' %   (PX_LAST, Bloomberg)' : '—');
+    L.push('');
+    L.push('  PU = 100.000 / (1 + taxa)^(DU/252)');
+    if (inst.rate != null && inst.du)
+      L.push(`     = 100.000 / (1 + ${_enqNum(inst.rate, 4)}%)^(${inst.du}/252) = ${_enqNum(inst.pu, 2)}`);
+    L.push('');
+    L.push('  exposição = qtd × PU   (nocional, sem delta: futuro tem delta 1)');
+    _enqPorFundo(L, porFundo);
+    return L.join('\n');
+  }
+
+  // Caixinha dólar: futuro (mini/cheio) ou opção de DOL.
+  L.push(nm);
+  L.push('Dólar — ' + (_ENQ_DOL_CAT[inst.category] || inst.category || '—'));
+  L.push('');
+  push('vencimento', venc);
+  // 4 casas: é cotação de câmbio (5,4321), e 2 esconderiam o movimento do dia.
+  push('preço', _enqNum(inst.px, 4) + (inst.category === 'option' ? '   (UCA — spot do dólar)' : ''));
+  push('tam. contrato', _enqNum(inst.mult, 0) + ' USD');
+  if (inst.category === 'option') push('delta', inst.delta != null ? _enqNum(inst.delta, 4) : '—');
+  L.push('');
+  L.push(inst.category === 'option'
+    ? '  exposição = delta × tam. contrato × spot × qtd'
+    : '  exposição = tam. contrato × preço × qtd');
+  if (inst.unit != null) L.push(`              por contrato: ${_enqNum(inst.unit, 2)}`);
+  _enqPorFundo(L, porFundo);
+  return L.join('\n');
 }
+
 
 // Colunas = união dos ativos entre os fundos, por caixinha; ordenadas por DU (DI) / ref.
 function _enqInstCols(funds, bucketKey) {
@@ -973,8 +1131,21 @@ function _enqInstCols(funds, bucketKey) {
     }
   }
   const arr = [...seen.entries()].map(([ck, inst]) => ({ ck, inst }));
-  arr.sort((a, b) => ((a.inst.du ?? 1e9) - (b.inst.du ?? 1e9)) || String(a.ck).localeCompare(String(b.ck)));
-  return arr.map(({ ck, inst }) => ({ ck, label: _enqInstLabel(bucketKey, inst), title: _enqInstTitle(bucketKey, inst) }));
+  // Opção de IDI não tem `du` (tem `bd`); sem isto ela cairia no fim, longe do vértice de DI
+  // do mesmo prazo — que é justamente com o que a mesa a compara.
+  const _ord = i => i.du ?? i.bd ?? 1e9;
+  arr.sort((a, b) => (_ord(a.inst) - _ord(b.inst)) || String(a.ck).localeCompare(String(b.ck)));
+  return arr.map(({ ck, inst }) => {
+    const porFundo = [];
+    for (const f of funds) {
+      const bk = (f.buckets || []).find(b => b.key === bucketKey);
+      const i = ((bk && bk.instruments) || []).find(x => (x.instrument_reference || x.instrument_name) === ck);
+      if (!i || !i.final_qty) continue;     // fundo sem a linha, ou zerado nela
+      porFundo.push({ label: fundLabelMesa(f.fund_label), qty: i.final_qty, exp: i.exp,
+                      pct: (i.exp != null && f.nav) ? i.exp / f.nav : null });
+    }
+    return { ck, label: _enqInstLabel(bucketKey, inst), info: _enqInfoPanel(bucketKey, inst, porFundo) };
+  });
 }
 
 // Célula (fundo × ativo): % do NAV em cima, (quantidade final) embaixo. lb = borda de início do grupo.
@@ -983,7 +1154,11 @@ function _enqMatrixCell(inst, nav, lb) {
   if (!inst) return `<td class="num" style="${bl}color:var(--text-muted)">—</td>`;
   const pctStr = (inst.exp != null && nav) ? fmtPct(inst.exp / nav) : '—';
   const qty = Math.round(inst.final_qty || 0).toLocaleString('pt-BR');
-  return `<td class="num" style="${bl}">${pctStr}<br><span style="font-size:11px;color:var(--text-muted)">(${qty})</span></td>`;
+  /* ⛔ SEM `title=`: a aritmética daquele fundo (qtd → exposição → % do NAV) mora no painel do
+     ⓘ do cabeçalho, na seção "por fundo". Eram dois tooltips para o mesmo ativo — a janela
+     estilizada e o balão nativo do SO —, e o nativo ainda era o único com o delta na conta. */
+  return `<td class="num" style="${bl}">${pctStr}`
+       + `<br><span style="font-size:11px;color:var(--text-muted)">(${qty})</span></td>`;
 }
 
 let enqDiTarget = 0.80;   // target de reenquadramento da caixinha DI (default 80% do NAV)
@@ -1051,9 +1226,21 @@ function renderEnquadramentoRF(data) {
   // Cabeçalho: linha 1 = grupos (caixinhas); linha 2 = ativos + Total por grupo.
   const grpHead = cols.map(c =>
     `<th class="num" colspan="${c.insts.length + 1}" style="border-left:2px solid var(--border)">${c.label}</th>`).join('');
+  // ⓘ por ativo, com a conta aberta (`_enqInfoPanel`). ⚠️ O painel tem ~420px e o `.jgp-info`
+  // abre ancorado à ESQUERDA: nas colunas da metade direita isso o jogaria para fora da tela,
+  // então ali ele inverte (`.rt`, ancorado à direita). O corte é pela posição da coluna no
+  // cabeçalho INTEIRO, não dentro da caixinha — o que decide é a borda da janela.
+  const _nInst = cols.reduce((a, c) => a + c.insts.length, 0);
+  let _iCol = 0;
   const instHead = cols.map(c =>
-    c.insts.map((ic, j) =>
-      `<th class="num"${j === 0 ? ' style="border-left:2px solid var(--border)"' : ''} title="${ic.title}">${ic.label}</th>`).join('')
+    c.insts.map((ic, j) => {
+      const rt = (_iCol++) >= _nInst / 2 ? ' rt' : '';
+      /* ⛔ SEM `title=` aqui. Com os dois, o browser desenhava a janela do ⓘ E o balão nativo
+         do SO por cima dela — e o balão nativo herdava do <th>, então aparecia inclusive ao
+         passar o mouse no próprio ⓘ. A janela do ⓘ é a única, e traz tudo. */
+      return `<th class="num"${j === 0 ? ' style="border-left:2px solid var(--border)"' : ''}>`
+        + `${ic.label} <span class="jgp-info${rt}" data-info="${_escHtml(ic.info)}">&#9432;</span></th>`;
+    }).join('')
     + `<th class="num" style="border-left:1px solid var(--border);font-weight:700">Total</th>`).join('');
 
   const body = funds.map(f => {

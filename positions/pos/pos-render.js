@@ -749,6 +749,28 @@ const _netAreaOf    = r => (_NET_REAL_AREAS.has(r.area) ? r.area : (r.net_area ?
 const _netSubareaOf = r => (_NET_REAL_AREAS.has(r.area) ? r.subarea : (r.net_subarea ?? r.subarea));
 
 const POS_NET_GROUPS = [
+  /* ☠️ **PRIMEIRO do array, e a ordem é a prioridade de match.** Dois motivos, e o 2º
+     só apareceu porque aconteceu: (a) opção de DI e DI seco têm a MESMA sub-área
+     (`Fixed Rates Brazil`), então sem este balde à frente do `di` a opção cai no DI seco;
+     (b) uma digital boletada em `Currencies` — que é como a `Digital Copom` apareceu em
+     04/11/2026, por engano de estratégia — casaria no `fx` antes de chegar aqui e sairia
+     no chip de CÂMBIO. Opção de DI é opção de DI independentemente do cadastro, mesma
+     lição do check de mandato.
+     ⭐ **E não é arrumação: são UNIDADES diferentes** (pedido da mesa, 05/11/2026: *"separe o
+     que é exposição de DI e o que é % de prêmio em opções de DI (digitais e IDIs)"*). O DI
+     seco entra em `nominal` — PL por 100bp — e a opção em `pct`, o prêmio em % do NAV. São
+     respostas a perguntas diferentes ("quanto ando se a taxa mexe 1%" × "quanto tenho
+     arriscado em prêmio"), e no mesmo chip saíam lado a lado separadas por um `·` como se
+     fossem duas metades do mesmo número.
+     ⚠️ A regra de quem é "opção de DI" vem CARIMBADA do backend (`premio_juros_br`, de
+     `instruments.is_premio_juros_br`): o fallback por nome existe só para payload antigo e
+     snapshot estático, e não deve virar a fonte — duas definições divergem na 3ª família. */
+  { id: 'diopt', sort: 10.5, sub: () => 'DI Opçs',
+    tip: 'Opções de DI — digitais de COPOM e opções de IDI. O número é o PRÊMIO em % do NAV (qtd × prêmio), não sensibilidade a taxa: por isso sai do chip DI, que é PL por 100bp. Somar os dois não mede nada.',
+    match: r => (r.premio_juros_br === true
+                 || /^IDIX9/i.test(String(r.instrument_name ?? '').trim())
+                 || String(r.instrument_name ?? '').toLowerCase().includes('digital copom')) },
+
   { id: 'fx', sort: 30, sub: _netFxPair, legs: _netFxLegs, subRank: _netFxRank,
     tip: 'Moedas, todas em PARES CONTRA O DÓLAR (convenção de mercado: USDBRL, USDMXN, EURUSD…). Um cross vira dois pares: EURBRL vendido 4% = EURUSD −4% e USDBRL −4%. Futuro cheio/mini, opção de DOL BMF, opção USDBRL e spot/fwd/NDF entram como USDBRL (recorte do isUsdBrlDollarRow).',
     match: r => _dollarKind(r) != null || r.is_fx || r.option_subtype === 'fx' || _netAreaOf(r) === 'Currencies' },
@@ -761,7 +783,7 @@ const POS_NET_GROUPS = [
     match: _netIsCds },
 
   { id: 'di', sort: 10, sub: () => 'DI',
-    tip: 'Sub-área Fixed Rates Brazil — o mesmo recorte que o regime de DV01 usa para o DI (positions/pricing/dv01.py).',
+    tip: 'DI seco — futuro e swap da sub-área Fixed Rates Brazil, o mesmo recorte que o regime de DV01 usa (positions/pricing/dv01.py). Opção de DI (digital de COPOM, IDI) sai no chip "DI Opçs" ao lado, porque lá o número é prêmio e aqui é PL por 100bp.',
     match: r => _netSubareaOf(r) === 'Fixed Rates Brazil' },
   { id: 'jurosoff', sort: 11, sub: () => 'Juros off',
     tip: 'Resto da área Rates: juros de fora do Brasil (Fixed Rates G7 e demais sub-áreas).',
@@ -888,7 +910,7 @@ function renderNetSummary(rows) {
     const _ownTxt = a.ownLabel || (rfc?.nav_fund ?? 'fundo que detém o veículo offshore');
     const _navNum = a.ownNav ?? rfc?.nav;
     const navTxt = a.owner
-      ? `\n\n⚠ Posição do ${a.owner} no sleeve de RF. O % é fração do NAV do `
+      ? `\n\n⚠ Posição de ${a.owner} espelhada no veículo do RF. O % é fração do NAV do `
         + `${_ownTxt}`
         + (_navNum != null ? ` (USD ${Number(_navNum).toLocaleString('en-US', {maximumFractionDigits: 0})})` : '')
         + ` — NÃO do NAV desta aba. Por isso o chip é separado: os dois não se somam.`
@@ -915,7 +937,7 @@ function renderTable(rows, tbodyId) {
   const netEl = document.getElementById(tbodyId.replace(/^body_/, 'netsum_'));
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${body.closest('table')?.querySelector('thead tr')?.childElementCount ?? 12}" class="no-data">Nenhuma posição encontrada.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${body.closest('table')?.querySelector('thead tr')?.childElementCount ?? 13}" class="no-data">Nenhuma posição encontrada.</td></tr>`;
     if (netEl) netEl.innerHTML = '';   // senão a tira do render anterior fica mentindo
     if (typeof syncHideZeroBtn === 'function') syncHideZeroBtn(tbodyId, []);
     return;
@@ -992,7 +1014,7 @@ function renderTable(rows, tbodyId) {
              .join('\n').replace(/"/g, '&quot;')}">⚡ </span>`
       : '';
     const slvCls = typeof sleeveRowClass === 'function' ? sleeveRowClass(r) : '';
-    const slvTtl = slvCls ? ` — ${r.trader} (sleeve de RF)` : '';
+    const slvTtl = slvCls ? ` — ${r.trader} (trader de MM, espelhado no RF)` : '';
     return `<tr class="${rowClass} ${areaClass} ${tradedClass}${slvCls}" data-ref="${refCopy}" style="cursor:pointer" title="Clique para copiar a referência${slvTtl}" onclick="copyRowRef(this)">
       ${killCell}
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>

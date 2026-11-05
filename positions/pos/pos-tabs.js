@@ -40,6 +40,12 @@ function activateTab(key) {
     else                                          renderUsdbrlChip(null);
   }
   if (typeof simSync === 'function') simSync();   // abas de dólar/rolagem: inativa a simulação
+  // ⚠️ A faixa de atalho é POR ABA (`data-scope`): a aba que estava escondida não tinha
+  // seção VISÍVEL para o editorial.js varrer (`offsetParent === null`), então a faixa dela
+  // nasce vazia e só tem o que listar depois da troca. Sem este refresh o atalho aparece
+  // em branco na 1ª vez que se abre a aba — e enche sozinho no primeiro resize, que é o
+  // tipo de bug que se lê como "às vezes não aparece".
+  if (window.JGPSecNav) window.JGPSecNav.refresh();
 }
 
 // Listener delegado único. #tabbar existe (scripts no fim do <body>); ausente no snapshot.
@@ -50,6 +56,20 @@ function activateTab(key) {
     const btn = e.target.closest('.tabbtn');
     if (btn && bar.contains(btn)) activateTab(btn.dataset.tab);
   });
+
+  /* Publica a altura da tabbar para o atalho de seções se ancorar ABAIXO dela — são três
+     barras fixas empilhadas (navbar global → esta → atalho) e o CSS em positions.html soma
+     as três. Via ResizeObserver e não só no `load`: em tela estreita a tabbar quebra de
+     linha (são 10 abas) e a faixa de seções ficaria POR BAIXO dela — mesmo sintoma que o
+     nav.js já trata na navbar global. O `+3` casa o `top: calc(var(--jgp-nav-h) + 3px)`
+     da `.tabbar` no CSS. */
+  const pubTabbarH = () => {
+    document.documentElement.style.setProperty('--jgp-tabbar-h', (bar.offsetHeight + 3) + 'px');
+    if (window.JGPSecNav) window.JGPSecNav.refresh();
+  };
+  pubTabbarH();
+  if (window.ResizeObserver) new ResizeObserver(() => requestAnimationFrame(pubTabbarH)).observe(bar);
+  window.addEventListener('resize', pubTabbarH, { passive: true });
 })();
 
 function showTraderTab(tabId) {
@@ -551,10 +571,15 @@ function _renderSectionsForTab(tabId, allRows) {
   // `typeof` porque o snapshot estático não carrega o pos-fxlegs.js.
   if (typeof renderFxSectionsForTab === 'function') renderFxSectionsForTab(tabId);
 
-  /* Painel de DERIVA DO ALVO do sleeve de RF — topo da aba, antes de tudo.
-     ⚠️ ANTES do early return de "sem posição" e sem depender de `rfCfg.n_rows`: ele é sobre
-     os NAVs, e o estado em que ele mais importa é justamente o de zero linha boletada (antes
-     da 1ª boleta, ou num dia parado), quando a mesa pergunta se a proporção ainda vale. */
+  /* ⚰️ Aqui ficava o painel de DERIVA DO ALVO do sleeve de RF (`renderRfTargetBanner`), que
+     propunha trocar a constante do alvo quando os NAVs andassem. Saiu em 05/11/2026, quando o
+     alvo passou a ser DERIVADO dos NAVs a cada request — não há mais o que trocar; ver o ⚰️
+     em pos-fundtables.js. O que roda daqui para baixo são os ALERTAS (container ACIMA da
+     Posição) e o painel de REGRAS (container DEPOIS dela).
+     ⚠️ Os dois são montados ANTES do early return de "sem posição" e sem depender de
+     `rfCfg.n_rows`: as regras são sobre os NAVs, e o estado em que elas mais importam é
+     justamente o de zero linha boletada (antes da 1ª boleta, ou num dia parado), quando a
+     mesa pergunta se a proporção ainda vale. */
   /* ⛔ Alerta de ESCOPO primeiro — posição que não deveria existir vem antes de qualquer
      conversa sobre proporção. Silencioso quando não há nada fora. */
   /* ⛔ E antes de tudo o DÓLAR NO FUNDO ERRADO (29/10/2026): dólar direcional só pode estar
@@ -581,12 +606,29 @@ function _renderSectionsForTab(tabId, allRows) {
   const _regrasEl = document.getElementById(`rfRegrasContainer-${tabId}`);
   if (_regrasEl) _regrasEl.innerHTML = _regrasHtml;
 
-  const rfBanner = ((typeof renderDolarFundoAlerta === 'function' && hasFundBreak)
+  /* ── ALERTAS — o único conteúdo ACIMA da Posição (05/11/2026, pedido da mesa) ──────
+     *"acima da posição, só quero que você destaque os ERROS, quando houver, de forma bem
+     chamativa"*. Eles iam no meio do `posContainer`, abaixo do título e da barra de filtros,
+     e disputavam o topo com o painel de REGRAS — que agora desceu para depois da Posição.
+     ⭐ **Silêncio é o estado normal**: sem erro nada é renderizado e a aba abre direto na
+     Posição. É isso que autoriza o tom alto quando algo aparece — faixa que sai todo dia
+     ensina a mesa a pular. */
+  const rfAlertas = ((typeof renderDolarFundoAlerta === 'function' && hasFundBreak)
                       ? renderDolarFundoAlerta(data, displayRows) : '')
     + ((typeof renderPrfEscopoAlerta === 'function') ? renderPrfEscopoAlerta(data) : '')
-    + ((typeof renderRfEscopoAlerta === 'function') ? renderRfEscopoAlerta(rfCfg) : '')
+    // ⚠️ Boleta na área errada: DEPOIS do mandato, porque é menos grave — lá a posição
+    // não pode existir no fundo; aqui ela pode, só está lançada no lugar errado.
+    + ((typeof renderPrfAreaDivergenteAlerta === 'function') ? renderPrfAreaDivergenteAlerta(data) : '')
+    + ((typeof renderRfEscopoAlerta === 'function') ? renderRfEscopoAlerta(rfCfg) : '');
+
+  const _alertEl = document.getElementById(`rfAlertContainer-${tabId}`);
+  if (_alertEl) _alertEl.innerHTML = rfAlertas;
+
+  /* ⚠️ FALLBACK, não 2º layout: sem os containers dedicados (aba do próprio trader de MM,
+     snapshot estático) tudo volta ao fluxo antigo, dentro do `posContainer`. */
+  const rfBanner = (_alertEl ? '' : rfAlertas)
     + ((_regrasEl && _regrasHtml) ? ''
-        : (typeof renderRfTargetBanner === 'function') ? renderRfTargetBanner(rfCfg, data) : '');
+        : (typeof renderRfRegrasPanel === 'function') ? (renderRfRegrasPanel(data, rfCfg) || '') : '');
   /* Check do câmbio LINEAR, por moeda. Vai no FIM da aba e COLAPSADO (pedido da mesa):
      a leitura do dia a dia é a tabela de posição. O veredito fica no título do card, que
      continua visível fechado — ver `renderRfCcyCheck`. */

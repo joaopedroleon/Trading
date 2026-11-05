@@ -664,20 +664,23 @@ html.theme-v2 .net-summary:empty { display: none; }
 /* ═══ Célula de CHECK — o veredito tem de saltar à vista (08/10/2026) ════════════════════
    Os checks eram um ✓ de 13px na cor do texto, perdido numa tabela de 12 colunas de números.
    A mesa pediu destaque: aqui eles viram **bloco de cor** — fundo tingido na célula inteira,
-   glifo maior e em negrito. Vale para TODOS (`Check Prev`, `Check Boleta`, `% Alloc Final`,
-   `Check RF`), nas duas famílias de tabela: `.data-table` e `.jgp-tbl`.
+   glifo maior e em negrito. Vale para TODOS (`Check Prev`, `Check Boleta`, `Check RF`), nas
+   duas famílias de tabela: `.data-table` e `.jgp-tbl`.
 
-   ☠️ **FICA NO FIM DO ARQUIVO, e com 4 classes no seletor — é briga de ESPECIFICIDADE.**
+   ☠️ **VEM DEPOIS DA ZEBRA, e com 4 classes no seletor — é briga de ESPECIFICIDADE.**
    A zebra da `.jgp-tbl` pinta o `td`, não o `tr`:
        html.theme-v2 .jgp-tbl tbody tr:nth-child(even):not(.grp) td   → (0,3,4)
    e a 1ª versão daqui era `html.theme-v2 .jgp-tbl td.check-cell` → (0,3,2): mesmo nº de
    classes, menos elementos ⇒ **a zebra vencia**. Sintoma medido na "Posição por moeda" do
    PAbinader: EUR e USD (linhas ímpares) saíam verdes e o **AUD, par, saía sem fundo** —
    `backgroundColor` do `<td>` = `rgb(250,250,247)`, a cor da zebra. Lido na tela parecia
-   check de outro tipo. Hoje são 4 classes (0,4,4) e o bloco é o ÚLTIMO do arquivo, então
-   também vence o `tr.tot.tot-sub td` (0,4,4) no desempate por ordem.
+   check de outro tipo. Hoje são 4 classes (0,4,4), e o bloco tem de vir DEPOIS do bloco da
+   `.jgp-tbl` e do `tr.tot.tot-sub td` (0,4,4) — é no desempate por ordem que ele vence este
+   último. Essa é a dependência real; já esteve no FIM do arquivo e hoje há blocos depois
+   dele (`.ed`, `#rfAlertContainer-*`), nenhum casando `td.check-cell`.
    ⚠️ Mexer na ordem deste bloco, ou tirar uma classe do seletor, traz o bug de volta — e ele
-   volta CALADO, numa linha sim e noutra não.
+   volta CALADO, numa linha sim e noutra não. Bloco novo que pinte `td` de tabela vai DEPOIS
+   deste só se não casar `.check-cell`.
 
    ⚠️ O fundo é `color-mix(… , transparent)`, não cor chapada: assim ele se compõe com a
    zebra e com o tom da linha do sleeve, em vez de apagá-los.
@@ -737,3 +740,36 @@ html.theme-v2 .ed {
   background: rgba(201, 162, 39, .10) !important;
   border-color: rgba(201, 162, 39, .55) !important;
 }
+
+
+/* ═══ ALERTAS do topo da aba de RF — e o tom alto é CALIBRADO, não enfeite ═══
+   ⭐ Pedido da mesa (05/11/2026): *"acima da posição, só quero que você destaque os ERROS,
+   quando houver, de forma bem chamativa"*. O container (`#rfAlertContainer-*`) fica VAZIO no
+   dia normal — e é só isso que torna legítimo gritar quando ele enche: faixa que aparece
+   todos os dias vira moldura e a mesa aprende a pular. Se um dia algum destes alertas passar
+   a ser rotineiro, o conserto é no ALERTA, não neste CSS.
+   ⚠️ Duas gravidades, duas cores, e a diferença importa: **vermelho** = posição que não
+   pode existir ali (mandato, dólar no fundo errado, fora do escopo do veículo); **âmbar** =
+   a posição pode existir, só foi lançada na área errada. Achatar as duas no mesmo vermelho
+   faria a mesa tratar um erro de cadastro como quebra de mandato.
+   ☠️ `box-shadow` em vez de `outline`/borda grossa nos 4 lados: a borda ESQUERDA de 4px é a
+   assinatura dos alertas da tela e some num `border` uniforme. */
+#rfAlertContainer-portfoliorf > .card {
+  /* ⚠️ A borda esquerda colorida vem INLINE de cada alerta (`border-left:4px solid
+     var(--red|--yellow)`), e inline ganha de regra — não adianta engrossá-la daqui. O que
+     esta regra acrescenta é o que não conflita: sombra, respiro e corpo do título.
+     ⚠️ Sombra NEUTRA (e não avermelhada): ela vale para os dois tons, e um halo vermelho
+     sob a faixa âmbar apagaria justamente a distinção de gravidade entre as duas. */
+  box-shadow: 0 2px 12px rgba(20, 30, 60, .22);
+  margin-bottom: 10px;
+  padding: 12px 16px;
+}
+/* Título do alerta em bloco: ele é a única linha que tem de ser lida de longe.
+   ⚠️ O TAMANHO mora no `style=` de cada alerta (hoje 15px), não aqui — inline vence regra,
+   e um `font-size` nesta regra seria letra morta (foi, entre 05/11 e a revisão do mesmo dia).
+   Vale também porque o alerta pode cair no fluxo antigo, fora deste container. */
+#rfAlertContainer-portfoliorf > .card b:first-of-type {
+  display: inline-block; letter-spacing: .3px; margin-bottom: 3px;
+}
+/* Respiro entre o último alerta e o título "Posição" — colado, o h2 parece legenda da faixa. */
+#rfAlertContainer-portfoliorf:not(:empty) { display: block; margin-bottom: 16px; }
