@@ -662,6 +662,11 @@ function _renderSectionsForTab(tabId, allRows) {
     const titleId  = hasAlloc ? `id="sec_title_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}_MM"` : '';
     const bodyWrapId = `mmPrev_wrap_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}`;
     const hasFund  = hasFundBreak && s.group === 'Todos';
+    /* Legenda do fundo azul: só na seção que DE FATO recebeu linhas do sleeve — o card de
+       MM Prev e as seções sem mescla não têm linha azul a explicar. */
+    const temSleeveAqui = !!rfMergeInto && !isRfSleeve
+                       && sectionRows(s).some(r => r.group === rfGroupId);
+    const donoSleeve = (rfCfg?.traders ?? []).join(' · ') || 'sleeve de RF';
 
     if (isMmPrev) {
       (prevContainer ? prevCards : mainCards).push(`
@@ -749,6 +754,23 @@ function _renderSectionsForTab(tabId, allRows) {
             ${thead()}
             <tbody id="${sectionBodyId(s)}"></tbody>
           </table>
+          ${temSleeveAqui ? `<!-- ⭐ Legenda do fundo azul (05/11/2026, pedido da mesa). A linha
+               do sleeve já tem selo do dono NELA, mas a tira de cor é o que se vê de longe e
+               nada dizia o que ela significa.
+               ⚠ **Fora do print** (data-html2canvas-ignore), por pedido: a imagem vai para
+               quem já sabe de quem é o livro, e a nota comeria altura em toda cópia.
+               ⚠ width:0 + min-width:100% é a mesma trava do .jgp-tbl-note e da .net-summary:
+               o alvo do print é fit-content, e um texto mais largo que a tabela ditaria a
+               largura do pai. Aqui ele está ignorado na captura, mas a trava vale para a TELA
+               (senão a nota estica o card e a auxiliar desce de linha sem precisar).
+               (Sem crase neste comentário: ele vive dentro de um template literal.) -->
+          <div data-html2canvas-ignore="true" style="width:0;min-width:100%;margin-top:6px;
+               font-size:11px;color:var(--text-muted);white-space:normal">
+            <span style="display:inline-block;width:9px;height:9px;vertical-align:middle;
+                  border-left:3px solid color-mix(in srgb, var(--accent) 55%, var(--bg-card));
+                  background:color-mix(in srgb, var(--accent) 4%, var(--bg-card))"></span>
+            ${_escHtml(donoSleeve)} · demais linhas: ${_escHtml(tab?.trader ?? 'PortfolioRF')}
+          </div>` : ''}
         </div>
         ${hasAlloc ? `<div id="alloc_outer_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}" data-html2canvas-ignore="true" style="flex-shrink:0">
           <div id="alloc_spacer_${s.trader.replace(/[^a-zA-Z0-9]/g,'_')}"></div>

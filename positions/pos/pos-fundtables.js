@@ -655,38 +655,99 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
     }
     const pair = String(row.instrument_name ?? '').toUpperCase();
     const [base, quote] = pair.split('/').map(x => (x || '').trim());
-    const legs = (c?.linhas ?? []).filter(l => l.ccy === base || l.ccy === quote);
-    const mat  = legs.filter(l => l.ratio != null);
+    const legs  = (c?.linhas ?? []).filter(l => l.ccy === base || l.ccy === quote);
+    // ⚠ O USD fica fora de qualquer veredito: é o numerário dos dois NAVs (ver a tabela).
+    const uteis = legs.filter(l => !l.numerario);
+    const mat   = legs.filter(l => l.ratio != null && !l.mm_pequeno);
+    const eLin  = rfAllocEval(mmQty, rfQty, cfg, row);
+
+    /* ⭐ **O tooltip diz UMA coisa por caso** (05/11/2026, pedido da mesa) — ele vinha com
+       três parágrafos de doutrina sobre por que a régua do câmbio é a moeda, e o que a mesa
+       precisa ler é uma frase: **este vértice está na proporção**, ou **não está mas o
+       agregado da(s) moeda(s) do par fechou**, ou **nem um nem outro**. O "porquê" da régua
+       mora no cabeçalho da coluna e na tabela do topo da aba. */
+    const _mat  = row.maturity
+      ? ' ' + String(row.maturity).slice(0, 10).split('-').reverse().join('/') : '';
+    const _vert = pair + _mat;
+    const _linTxt = eLin.allocPct != null
+      // `fmtFinalQtyTxt(0)` sai "—", e "RF — ÷ MM 9.336.765" lê-se como dado faltando em vez
+      // de posição zerada, que é justamente o fato que esta linha está afirmando.
+      ? `  este vértice:  RF ${Math.abs(rfQty ?? 0) > 0 ? fmtFinalQtyTxt(rfQty) : 'zero'}`
+        + ` ÷ MM ${fmtFinalQtyTxt(mmQty)}`
+        + ` = ${fmtPct(eLin.allocPct)}  ·  alvo ${fmtPct(eLin.allocTarget)}`
+      : '  este vértice:  sem contraparte no MM para medir sozinho';
+    /* O agregado de CADA moeda do par, uma linha por moeda, com o veredito ao lado — é ele
+       que sustenta o "foi conferido no agregado" da frase de cima. */
+    const _aggTxt = uteis.map(l => {
+      // ⚠ "zerada" seria forte demais: o critério é estar abaixo do piso dos DOIS lados
+      // (hoje US$ 200 mil no MM e US$ 8.883 no RF), e o AUD tem 3,7 mil lá — é resíduo.
+      const v = l.veredito === 'ok_residuo' ? '✓ resíduo nos dois lados — nada a espelhar'
+        : l.veredito === 'rf_sem_par'       ? '⛔ o RF carrega e o MM não'
+        : l.ratio == null                   ? '— sem denominador'
+        : `${fmtPct(l.ratio)}  ·  alvo ${fmtPct(alvoExp)}  `
+          + (rfAllocClass(l.ratio, alvoExp) === 'alloc-ok' ? '✓' : '⚠');
+      return `  agregado ${l.ccy}:  ${v}`;
+    }).join('\n');
+    const _rodape = '\n\nDetalhe em "Exposição por moeda", no topo da aba.';
+
+    /* ☠️ **1º o erro sem absolvição possível: RF com a moeda, MM sem.** Vem ANTES da régua da
+       linha porque a linha só absolve — e absolver também é decidir. O MM pode ter uma LINHA
+       grande numa moeda cujo NET é ~0 (o `EUR/USD` de −548.964 convive com o `EUR/AUD` de
+       +5.941.164), e aí um RF espelhando esse vértice em 4,4 % exatos diria ✓ carregando euro
+       que o MM não tem. Mesma regra do dólar direcional: presença de posição onde ela não
+       deveria existir não tem faixa de tolerância. */
+    if (uteis.some(l => l.veredito === 'rf_sem_par')) {
+      return `<td class="check-cell alloc-bad" title="${_escHtml(
+        `⛔ ${_vert} NÃO está na proporção correta no RF — e o agregado da moeda também não: `
+        + 'o RF carrega moeda que o book de MM não tem, então não há alocação a espelhar.'
+        + `\n\n${_linTxt}\n${_aggTxt}` + _rodape)}">s/ par ⛔</td>`;
+    }
+
+    /* ⭐ **2º a PRÓPRIA LINHA (vértice+cross).** Batendo, o número que a mesa quer é o DELA —
+       o mais específico que a tela tem a dizer, e não a fatia do balde, que mistura todos os
+       pares daquela moeda. ⚠ Ela só ABSOLVE: linha fora de proporção não é evidência de erro
+       em câmbio (o mesmo euro é montado com pares diferentes em cada livro) — cai para o balde. */
+    if (eLin.allocPct != null && eLin.allocTarget
+        && rfAllocClass(eLin.allocPct, eLin.allocTarget) === 'alloc-ok') {
+      const dppL = (eLin.allocPct - eLin.allocTarget) * 100;
+      return `<td class="check-cell alloc-ok" title="${_escHtml(
+        `✓ ${_vert} está na proporção correta no RF.`
+        + `\n\n${_linTxt}  (${dppL >= 0 ? '+' : ''}${
+            dppL.toLocaleString('en-US', {maximumFractionDigits: 2})}pp)` + _rodape)}">${
+        _vere(eLin.allocPct, '✓')}</td>`;
+    }
+
+    // 3º o BALDE da moeda. Sem denominador firme em nenhuma perna o estado é "zerada nos dois
+    // lados" — o `rf_sem_par`, que é o outro jeito de não ter denominador, já saiu lá em cima.
     if (!mat.length) {
-      return muted('—', `Câmbio linear: o check é por MOEDA, no agregado.\n\n`
-        + `${base}/${quote} não tem exposição material no MM para servir de denominador `
-        + `(piso de US$ ${Number(c?.min_usd ?? 200000).toLocaleString('en-US')}).\n\n`
-        + 'Ver a tabela "Exposição por moeda" no topo da aba.');
+      if (!uteis.length) return muted('—', 'Par sem moeda conferível (só a perna de USD, que '
+        + 'é o numerário dos dois NAVs e fica fora do veredito).');
+      return `<td class="check-cell alloc-ok" title="${_escHtml(
+        `✓ ${_vert} não está na proporção vértice a vértice — mas foi conferido o agregado: as `
+        + 'moedas do par estão em resíduo nos dois lados (no MM o net se cancela entre pares), '
+        + 'então não há exposição a espelhar.'
+        + `\n\n${_linTxt}\n${_aggTxt}` + _rodape)}">OK ✓</td>`;
     }
     const pior = mat.reduce((a, b) =>
       Math.abs(b.ratio / alvoExp - 1) > Math.abs(a.ratio / alvoExp - 1) ? b : a);
     const cls  = rfAllocClass(pior.ratio, alvoExp);
-    const det  = legs.map(l => l.ratio != null
-      ? `  ${l.ccy}: RF ${fmtPct(l.rf_pct)} do NAV do RF ÷ MM ${fmtPct(l.mm_pct)} do NAV do MM = ${fmtPct(l.ratio)}`
-      : `  ${l.ccy}: sem exposição material no MM — não afirmado`).join('\n');
     /* ☠️ **O número impresso NÃO é o `ratio` que decide o veredito.** O `ratio` é razão de
-       EXPOSIÇÃO (cada lado sobre o SEU NAV) e vale contra os 10 %; esta coluna tem os 4,5 %
-       no cabeçalho, então imprimi-lo aqui seria oferecer um número para ser lido contra o
-       alvo errado — medido: 18,6 % de exposição são ~8,4 % de nocional. O que a coluna mostra
-       é a fatia NOMINAL (`rf_usd ÷ mm_usd`), a mesma pergunta das outras duas réguas. O
-       veredito e o tooltip seguem na unidade de exposição, que é a da regra. */
+       EXPOSIÇÃO (cada lado sobre o SEU NAV) e vale contra os 10 %; esta coluna tem o alvo da
+       boleta no cabeçalho, então imprimi-lo aqui seria oferecer um número para ser lido contra
+       o alvo errado — medido: 18,6 % de exposição são ~8,4 % de nocional. O que sai é a fatia
+       NOMINAL (`rf_usd ÷ mm_usd`), a mesma pergunta das outras réguas da coluna. */
     const fatia = _share(pior.rf_usd, pior.mm_usd);
-    const tip = `CÂMBIO LINEAR — o check é por MOEDA, não por instrumento: o mesmo ${base} é `
-      + `montado com pares diferentes em cada livro.\n\nAlvo: ${fmtPct(alvoExp)} de EXPOSIÇÃO.\n${det}\n\n`
-      + `O % na célula é a fatia NOMINAL em ${pior.ccy}: RF US$ ${
-          Math.round(pior.rf_usd ?? 0).toLocaleString('en-US')} ÷ MM US$ ${
-          Math.round(pior.mm_usd ?? 0).toLocaleString('en-US')} = ${
-          fatia != null ? fmtPct(fatia) : '—'} — a mesma pergunta das demais linhas da coluna, `
-      + `comparável ao alvo do cabeçalho. Quem decide o verde/amarelo aqui é a razão de `
-      + `exposição acima, contra ${fmtPct(alvoExp)}.\n\n`
-      + 'Tabela completa no topo da aba ("Exposição por moeda").';
-    return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
-      _vere(fatia, cls === 'alloc-ok' ? '✓' : '⚠')}</td>`;
+    /* ⭐ Dentro do alvo o balde diz "OK", não um %: chegar aqui significa que a LINHA não
+       fechou, então o % dela é justamente o que não bate e o do balde é de outra coisa.
+       Fora do alvo o % FICA — ali ele é a medida do desvio. */
+    return `<td class="check-cell ${cls}" title="${_escHtml(
+      (cls === 'alloc-ok'
+        ? `✓ ${_vert} não está na proporção vértice a vértice — mas foi conferido o agregado, `
+          + 'e as moedas do par estão batidas com o que deveriam ser.'
+        : `⚠ ${_vert} NÃO está na proporção correta no RF, e o agregado das moedas do par `
+          + 'também não está.')
+      + `\n\n${_linTxt}\n${_aggTxt}` + _rodape)}">${
+      cls === 'alloc-ok' ? 'OK ✓' : _vere(fatia, '⚠')}</td>`;
   }
 
   // ── o resto (opção incluída): linha a linha, pela QUANTIDADE ─────────────────────
@@ -1180,20 +1241,56 @@ function renderRfCcyCheck(cfg, tabId) {
         { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' + (v < 0 ? ')' : '');
   const col  = v => v == null ? '' : (v < 0 ? 'style="color:var(--red)"' : '');
 
+  /* ☠️ **O piso de US$ 200 mil NÃO esconde mais a razão** (05/11/2026, mesa: *"não quero que
+     esconda nada"*). Ele valia para a COLUNA e não valia para o AGREGADO, e a tela passava a
+     dizer duas coisas opostas sobre a mesma moeda: "— resíduo de rolagem" na linha, peso cheio
+     no total. Medido no dia: o EUR (73,6 k no MM, abaixo do piso) levava o agregado de 10,6%
+     para **13,4%** com todas as linhas visíveis em verde. Hoje a razão sempre sai, a linha
+     pequena ganha o selo `peq.` e o hover diz **quanto o total seria sem ela**. */
+  const aggEx = l => l.agg_ex != null
+    ? ` Sem esta moeda o agregado seria ${pct(l.agg_ex)} (hoje ${pct(c.gross?.ratio)}).` : '';
   const tr = c.linhas.map((l, i) => {
-    const mutedRow = (l.small || l.numerario) ? ' style="color:var(--text-muted)"' : '';
-    const rCls = l.ratio != null ? rfAllocClass(l.ratio, alvo) : '';
-    const rTxt = l.ratio != null ? pct(l.ratio)
+    /* ☠️ **Número sempre; COR só com denominador firme.** A 1ª versão desta mudança pintou a
+       moeda pequena com `rfAllocClass` e isso virou vermelho em livro BATIDO — com as pernas
+       do MM se cancelando entre pares o denominador colapsa, e aí a razão não mede alocação,
+       mede o resíduo. Quem aponta o problema aqui é a tira "Quem leva o agregado", que nomeia
+       a moeda em vermelho SEM precisar afirmar um veredito por linha. */
+    const mutedRow = l.numerario ? ' style="color:var(--text-muted)"' : '';
+    /* Três estados, e só o último usa a razão — o veredito vem pronto do backend
+       (`_rf_ccy_check`), para não haver duas definições de "batido" na tela e no servidor. */
+    const rCls = l.veredito === 'ok_residuo' ? 'alloc-ok'
+      : l.veredito === 'rf_sem_par' ? 'alloc-bad'
+      : (l.ratio != null && !l.mm_pequeno) ? rfAllocClass(l.ratio, alvo) : '';
+    /* O selo NOMEIA o estado em vez de dizer só "pequeno": com a célula verde e a razão em
+       −6,8% ao lado, "peq." não explicava por que a cor estava certa. */
+    const seloTxt = l.veredito === 'ok_residuo' ? 'batido'
+      : l.veredito === 'rf_sem_par' ? 's/ par no MM' : 'peq.';
+    const seloTip = l.veredito === 'ok_residuo'
+      ? `NET BATIDO: o MM tem só US$ ${Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')} `
+        + 'nesta moeda (as pernas se cancelam entre pares) e o RF também não a carrega — não há '
+        + 'exposição a espelhar, então ✓. A razão ao lado oscila muito com denominador perto de '
+        + 'zero e NÃO decide a cor.'
+      : l.veredito === 'rf_sem_par'
+      ? `SEM PAR NO MM: o MM tem só US$ ${Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')} `
+        + `nesta moeda e o RF carrega US$ ${Math.abs(Math.round(l.rf_usd)).toLocaleString('en-US')} `
+        + `(piso equivalente: US$ ${Math.round(c.rf_min_usd ?? 0).toLocaleString('en-US')}). `
+        + 'Não há alocação a espelhar — isto não é desvio de proporção, é posição sem origem.'
+      : `A perna do MM tem US$ ${Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')}, `
+        + `abaixo da régua de US$ ${Number(c.min_usd).toLocaleString('en-US')} que a casa usa para `
+        + '"posição de câmbio pequena": o denominador é pequeno, então a razão mexe muito com pouco.';
+    const selo = (l.ratio != null && l.mm_pequeno)
+      ? ` <span style="font-size:9px;font-weight:600;color:var(--text-muted)" title="${
+          _escHtml(seloTip + ' ⚠ Esta moeda entra no agregado em peso cheio.' + aggEx(l))
+        }">${seloTxt}</span>` : '';
+    const rTxt = l.ratio != null ? pct(l.ratio) + selo
       : `<span style="color:var(--text-muted)" title="${_escHtml(
           l.numerario
             ? 'O dólar é o NUMERÁRIO dos dois NAVs — "exposição a USD" não é risco aqui. E ela '
               + 'não pode espelhar: no MM o euro vem de EUR/AUD, que não toca o dólar, e no RF de '
               + 'EUR/USD + AUD/USD, cujas pernas de dólar se cancelam. A linha fica como informação, '
               + 'fora do veredito e fora do agregado.'
-            : l.small
-              ? `Abaixo de US$ ${Number(c.min_usd).toLocaleString('en-US')} nos dois lados — resíduo de rolagem. `
-                + 'A proporção aqui não diz nada, então não é afirmada.'
-              : 'Sem exposição material no MM para servir de denominador.')}">—</span>`;
+            : 'O MM não carrega esta moeda — sem denominador não há razão. ⚠ A posição do RF '
+              + 'continua entrando no agregado.' + aggEx(l))}">—</span>`;
     return `<tr class="${i % 2 === 0 ? 'group-odd' : 'group-even'}"${mutedRow}>
       <td><b>${l.ccy}</b></td>
       <td class="num" ${col(l.mm_usd)}>${usd(l.mm_usd)}</td>
@@ -1217,6 +1314,32 @@ function renderRfCcyCheck(cfg, tabId) {
     <td class="num"><b>${pct(g.rf_pct)}</b></td>
     <td class="num ${gCls}"><b>${pct(g.ratio)}</b></td>
   </tr>`;
+
+  /* ⭐ **Quem move o agregado** (05/11/2026). A pergunta da mesa foi literalmente "não entendi
+     essa conta estar apontando erro agora", com ZAR em 10,5% e MXN em 10,8% na tela e o total
+     em 13,4%: as duas moedas que respondiam estavam atrás de um "—". Esta tira decompõe o
+     total — para cada moeda, o agregado **sem ela** —, ordenada pelo tamanho do empurrão.
+     ⚠ Só aparece quando o agregado está FORA do alvo: um decompositório diário em dia
+     alinhado treina a mesa a não ler a tira (a mesma regra da faixa de erro do topo). */
+  const gOk = g.ratio != null && rfAllocClass(g.ratio, alvo) === 'alloc-ok';
+  const movs = (g.ratio == null || gOk) ? [] : c.linhas
+    .filter(l => !l.numerario && l.agg_ex != null)
+    .map(l => ({ ccy: l.ccy, ex: l.agg_ex, d: Math.abs(l.agg_ex - g.ratio),
+                 // "afasta" = tirar a moeda APROXIMA o total do alvo, logo é ela que empurra.
+                 afasta: Math.abs(l.agg_ex - alvo) < Math.abs(g.ratio - alvo) }))
+    // Quem EMPURRA primeiro, e dentro de cada grupo o de maior efeito: ordenar só pelo
+    // tamanho do efeito põe na frente a moeda grande e alinhada (tirar o ZAR mexe mais no
+    // total do que tirar o EUR), e o culpado cai para o meio da lista.
+    .sort((a, b) => (b.afasta - a.afasta) || (b.d - a.d));
+  const quemMove = !movs.length ? ''
+    : `<div style="font-size:11px;margin-top:6px;white-space:normal;max-width:620px">`
+      + `<b>Quem leva o agregado a ${pct(g.ratio)}</b> <span style="color:var(--text-muted)">`
+      + `— o total recalculado SEM cada moeda</span>: `
+      + movs.map(m => `<span style="color:${m.afasta ? 'var(--red)' : 'var(--text-muted)'}">`
+          + `sem ${m.ccy} → ${pct(m.ex)}</span>`).join(' · ')
+      + `. <span style="color:var(--text-muted)">Em vermelho, a moeda cuja saída APROXIMA o total `
+      + `do alvo de ${pct(alvo)} — é ela que está empurrando. Como o agregado soma MÓDULOS, `
+      + `posição em direção oposta à do MM não cancela: soma dos dois lados.</span></div>`;
 
   const foraTxt = Object.entries({ ...(c.fora?.mm ?? {}) })
     .map(([k, n]) => `${n}× ${k}`).join(' · ');
@@ -1291,7 +1414,7 @@ function renderRfCcyCheck(cfg, tabId) {
         </tr></thead>
         <tbody>${tr}${gTr}</tbody>
       </table>
-      ${nota}${semSpot}
+      ${quemMove}${nota}${semSpot}
       </div>
     </div>
   </div>`;

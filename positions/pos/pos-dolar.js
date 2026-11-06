@@ -949,6 +949,9 @@ const _ENQ_DOL_CAT = { mini: 'Mini (WDO)', cheio: 'Cheio (UC)', option: 'Opção
 // Rótulo curto do ativo (cabeçalho de coluna): tira o sufixo " Comdty"/" Curncy".
 function _enqInstLabel(bucketKey, inst) {
   const ref = inst.instrument_reference || '';
+  // ⚗ Ativo acrescentado na simulação: a referência é um id interno (`sim-1`), que não diz
+  // nada. O rótulo é o nome escolhido, com o frasco marcando que não é posição real.
+  if (inst._novo) return `⚗ ${inst.instrument_name || 'simulado'}`;
   // ☠️ Opção de IDI tem FIGI no `instrument_reference` (`BBG0210H1210`) — rótulo ilegível.
   // O nome é que carrega vencimento/tipo/strike, então o rótulo sai dele: `04/27 P566800`.
   if (inst.category === 'idi_option')
@@ -1050,6 +1053,28 @@ function _enqInfoPanel(bucketKey, inst, porFundo) {
   // 15: o rótulo mais longo é `tam. contrato` (13) — com padEnd(13) ele encostava no valor.
   const push = (k, v) => L.push('  ' + k.padEnd(15) + v);
 
+  if (inst._novo) {
+    L.push(`⚗ ${nm}`);
+    L.push('Ativo ACRESCENTADO na simulação — não está na carteira.');
+    L.push('');
+    if (inst.maturity) push('vencimento', venc);
+    if (inst.du != null) push('DU', String(inst.du));
+    if (inst.rate != null) push('taxa', _enqNum(inst.rate, 4) + ' %');
+    if (inst.px != null) push('preço', _enqNum(inst.px, 2));
+    if (inst.mult != null) push('tam. contrato', _enqNum(inst.mult, 0));
+    if (inst.spot != null) push('IDI spot', _enqNum(inst.spot, 2));
+    if (inst.delta != null) push('delta', _enqNum(inst.delta, 6) + '   (digitado)');
+    L.push('');
+    const u = inst.unit_per_delta != null
+      ? (inst.delta != null ? inst.delta * inst.unit_per_delta : null) : inst.unit;
+    L.push(inst.unit_per_delta != null
+      ? '  exposição = delta × nocional × qtd'
+      : '  exposição = qtd × exposição por contrato');
+    if (u != null) L.push(`              por contrato: ${_enqNum(u, 2)}`);
+    _enqPorFundo(L, porFundo);
+    return L.join('\n');
+  }
+
   if (inst.category === 'idi_option') {
     const spot = inst.spot, K = inst.strike, bd = inst.bd;
     L.push(nm);
@@ -1144,21 +1169,93 @@ function _enqInstCols(funds, bucketKey) {
       porFundo.push({ label: fundLabelMesa(f.fund_label), qty: i.final_qty, exp: i.exp,
                       pct: (i.exp != null && f.nav) ? i.exp / f.nav : null });
     }
-    return { ck, label: _enqInstLabel(bucketKey, inst), info: _enqInfoPanel(bucketKey, inst, porFundo) };
+    return { ck, label: _enqInstLabel(bucketKey, inst), info: _enqInfoPanel(bucketKey, inst, porFundo),
+             // ⚠️ `category`/`delta` sobem para o cabeçalho poder oferecer o campo de delta:
+             // ele é por ATIVO (uma coluna), não por fundo (uma célula).
+             category: inst.category, delta: inst.delta, bucket: bucketKey };
   });
 }
 
 // Célula (fundo × ativo): % do NAV em cima, (quantidade final) embaixo. lb = borda de início do grupo.
-function _enqMatrixCell(inst, nav, lb) {
+function _enqMatrixCell(inst, nav, lb, ctx) {
   const bl = lb ? 'border-left:2px solid var(--border);' : '';
-  if (!inst) return `<td class="num" style="${bl}color:var(--text-muted)">—</td>`;
+  // ⚠️ A tag vai na célula VAZIA também: em modo simulação o fundo pode receber quantidade
+  // num ativo que ele não tem hoje, e sem o alvo o refresh não teria onde escrever.
+  const tag = ctx ? ` data-enqpct="${_escHtml(`${ctx.bucket}|${ctx.ck}|${ctx.fund}`)}"` : '';
+  if (!inst) {
+    if (!(ctx && ctx.sim)) return `<td class="num" style="${bl}color:var(--text-muted)">—</td>`;
+    return `<td class="num" style="${bl}"><span${tag} style="color:var(--text-muted)">—</span>`
+         + `<br>${_enqSimQtyInput(ctx, null)}</td>`;
+  }
   const pctStr = (inst.exp != null && nav) ? fmtPct(inst.exp / nav) : '—';
   const qty = Math.round(inst.final_qty || 0).toLocaleString('pt-BR');
+  if (ctx && ctx.sim)
+    return `<td class="num" style="${bl}"><span${tag}>${pctStr}</span>`
+         + `<br>${_enqSimQtyInput(ctx, inst.final_qty)}</td>`;
   /* ⛔ SEM `title=`: a aritmética daquele fundo (qtd → exposição → % do NAV) mora no painel do
      ⓘ do cabeçalho, na seção "por fundo". Eram dois tooltips para o mesmo ativo — a janela
      estilizada e o balão nativo do SO —, e o nativo ainda era o único com o delta na conta. */
-  return `<td class="num" style="${bl}">${pctStr}`
+  return `<td class="num" style="${bl}"><span${tag}>${pctStr}</span>`
        + `<br><span style="font-size:11px;color:var(--text-muted)">(${qty})</span></td>`;
+}
+
+/* Campo de DELTA no cabeçalho da coluna — só em opção, e só em modo simulação.
+   ⚠️ Fica no cabeçalho porque o delta é do ATIVO: a mesma opção tem um delta só, qualquer que
+   seja o fundo que a carrega. Pôr um por célula deixaria marretar deltas diferentes para o
+   mesmo papel em fundos diferentes, que é inventar dois mercados.
+   ☠️ Vale tanto para a opção de IDI (`idi_option`) quanto para a de DÓLAR (`option`) — foi o
+   buraco da 1ª versão: o `enqSimSetDelta` existia e NENHUMA tela o chamava, então o delta das
+   opções já em carteira não dava para mexer. O teste não pegou porque chamava a função direto
+   em vez de digitar no campo. */
+/* O instrumento REAL (do cache do servidor), para os placeholders.
+   ☠️ O cabeçalho e as células são montados a partir da view SIMULADA, então `inst.delta` e
+   `inst.final_qty` ali já vêm marretados. Usá-los como placeholder faria o campo dizer
+   "vazio = o real" mostrando o valor simulado — ou seja, mentindo justamente sobre qual é o
+   número de verdade. O real só existe no `posDataByTab`. */
+function _enqRealInst(bucket, ck, fund) {
+  const d = (typeof posDataByTab !== 'undefined') ? posDataByTab[ENQ_RF_TAB_KEY] : null;
+  for (const f of ((d && d.funds) || [])) {
+    if (fund != null && f.fund_label !== fund) continue;
+    for (const b of (f.buckets || [])) {
+      if (b.key !== bucket) continue;
+      for (const i of (b.instruments || []))
+        if ((i.instrument_reference || i.instrument_name) === ck) return i;
+    }
+  }
+  return null;
+}
+
+function _enqSimDeltaCell(ic) {
+  if (ic.category !== 'idi_option' && ic.category !== 'option') return '';
+  const k = `${ic.bucket}|${ic.ck}`;
+  const v = _enqSim.delta[k];
+  const real = _enqRealInst(ic.bucket, ic.ck, null);
+  const dReal = real ? real.delta : ic.delta;
+  const ph = dReal != null ? _enqNum(dReal, 4) : '—';
+  // `data-*` identificam o alvo no DOM: o `oninput` já carrega os mesmos valores, mas lê-los
+  // de lá exigiria parsear a string do handler — e foi assim que um teste apontou para a
+  // coluna errada e acusou um bug que não existia.
+  return `<br><span style="font-weight:400;font-size:10px;color:var(--text-muted)">Δ</span>`
+    + `<input type="text" inputmode="decimal" data-enqdelta="${_escHtml(ic.ck)}" data-enqbucket="${_escHtml(ic.bucket)}"
+        value="${v != null ? _enqNum(v, 4) : ''}" placeholder="${ph}"
+        oninput="enqSimSetDelta('${ic.bucket}','${_escHtml(ic.ck)}',this.value)"
+        title="Delta simulado deste ativo, em todos os fundos. Vazio = o real (${ph})."
+        style="width:72px;text-align:right;font-size:11px;padding:1px 3px;margin-left:3px">`;
+}
+
+/* Campo de quantidade da simulação. Mostra a quantidade REAL como placeholder: vazio = "usa a
+   de verdade", e não "zero" — que seria zerar a linha sem querer. */
+function _enqSimQtyInput(ctx, atual) {
+  const k = `${ctx.bucket}|${ctx.ck}|${ctx.fund}`;
+  const v = _enqSim.qty[k];
+  const real = _enqRealInst(ctx.bucket, ctx.ck, ctx.fund);     // ver `_enqRealInst`
+  const qReal = real ? real.final_qty : atual;
+  const ph = (qReal != null) ? Math.round(qReal).toLocaleString('pt-BR') : '0';
+  return `<input type="text" inputmode="numeric" data-enqqty="${_escHtml(k)}"
+     value="${v != null ? v : ''}" placeholder="${ph}"
+     oninput="enqSimSetQty('${ctx.bucket}','${_escHtml(ctx.ck)}','${_escHtml(ctx.fund)}',this.value)"
+     title="Quantidade simulada. Vazio = a real (${ph})."
+     style="width:76px;text-align:right;font-size:11px;padding:1px 3px">`;
 }
 
 let enqDiTarget = 0.80;   // target de reenquadramento da caixinha DI (default 80% do NAV)
@@ -1205,9 +1302,14 @@ function _enqDiAdjust(fund, front) {
     <td class="num">${action}</td></tr>`;
 }
 
-function renderEnquadramentoRF(data) {
+function renderEnquadramentoRF(dataReal) {
   const container = document.getElementById('enqRfContainer');
   if (!container) return;
+  /* ⚗ A simulação é uma CAMADA: o payload real fica intacto em `posDataByTab` (é o que
+     `Limpar` devolve e o que o refresh in-place recalcula), e daqui para baixo tudo lê a
+     `data` simulada. Com a simulação desligada, `data === dataReal`. */
+  const sim  = (typeof enqSimAtivo === 'function') && enqSimAtivo();
+  const data = sim ? _enqApplySim(dataReal) : dataReal;
   const funds   = data.funds || [];
   const buckets = (funds[0] && funds[0].buckets) ? funds[0].buckets : [];
   // colunas de ativos (união entre fundos) por caixinha
@@ -1239,7 +1341,8 @@ function renderEnquadramentoRF(data) {
          do SO por cima dela — e o balão nativo herdava do <th>, então aparecia inclusive ao
          passar o mouse no próprio ⓘ. A janela do ⓘ é a única, e traz tudo. */
       return `<th class="num"${j === 0 ? ' style="border-left:2px solid var(--border)"' : ''}>`
-        + `${ic.label} <span class="jgp-info${rt}" data-info="${_escHtml(ic.info)}">&#9432;</span></th>`;
+        + `${ic.label} <span class="jgp-info${rt}" data-info="${_escHtml(ic.info)}">&#9432;</span>`
+        + (sim ? _enqSimDeltaCell(ic) : '') + `</th>`;
     }).join('')
     + `<th class="num" style="border-left:1px solid var(--border);font-weight:700">Total</th>`).join('');
 
@@ -1259,9 +1362,10 @@ function renderEnquadramentoRF(data) {
       const bk  = (f.buckets || []).find(b => b.key === c.key);
       const lut = {};
       for (const i of ((bk && bk.instruments) || [])) lut[i.instrument_reference || i.instrument_name] = i;
-      const instCells = c.insts.map((ic, j) => _enqMatrixCell(lut[ic.ck], nav, j === 0)).join('');
+      const instCells = c.insts.map((ic, j) => _enqMatrixCell(
+        lut[ic.ck], nav, j === 0, { bucket: c.key, ck: ic.ck, fund: f.fund_label, sim })).join('');
       const totStr = (bk && bk.pct != null) ? fmtPct(bk.pct) + (bk.over ? ' ⚠' : '') : '—';
-      const totCell = `<td class="num" style="border-left:1px solid var(--border);font-weight:700;${estilo(bk ? bk.pct : null)}">${totStr}</td>`;
+      const totCell = `<td class="num" data-enqtot="${_escHtml(`${c.key}|${f.fund_label}`)}" style="border-left:1px solid var(--border);font-weight:700;${estilo(bk ? bk.pct : null)}">${totStr}</td>`;
       return instCells + totCell;
     }).join('');
     // Total geral = soma dos MÓDULOS das caixinhas (não se compensam) — é a regra dos 100%.
@@ -1269,15 +1373,17 @@ function renderEnquadramentoRF(data) {
     for (const b of (f.buckets || [])) if (b.net_exp != null) { totExp += Math.abs(b.net_exp); haveAny = true; }
     const totPct  = (haveAny && nav) ? totExp / nav : null;
     const totOver = (temLim && totPct != null && totPct > 1.0);
-    const totalGeral = `<td class="num" style="border-left:2px double var(--border);font-weight:700;${estilo(totPct)}">${totPct != null ? fmtPct(totPct) + (totOver ? ' ⚠' : '') : '—'}</td>`;
+    const totalGeral = `<td class="num" data-enqgrand="${_escHtml(f.fund_label)}" style="border-left:2px double var(--border);font-weight:700;${estilo(totPct)}">${totPct != null ? fmtPct(totPct) + (totOver ? ' ⚠' : '') : '—'}</td>`;
+    const _stTag = ` data-enqstatus="${_escHtml(f.fund_label)}"`;
     const status = !temLim
-      ? `<td class="num" style="color:var(--text-muted)" title="${_escHtml(
+      ? `<td class="num"${_stTag} style="color:var(--text-muted)" title="${_escHtml(
           fundLabelMesa(f.fund_label) + ' não está sujeito ao limite de 100% do NAV por '
           + 'caixinha (regra da mesa). O % continua aqui porque é o que está boletado — o '
           + 'que não existe é o teto.')}">sem limite</td>`
       : totOver
-        ? '<td class="num" style="color:#fff;background:var(--alert-4);font-weight:700">ESTOURO</td>'
-        : (totPct != null ? '<td class="num" style="color:var(--green)">OK</td>' : '<td class="num" style="color:var(--text-muted)">—</td>');
+        ? `<td class="num"${_stTag} style="color:#fff;background:var(--alert-4);font-weight:700">ESTOURO</td>`
+        : (totPct != null ? `<td class="num"${_stTag} style="color:var(--green)">OK</td>`
+                          : `<td class="num"${_stTag} style="color:var(--text-muted)">—</td>`);
     return `<tr><td>${fundLabelMesa(f.fund_label)}</td><td class="num">${navStr}</td>${groupCells}${totalGeral}${status}</tr>`;
   }).join('');
 
@@ -1288,7 +1394,8 @@ function renderEnquadramentoRF(data) {
         ${navMismatch ? '⚠ ' : ''}Abertura: ${fmtDate(data.opening_date)} · Boletas: ${fmtDate(data.ref_date)} · NAV: ${navDateStr}${_navSourceInline(data)} · USDBRL (interno): ${usdbrlStr} · limite 100% do NAV por caixinha</span>
     </div>
     ${warn}
-    <div style="overflow-x:auto">
+    ${(typeof _enqSimToolbar === 'function') ? _enqSimToolbar(data) : ''}
+    <div style="overflow-x:auto"${sim ? ' class="enq-sim-on"' : ''}>
       <table class="data-table" style="white-space:nowrap;width:auto">
         <thead>
           <tr><th rowspan="2">Fundo</th><th class="num" rowspan="2">NAV</th>${grpHead}<th class="num" rowspan="2">Total geral</th><th rowspan="2">Status</th></tr>
@@ -1317,5 +1424,8 @@ function renderEnquadramentoRF(data) {
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
       Operando o DI mais curto <b>listado no mercado</b> (front): nº de contratos p/ trazer |exposição DI| ao target (arredonda p/ cima na correção). Vende se a exposição líquida do PU está comprada, compra se vendida.</div>
   </div>`;
+  // Os campos que dependem do tipo só podem ser montados DEPOIS do innerHTML — eles escrevem
+  // em `#enqSimAtivoWrap`/`#enqSimDeltaWrap`, que acabaram de nascer.
+  if (sim && typeof _enqSimRenderAddForm === 'function') _enqSimRenderAddForm();
 }
 
