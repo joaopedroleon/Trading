@@ -131,6 +131,43 @@ function fundLabelMesa(fl, fallbackJrs = false) {
       ?? (fallbackJrs ? s.replace('JGP RF Ativa ', '').replace(/-[A-Z]$/, '') : s);
 }
 
+/* ── A SIGLA do fundo — só para célula ESTREITA de veredito ──────────────────────────────
+   "Juros e Moeda" → **JM**, "Juros Local" → **JL**, "Juros Global" → **JG**. Nasceu do
+   `Check #PL` da auxiliar do PortfolioRF (09/11/2026, pedido da mesa), onde a linha não
+   rateada imprimia `✓ só Juros e Moeda` numa coluna de veredito cujas demais células são
+   `✓` ou `±0,006%` — 15 caracteres de nome de fundo dentro de uma coluna de check.
+   ⛔ **Não é um 2º nome do fundo**: é o MESMO nome abreviado na hora de desenhar, derivado
+   do `fundLabelMesa` e de mais nada. O nome por extenso continua no `title` da célula, que
+   é onde a linha se explica. Um segundo mapa de apelidos aqui seria exatamente o que o
+   `FUND_LABELS_MESA` acabou de resolver (a tela com três nomes para o mesmo fundo).
+   ⛔ **Fundo FORA do mapa da mesa não é abreviado** — mesma curadoria do `fundLabelMesa`:
+   iniciais de um label do JRS ("Inst Master" → "IM") seriam tradução automática de um nome
+   que a mesa não escolheu.
+   ☠️ **Colisão volta ao nome por extenso.** Hoje JM/JL/JG são únicos, mas um fundo novo
+   chamado "Juros Macro" daria **JM** também, e duas linhas diriam a mesma sigla para fundos
+   diferentes — sem erro nenhum, que é o modo de falha pior. A checagem é sobre o mapa
+   inteiro, não sobre os fundos da aba: o mapa é acumulado de qualquer payload. */
+const _SIGLA_IGNORA = new Set(['e', 'de', 'do', 'da', 'dos', 'das', '&', '+']);
+
+function _siglaDe(nome) {
+  const w = String(nome ?? '').split(/[\s\-/]+/)
+    .filter(x => x && !_SIGLA_IGNORA.has(x.toLowerCase()));
+  const s = w.map(x => x[0].toUpperCase()).join('');
+  // Uma letra só não identifica fundo nenhum — ali o nome por extenso é a resposta honesta.
+  return s.length >= 2 ? s : null;
+}
+
+function fundSigla(fl) {
+  const k    = String(fl ?? '').trim();
+  const nome = fundLabelMesa(k, true);
+  if (!_FUND_LABELS_MESA[k]) return nome;
+  const s = _siglaDe(nome);
+  if (!s) return nome;
+  const colide = Object.keys(_FUND_LABELS_MESA)
+    .some(o => o !== k && _siglaDe(fundLabelMesa(o, true)) === s);
+  return colide ? nome : s;
+}
+
 function fmtNav(v, navDate, openingDate) {
   if (v == null) return '';
   const base = `NAV: USD ${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;

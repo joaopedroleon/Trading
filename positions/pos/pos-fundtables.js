@@ -20,9 +20,11 @@ function _checkVazio(txt, tip) {
   return `<td class="num" style="text-align:right;color:var(--text-muted)"${t}>${txt ?? '—'}</td>`;
 }
 
-function _checkCell(v, delta, tip) {
+/* ⚠️ `clsOvr` deixa o chamador impor a FAIXA sem mexer no `ALLOC_TOL`, que seis checks
+   compartilham — ver `rfQtdClass` em pos-helpers.js. */
+function _checkCell(v, delta, tip, clsOvr) {
   const txt = (typeof v === 'string') ? v : fmtPct(_semZeroNegativo(v));
-  const cls = allocClass(delta);
+  const cls = clsOvr !== undefined ? clsOvr : allocClass(delta);
   const t   = tip ? ` title="${_escHtml(tip)}"` : '';
   return cls ? `<td class="check-cell ${cls}"${t}>${txt}</td>` : _checkVazio(txt, tip);
 }
@@ -1056,8 +1058,15 @@ function renderRfRegrasPanel(data, cfg) {
 
     return `<tr>
       <td style="font-weight:600;white-space:nowrap">${r.label}
+        <!-- ⭐ **A FATIA DO LIVRO ao lado do NAV** (09/11/2026, pedido da mesa). Ela já
+             existia, mas só dentro do ⓘ — e é o número que responde "quanto deste fundo
+             tem no livro" sem fazer conta de cabeça com três NAVs de 7 dígitos. Fica na
+             MESMA linha do NAV, não em coluna nova: é a mesma medida em outra unidade, e
+             uma coluna para um número alargaria a tabela inteira. -->
         <div style="font-weight:400;color:var(--text-muted);font-size:10px">
-          ${_rfUsd(r.nav)} ${_rfInfo(navTip)}</div></td>
+          ${_rfUsd(r.nav)}${navTot && r.nav != null
+            ? ` · <b style="color:var(--text)">${fmtPct(r.nav / navTot)}</b> do livro` : ''
+          } ${_rfInfo(navTip)}</div></td>
       <td style="white-space:nowrap">${r.mandato ?? '—'} ${_rfInfo(mandTip)}</td>
       <td class="num" title="${_escHtml(dtTip)}">${
           r.daytrade == null ? '—' : r.daytrade ? sim : nao}</td>
@@ -1128,8 +1137,12 @@ function renderRfRegrasPanel(data, cfg) {
       <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
         <b>Regras dos fundos de RF</b>
         <span style="color:var(--text-muted);font-size:11px">NAV do livro <b>${_rfUsd(navTot)}</b>
-          ${_rfInfo('Soma dos NAVs dos fundos da aba — é o denominador do #PL das linhas '
-            + 'rateadas. As linhas de dólar e as offshore usam o NAV de UM fundo só.')}</span>
+          ${_rfInfo('Soma dos NAVs dos três fundos da aba.'
+            + NL + NL
+            + '⚠️ NÃO é o denominador de toda linha: desde 09/11/2026 o #PL de CADA linha '
+            + 'divide pela soma dos NAVs dos fundos ONDE AQUELA POSIÇÃO ESTÁ — os três quando '
+            + 'ela está nos três, um só quando está num só. O hover da célula de #PL declara '
+            + 'a base usada em cada linha.')}</span>
       </div>
       <table class="data-table" style="width:auto;margin-top:6px;white-space:nowrap">
         <thead><tr>
@@ -1239,114 +1252,153 @@ function renderRfCcyCheck(cfg, tabId) {
   const pct  = v => v == null ? '—'
     : (v < 0 ? '(' : '') + Math.abs(v * 100).toLocaleString('en-US',
         { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' + (v < 0 ? ')' : '');
+  /* Desvio RELATIVO ao alvo (`razão/alvo − 1`) — é a régua da COR (`rfAllocClass`) e é o que
+     a coluna da razão não diz: 10,8% contra alvo de 10% é "+8% do alvo", não "+0,8pp". */
+  const rel  = v => v == null ? '—'
+    : (v < 0 ? '(' : '') + Math.abs(v * 100).toLocaleString('en-US',
+        { maximumFractionDigits: 0 }) + '%' + (v < 0 ? ')' : '');
   const col  = v => v == null ? '' : (v < 0 ? 'style="color:var(--red)"' : '');
+  const trdLbl = c.trader || 'MM';
+  const rfLbl  = rfSleeveFundLabel(cfg);
 
-  /* ☠️ **O piso de US$ 200 mil NÃO esconde mais a razão** (05/11/2026, mesa: *"não quero que
-     esconda nada"*). Ele valia para a COLUNA e não valia para o AGREGADO, e a tela passava a
-     dizer duas coisas opostas sobre a mesma moeda: "— resíduo de rolagem" na linha, peso cheio
-     no total. Medido no dia: o EUR (73,6 k no MM, abaixo do piso) levava o agregado de 10,6%
-     para **13,4%** com todas as linhas visíveis em verde. Hoje a razão sempre sai, a linha
-     pequena ganha o selo `peq.` e o hover diz **quanto o total seria sem ela**. */
-  const aggEx = l => l.agg_ex != null
-    ? ` Sem esta moeda o agregado seria ${pct(l.agg_ex)} (hoje ${pct(c.gross?.ratio)}).` : '';
+  /* ⭐ **O VEREDITO virou COLUNA** (09/11/2026, mesa: *"bote tb uma coluna extra em que dá OK
+     quando a exposição é mt pequena, pq aí a razão se torna menos relevante, pois
+     provavelmente é resto de saldo"*). A regra pedida **já existia** — é o
+     `veredito: 'ok_residuo'` que o backend carimba desde 05/11 —, só que vivia num selo de
+     9px DENTRO da célula da razão, ao lado do número que ela justamente não decide. Hoje a
+     razão é NÚMERO e o veredito é célula de check (`.check-cell`, a mesma das outras colunas
+     da aba).
+     ☠️ **E a cor estava sumindo em silêncio**: a célula saía com `class="num alloc-ok"`, e
+     **não existe CSS para `alloc-*` sem `check-cell`** (positions-v2.css só casa
+     `td.check-cell.alloc-*`). O veredito era calculado e nunca pintado.
+     ⛔ **`l.small` NÃO serve para "é pequeno"**, apesar do nome: ele mede o piso de US$ 200
+     mil nos DOIS lados, e o RF é ~2,3× menor e espelha ~10% — ali 200 mil seriam **0,7% do
+     NAV do RF**, que é posição de verdade. Quem tem o piso certo (escalado, ~US$ 8,9 mil) é
+     o `veredito` do backend. */
+  const ccyCls = l => l.numerario ? ''
+    : l.veredito === 'ok_residuo' ? 'alloc-ok'
+    : l.veredito === 'rf_sem_par' ? 'alloc-bad'
+    : (l.ratio != null && !l.mm_pequeno) ? rfAllocClass(l.ratio, alvo) : '';
+
   const tr = c.linhas.map((l, i) => {
-    /* ☠️ **Número sempre; COR só com denominador firme.** A 1ª versão desta mudança pintou a
-       moeda pequena com `rfAllocClass` e isso virou vermelho em livro BATIDO — com as pernas
-       do MM se cancelando entre pares o denominador colapsa, e aí a razão não mede alocação,
-       mede o resíduo. Quem aponta o problema aqui é a tira "Quem leva o agregado", que nomeia
-       a moeda em vermelho SEM precisar afirmar um veredito por linha. */
     const mutedRow = l.numerario ? ' style="color:var(--text-muted)"' : '';
-    /* Três estados, e só o último usa a razão — o veredito vem pronto do backend
-       (`_rf_ccy_check`), para não haver duas definições de "batido" na tela e no servidor. */
-    const rCls = l.veredito === 'ok_residuo' ? 'alloc-ok'
-      : l.veredito === 'rf_sem_par' ? 'alloc-bad'
-      : (l.ratio != null && !l.mm_pequeno) ? rfAllocClass(l.ratio, alvo) : '';
-    /* O selo NOMEIA o estado em vez de dizer só "pequeno": com a célula verde e a razão em
-       −6,8% ao lado, "peq." não explicava por que a cor estava certa. */
-    const seloTxt = l.veredito === 'ok_residuo' ? 'batido'
-      : l.veredito === 'rf_sem_par' ? 's/ par no MM' : 'peq.';
-    const seloTip = l.veredito === 'ok_residuo'
-      ? `NET BATIDO: o MM tem só US$ ${Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')} `
-        + 'nesta moeda (as pernas se cancelam entre pares) e o RF também não a carrega — não há '
-        + 'exposição a espelhar, então ✓. A razão ao lado oscila muito com denominador perto de '
-        + 'zero e NÃO decide a cor.'
-      : l.veredito === 'rf_sem_par'
-      ? `SEM PAR NO MM: o MM tem só US$ ${Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')} `
-        + `nesta moeda e o RF carrega US$ ${Math.abs(Math.round(l.rf_usd)).toLocaleString('en-US')} `
-        + `(piso equivalente: US$ ${Math.round(c.rf_min_usd ?? 0).toLocaleString('en-US')}). `
-        + 'Não há alocação a espelhar — isto não é desvio de proporção, é posição sem origem.'
-      : `A perna do MM tem US$ ${Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')}, `
-        + `abaixo da régua de US$ ${Number(c.min_usd).toLocaleString('en-US')} que a casa usa para `
-        + '"posição de câmbio pequena": o denominador é pequeno, então a razão mexe muito com pouco.';
-    const selo = (l.ratio != null && l.mm_pequeno)
-      ? ` <span style="font-size:9px;font-weight:600;color:var(--text-muted)" title="${
-          _escHtml(seloTip + ' ⚠ Esta moeda entra no agregado em peso cheio.' + aggEx(l))
-        }">${seloTxt}</span>` : '';
+    const cls      = ccyCls(l);
+    const desvio   = (l.ratio != null && alvo) ? (l.ratio / alvo - 1) : null;
+
+    /* As quatro frases do veredito. A 2ª é a que a mesa pediu, e ela diz POR QUE o ✓ não veio
+       da razão — com a razão a dois dígitos ao lado, um "OK" sem motivo se lê como erro. */
+    let chkTxt, chkTip;
+    if (l.numerario) {
+      chkTxt = '—';
+      chkTip = 'O dólar é o NUMERÁRIO dos dois NAVs — "exposição a USD" não é risco aqui. E ela '
+        + 'não pode espelhar: no MM o euro vem de EUR/AUD, que não toca o dólar, e no RF de '
+        + 'EUR/USD + AUD/USD, cujas pernas de dólar se cancelam. A linha fica como informação, '
+        + 'fora do veredito.';
+    } else if (l.veredito === 'ok_residuo') {
+      chkTxt = 'OK · resíduo';
+      chkTip = 'EXPOSIÇÃO PEQUENA NOS DOIS LADOS — não há o que espelhar, e a razão ao lado não '
+        + 'decide nada (com denominador perto de zero ela oscila muito).' + _AL_NL + _AL_NL
+        + 'MM: US$ ' + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')
+        + '  (régua de resíduo: US$ ' + Number(c.min_usd).toLocaleString('en-US') + ')' + _AL_NL
+        + 'RF: US$ ' + Math.abs(Math.round(l.rf_usd)).toLocaleString('en-US')
+        + '  (régua: US$ ' + Math.round(c.rf_min_usd ?? 0).toLocaleString('en-US') + ' — a do MM '
+        + 'trazida pela proporção, porque o RF é menor e espelha uma fração)' + _AL_NL + _AL_NL
+        + 'É o caso do resto de rolagem e da moeda cujas pernas se cancelam entre pares.';
+    } else if (l.veredito === 'rf_sem_par') {
+      chkTxt = '⛔ s/ par';
+      chkTip = 'O RF CARREGA E O MM NÃO.' + _AL_NL + _AL_NL
+        + 'MM: US$ ' + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')
+        + '  (abaixo da régua de resíduo, US$ ' + Number(c.min_usd).toLocaleString('en-US') + ')'
+        + _AL_NL
+        + 'RF: US$ ' + Math.abs(Math.round(l.rf_usd)).toLocaleString('en-US')
+        + '  (acima da dele, US$ ' + Math.round(c.rf_min_usd ?? 0).toLocaleString('en-US') + ')'
+        + _AL_NL + _AL_NL
+        + 'Não há alocação a espelhar: isto não é desvio de proporção, é posição sem origem.';
+    } else if (cls) {
+      chkTxt = cls === 'alloc-ok' ? '✓'
+        : (cls === 'alloc-bad' ? '⛔ ' : '⚠ ') + rel(desvio);
+      chkTip = 'Razão ' + pct(l.ratio) + ' contra o alvo de ' + pct(alvo) + ' — '
+        + (desvio >= 0 ? 'acima' : 'abaixo') + ' em ' + rel(Math.abs(desvio)) + ' do alvo.'
+        + _AL_NL + _AL_NL
+        + 'Verde até ' + (RF_ALLOC_REL_TOL * 100).toFixed(0) + '% de desvio do alvo, amarelo até '
+        + 'o dobro, vermelho além. ⚠ A faixa é RELATIVA ao alvo: 2pp num alvo de ' + pct(alvo)
+        + ' aceitariam quase metade e quase o dobro da alocação pedida.';
+    } else {
+      chkTxt = '—';
+      chkTip = 'Sem denominador firme para a razão (falta o NAV de um dos lados) — não afirmado.';
+    }
+
+    /* A razão fica como NÚMERO, sem cor: quem dá o veredito é a coluna ao lado. A linha de MM
+       pequena mantém o selo `peq.`, porque ali o aviso é sobre o NÚMERO (ruído-sensível), e
+       não sobre o veredito — que nesse caso vem do backend e já tem célula própria. */
+    const selo = (l.ratio != null && l.mm_pequeno && l.veredito == null)
+      ? ' <span style="font-size:9px;font-weight:600;color:var(--text-muted)" title="'
+        + _escHtml('A perna do MM tem US$ '
+          + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US') + ', abaixo da régua de US$ '
+          + Number(c.min_usd).toLocaleString('en-US') + ': o denominador é pequeno, então a razão '
+          + 'mexe muito com pouco.') + '">peq.</span>'
+      : '';
     const rTxt = l.ratio != null ? pct(l.ratio) + selo
-      : `<span style="color:var(--text-muted)" title="${_escHtml(
-          l.numerario
-            ? 'O dólar é o NUMERÁRIO dos dois NAVs — "exposição a USD" não é risco aqui. E ela '
-              + 'não pode espelhar: no MM o euro vem de EUR/AUD, que não toca o dólar, e no RF de '
-              + 'EUR/USD + AUD/USD, cujas pernas de dólar se cancelam. A linha fica como informação, '
-              + 'fora do veredito e fora do agregado.'
-            : 'O MM não carrega esta moeda — sem denominador não há razão. ⚠ A posição do RF '
-              + 'continua entrando no agregado.' + aggEx(l))}">—</span>`;
+      : '<span style="color:var(--text-muted)" title="' + _escHtml(
+          l.numerario ? 'Perna de numerário — ver o check ao lado.'
+            : 'O MM não carrega esta moeda — sem denominador não há razão.') + '">—</span>';
+
     return `<tr class="${i % 2 === 0 ? 'group-odd' : 'group-even'}"${mutedRow}>
-      <td><b>${l.ccy}</b></td>
-      <td class="num" ${col(l.mm_usd)}>${usd(l.mm_usd)}</td>
-      <td class="num" ${col(l.mm_pct)}>${pct(l.mm_pct)}</td>
-      <td class="num" ${col(l.rf_usd)}>${usd(l.rf_usd)}</td>
-      <td class="num" ${col(l.rf_pct)}>${pct(l.rf_pct)}</td>
-      <td class="num ${rCls}">${rTxt}</td>
+      <td class="lbl">${l.ccy}</td>
+      <td class="sep" ${col(l.mm_usd)}>${usd(l.mm_usd)}</td>
+      <td ${col(l.mm_pct)}>${pct(l.mm_pct)}</td>
+      <td class="sep" ${col(l.rf_usd)}>${usd(l.rf_usd)}</td>
+      <td ${col(l.rf_pct)}>${pct(l.rf_pct)}</td>
+      <td class="sep">${rTxt}</td>
+      <td class="check-cell ${cls}" title="${_escHtml(chkTip)}">${chkTxt}</td>
     </tr>`;
   }).join('');
 
-  const g = c.gross;
-  const gCls = g.ratio != null ? rfAllocClass(g.ratio, alvo) : '';
-  const gTr = `<tr style="border-top:2px solid var(--border)">
-    <td><b>Agregado</b> <span style="color:var(--text-muted);font-size:10px" title="${_escHtml(
-      'Soma dos MÓDULOS das moedas, SEM o dólar. Somar com sinal faria as pernas de um par se '
-      + 'cancelarem e o total sairia ~0 dos dois lados, dizendo nada; e o dólar é o numerário '
-      + 'dos dois NAVs, não risco.')}">módulos, ex-USD</span></td>
-    <td class="num"><b>${usd(g.mm_usd)}</b></td>
-    <td class="num"><b>${pct(g.mm_pct)}</b></td>
-    <td class="num"><b>${usd(g.rf_usd)}</b></td>
-    <td class="num"><b>${pct(g.rf_pct)}</b></td>
-    <td class="num ${gCls}"><b>${pct(g.ratio)}</b></td>
-  </tr>`;
+  /* ⚰️ **A linha AGREGADO e a tira "Quem leva o agregado" SAÍRAM** (09/11/2026, mesa: *"a
+     linha agregado não faz sentido, pois o batimento é por moeda, a soma de tudo não diz
+     nada"*). Ela somava os MÓDULOS das moedas dos dois lados e dividia — um número que não
+     corresponde a posição nenhuma e que podia estar fora do alvo com TODAS as moedas dentro
+     (e o contrário).
+     ⭐ **E a remoção só é segura porque o alarme que ela carregava virou LINHA.** O agregado
+     nasceu para pegar o `EUR/USD` de −85.000 de 05/11/2026, que levava o total de 10,6% a
+     13,4% sem nenhuma linha acusando; hoje aquele caso é exatamente o veredito `rf_sem_par`,
+     que marca a MOEDA em vermelho na coluna Check. Tirá-lo antes disso teria apagado o aviso.
+     ⚠️ O backend segue publicando `gross` e `agg_ex` — **sem consumidor** desde esta mudança. */
 
-  /* ⭐ **Quem move o agregado** (05/11/2026). A pergunta da mesa foi literalmente "não entendi
-     essa conta estar apontando erro agora", com ZAR em 10,5% e MXN em 10,8% na tela e o total
-     em 13,4%: as duas moedas que respondiam estavam atrás de um "—". Esta tira decompõe o
-     total — para cada moeda, o agregado **sem ela** —, ordenada pelo tamanho do empurrão.
-     ⚠ Só aparece quando o agregado está FORA do alvo: um decompositório diário em dia
-     alinhado treina a mesa a não ler a tira (a mesma regra da faixa de erro do topo). */
-  const gOk = g.ratio != null && rfAllocClass(g.ratio, alvo) === 'alloc-ok';
-  const movs = (g.ratio == null || gOk) ? [] : c.linhas
-    .filter(l => !l.numerario && l.agg_ex != null)
-    .map(l => ({ ccy: l.ccy, ex: l.agg_ex, d: Math.abs(l.agg_ex - g.ratio),
-                 // "afasta" = tirar a moeda APROXIMA o total do alvo, logo é ela que empurra.
-                 afasta: Math.abs(l.agg_ex - alvo) < Math.abs(g.ratio - alvo) }))
-    // Quem EMPURRA primeiro, e dentro de cada grupo o de maior efeito: ordenar só pelo
-    // tamanho do efeito põe na frente a moeda grande e alinhada (tirar o ZAR mexe mais no
-    // total do que tirar o EUR), e o culpado cai para o meio da lista.
-    .sort((a, b) => (b.afasta - a.afasta) || (b.d - a.d));
-  const quemMove = !movs.length ? ''
-    : `<div style="font-size:11px;margin-top:6px;white-space:normal;max-width:620px">`
-      + `<b>Quem leva o agregado a ${pct(g.ratio)}</b> <span style="color:var(--text-muted)">`
-      + `— o total recalculado SEM cada moeda</span>: `
-      + movs.map(m => `<span style="color:${m.afasta ? 'var(--red)' : 'var(--text-muted)'}">`
-          + `sem ${m.ccy} → ${pct(m.ex)}</span>`).join(' · ')
-      + `. <span style="color:var(--text-muted)">Em vermelho, a moeda cuja saída APROXIMA o total `
-      + `do alvo de ${pct(alvo)} — é ela que está empurrando. Como o agregado soma MÓDULOS, `
-      + `posição em direção oposta à do MM não cancela: soma dos dois lados.</span></div>`;
+  /* O card nasce COLAPSADO, então o título precisa carregar o veredito. Ele passou a ser a
+     CONTAGEM por moeda, com os nomes: é a mesma pergunta ("está batendo?") respondida na
+     unidade em que o batimento existe. */
+  const julg  = c.linhas.filter(l => !l.numerario && ccyCls(l));
+  const foraL = julg.filter(l => ccyCls(l) !== 'alloc-ok');
+  const pior  = foraL.some(l => ccyCls(l) === 'alloc-bad') ? 'var(--red)' : 'var(--yellow)';
+  /* ☠️ **A lista de nomes é LIMITADA a 3, e o motivo é a largura da IMAGEM.** O título vive
+     DENTRO do `.section-copy-target`, que é `width: fit-content` — então, sendo mais largo que
+     a tabela, é ELE quem dita a largura do print (a mesma armadilha do `.jgp-tbl-note`).
+     Medido nesta tela: tabela 526px contra alvo de cópia **896px** com 1 moeda nomeada e
+     **1.123px** com 7 — ou seja, de 370 para 597px de faixa branca morta. Com o teto, o pior
+     caso fica perto do rótulo que havia antes (870px). O resto vai no `title`, e todas as
+     moedas estão marcadas na coluna Check da tabela. */
+  const _CCY_TIT_MAX = 3;
+  const nomes = foraL.slice(0, _CCY_TIT_MAX).map(l => l.ccy).join(' · ')
+    + (foraL.length > _CCY_TIT_MAX ? ` +${foraL.length - _CCY_TIT_MAX}` : '');
+  const veredito = !julg.length ? ''
+    : foraL.length
+      ? '<span style="font-weight:600;color:' + pior + '" title="' + _escHtml(
+          'Fora do alvo de ' + pct(alvo) + ' (ou com posição no RF sem par no MM): '
+          + foraL.map(l => l.ccy).join(' · ') + '.' + _AL_NL + _AL_NL
+          + 'O batimento é POR MOEDA — não há um número só para o conjunto.')
+        + '">⚠ ' + foraL.length + ' de ' + julg.length + ' moedas fora do alvo · '
+        + nomes + '</span>'
+      : '<span style="font-weight:600;color:var(--green)" title="' + _escHtml(
+          'Cada moeda dentro da faixa do alvo de ' + pct(alvo) + ', ou com exposição residual '
+          + 'nos dois lados.') + '">✓ ' + julg.length + ' moedas no alvo</span>';
 
   const foraTxt = Object.entries({ ...(c.fora?.mm ?? {}) })
     .map(([k, n]) => `${n}× ${k}`).join(' · ');
   const foraRf = Object.entries({ ...(c.fora?.rf ?? {}) })
     .map(([k, n]) => `${n}× ${k}`).join(' · ');
   const nota = (foraTxt || foraRf)
-    ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;white-space:normal;max-width:620px">`
+    ? `<div class="jgp-tbl-note" style="font-size:11px;color:var(--text-muted);margin-top:6px;white-space:normal">`
       + `⛔ Fora desta conta (só câmbio linear entra): `
       + [foraTxt && `no MM ${foraTxt}`, foraRf && `no RF ${foraRf}`].filter(Boolean).join(' · ')
       + `. Opção de FX e futuro de dólar são conferidos <b>linha a linha, pela quantidade</b>, `
@@ -1358,23 +1410,17 @@ function renderRfCcyCheck(cfg, tabId) {
      listada aqui sai errada sem nada marcando a célula. Enquanto houver `sem_spot`, as
      colunas de check das linhas de câmbio saem como "—" (ver `rfCheckCell`). */
   const semSpot = c.sem_spot?.length
-    ? `<div style="font-size:11px;color:var(--red);margin-top:4px">⚠ <b>agregado incompleto</b> — `
-      + `sem spot de ${c.sem_spot.join(', ')}: a linha inteira é pulada, e um cross pulado `
-      + `tira da conta também a perna da outra moeda. As razões acima podem estar erradas em `
-      + `moeda que nem aparece nesta lista.</div>`
+    ? `<div class="jgp-tbl-note" style="font-size:11px;color:var(--red);margin-top:4px;white-space:normal">`
+      + `⚠ <b>conta incompleta</b> — sem spot de ${c.sem_spot.join(', ')}: a linha inteira é `
+      + `pulada, e um cross pulado tira da conta também a perna da outra moeda. As razões acima `
+      + `podem estar erradas em moeda que nem aparece nesta lista.</div>`
     : '';
-
-  const veredito = g.ratio == null ? ''
-    : `<span style="font-weight:600;color:${
-        rfAllocClass(g.ratio, alvo) === 'alloc-ok' ? 'var(--green)'
-        : rfAllocClass(g.ratio, alvo) === 'alloc-warn' ? 'var(--yellow)' : 'var(--red)'
-      }">${rfAllocClass(g.ratio, alvo) === 'alloc-ok' ? '✓' : '⚠'} agregado ${pct(g.ratio)} · alvo ${pct(alvo)}</span>`;
 
   /* ⭐ **Colapsado por padrão, e no FIM da aba** (pedido da mesa, 08/10/2026): a leitura do dia
      a dia é a tabela de posição, e um card de 10 moedas acima dela empurrava tudo para baixo.
      ⚠️ Mas o VEREDITO fica no TÍTULO, que continua visível fechado — esconder o card inteiro
-     tiraria da tela justamente o número que responde "a conta de 10% bate?". Mesmo padrão do
-     card de MM Prev (pos-tabs.js): cabeçalho sempre à vista, corpo atrás da setinha. */
+     tiraria da tela justamente a resposta de "a conta dos 10% bate?". Mesmo padrão do card de
+     MM Prev (pos-tabs.js): cabeçalho sempre à vista, corpo atrás da setinha. */
   /* ☠️ Id por ABA. Era `rfCcyWrap` fixo, e o card é renderizado nas DUAS abas que têm sleeve
      — dois elementos com o MESMO id no documento. O `getElementById` devolve sempre o
      primeiro (o da aba do PortfolioRF, escondido), então a setinha da aba do PAbinader
@@ -1388,7 +1434,7 @@ function renderRfCcyCheck(cfg, tabId) {
         btn.textContent=open?'▶':'▼';
       })(this.querySelector('.rfCcyArrow'),document.getElementById('${wrapId}'))">
       <div class="section-title" style="padding:4px 0 8px 0;font-size:12px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
-        <span>Exposição por moeda — RF × ${c.trader}
+        <span>Exposição por moeda — RF × ${trdLbl}
           <span style="font-weight:400;color:var(--text-muted);font-size:11px" title="${_escHtml(
             'Cada par decomposto em pernas CONTRA O DÓLAR (EUR/AUD = +EUR −AUD) e somado por moeda. '
             + 'É a régua do câmbio: a mesma exposição é montada com contratos diferentes em cada livro, '
@@ -1401,20 +1447,41 @@ function renderRfCcyCheck(cfg, tabId) {
       </div>
       </div>
       <div id="${wrapId}" style="display:none">
-      <table class="data-table alloc-table" style="white-space:nowrap;width:auto">
-        <thead><tr>
-          <th>Moeda</th>
-          <th title="${_escHtml('Exposição do book de MM do ' + c.trader + ' naquela moeda, em USD ao spot.')}">MM (USD)</th>
-          <th title="${_escHtml('Sobre o NAV de MM do trader: USD ' + Number(c.nav_mm ?? 0).toLocaleString('en-US', {maximumFractionDigits:0}))}">% NAV MM</th>
-          <th title="${_escHtml('Exposição do sleeve naquela moeda, em USD ao spot.')}">RF (USD)</th>
-          <th title="${_escHtml('Sobre o NAV do fundo que detém o veículo: USD ' + Number(c.nav_rf ?? 0).toLocaleString('en-US', {maximumFractionDigits:0}))}">% NAV RF</th>
-          <th title="${_escHtml('% NAV RF ÷ % NAV MM. É O CHECK: o RF tem de carregar ' + (alvo*100).toFixed(0)
-            + '% do que o MM carrega. Verde dentro de ±' + (RF_ALLOC_REL_TOL*100).toFixed(0)
-            + '% do alvo, amarelo até o dobro, vermelho além.')}">RF ÷ MM · alvo ${pct(alvo)}</th>
-        </tr></thead>
-        <tbody>${tr}${gTr}</tbody>
+      <table class="jgp-tbl">
+        <thead>
+          <tr>
+            <th class="left" rowspan="2">Moeda</th>
+            <th class="center sep" colspan="2" title="${_escHtml(
+              'Book de MM do ' + trdLbl + ', em USD ao spot.' + _AL_NL + 'NAV: USD '
+              + Number(c.nav_mm ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+            )}">MM · ${trdLbl}</th>
+            <th class="center sep" colspan="2" title="${_escHtml(
+              'Sleeve espelhado no veículo offshore, em USD ao spot.' + _AL_NL
+              + 'NAV do(s) fundo(s) que o detêm: USD '
+              + Number(c.nav_rf ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+            )}">RF · ${rfLbl}</th>
+            <th class="center sep" colspan="2" title="${_escHtml(
+              'O CHECK: o RF tem de carregar ' + (alvo * 100).toFixed(0) + '% da exposição do '
+              + 'MM, cada lado medido em % do NAV do SEU fundo.')}">Proporção · alvo ${pct(alvo)}</th>
+          </tr>
+          <tr>
+            <th class="sep">USD</th>
+            <th>% NAV</th>
+            <th class="sep">USD</th>
+            <th>% NAV</th>
+            <th class="sep" title="${_escHtml('% NAV RF ÷ % NAV MM.')}">RF ÷ MM</th>
+            <th class="center" title="${_escHtml(
+              'Veredito da moeda.' + _AL_NL
+              + '✓ — dentro de ±' + (RF_ALLOC_REL_TOL * 100).toFixed(0) + '% do alvo (amarelo '
+              + 'até o dobro, vermelho além)' + _AL_NL
+              + 'OK · resíduo — exposição pequena DOS DOIS LADOS: a razão ao lado não decide '
+              + 'nada, é resto de rolagem' + _AL_NL
+              + '⛔ s/ par — o RF carrega a moeda e o MM não')}">Check</th>
+          </tr>
+        </thead>
+        <tbody>${tr}</tbody>
       </table>
-      ${quemMove}${nota}${semSpot}
+      ${nota}${semSpot}
       </div>
     </div>
   </div>`;
@@ -1472,12 +1539,21 @@ function rfTargetNote(cfg) {
    da linha (pedido da mesa) — `%` do NAV nas linhas de preço, "% do NAV por 100 bps" nas de
    taxa, que é a mesma unidade da coluna #PL ao lado. 3 casas quando o número é pequeno: com
    2 fixas um desvio de 15% num vértice pequeno imprimia "0.00" em VERMELHO. */
-function _mirrorDiffTxt(diff, type) {
-  const abs = Math.abs(diff);
-  const dec = abs < 0.01 ? 3 : 2;
-  const s = type === 'pct'
-    ? (abs * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'
-    : abs.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+/* ☠️ **As casas decimais seguem o valor EXIBIDO, não o cru** (09/11/2026). Em linha `pct`
+   eram 2 casas fixas sobre `valor × 100`, então **a faixa inteira do amarelo imprimia
+   "0.00%"**: com o limiar em 0,005% do NAV, tudo entre verde e vermelho arredondava para
+   zero e a célula dizia *"⚠ −0,00%"* — um alerta que mostra zero treina a mesa a ignorá-lo,
+   e foi exatamente assim que a mesa pegou a faixa errada. */
+/* ⚠️ `extra` dá uma casa a mais, e existe para o TOOLTIP. Na borda da faixa a célula
+   imprime −0,005 ao lado de um "verde até 0,005" e as duas se contradizem — a diferença
+   está na 4ª casa. A CÉLULA fica com 3 (a coluna é estreita); quem audita abre o hover, e é
+   lá que o número tem de fechar com o limiar. */
+function _mirrorDiffTxt(diff, type, extra) {
+  const abs  = Math.abs(diff);
+  const disp = type === 'pct' ? abs * 100 : abs;
+  const dec  = (disp < 0.01 ? 3 : 2) + (extra ? 1 : 0);
+  const s = disp.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec })
+          + (type === 'pct' ? '%' : '');
   return (diff >= 0 ? '+' : '−') + s;
 }
 
@@ -1570,12 +1646,21 @@ Não existe `
     + qtd + `
 
 `
-    + `Verde dentro de ±${(e.tol * 100).toLocaleString('en-US', {maximumFractionDigits: 1})}% `
-    + `da exposição dele, amarelo até o dobro, vermelho além`
-    + (e.tol > (cfg.rel_tol ?? RF_MIRROR_REL_TOL) + 1e-9
-        ? ` — faixa alargada nesta linha porque 1 contrato de diferença já passaria de `
-          + `${((cfg.rel_tol ?? RF_MIRROR_REL_TOL) * 100).toFixed(0)}%, e abaixo disso a boleta não desce.`
-        : '.');
+    + (e.diff != null && e.tolAbs
+        ? `Divergência: ${_mirrorDiffTxt(e.diff, row.pl_type, true)} (${un}).\n`
+          + `Verde até ${_mirrorDiffTxt(e.tolAbs, row.pl_type, true).replace('+', '')}, `
+          + `amarelo até ${_mirrorDiffTxt(2 * e.tolAbs, row.pl_type, true).replace('+', '')}, `
+          + `vermelho além — faixa ABSOLUTA, na unidade da linha.\n`
+          + `⚠ Não é relativa à exposição do ${tr}: ±5% de uma linha pequena é um desvio que `
+          + `não existe na prática, e de uma linha grande é um que importa.`
+          + (e.plLote ? `\n\n1 contrato aqui vale ~${
+              _mirrorDiffTxt(e.plLote, row.pl_type, true).replace('+', '')} (${un})`
+              + (Math.abs(e.diff) < e.plLote
+                  ? ' — a diferença é MENOR que isso, então a boleta não consegue corrigir.'
+                  : '.') : '')
+        : `Sem #PL dos dois lados: o veredito cai na faixa RELATIVA de `
+          + `±${(e.tol * 100).toLocaleString('en-US', {maximumFractionDigits: 1})}% da exposição `
+          + `dele, amarelo até o dobro, vermelho além.`);
   const cls = rfMirrorClass(e);
   return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
     e.caso === 'ok' ? '✓'
@@ -1879,8 +1964,17 @@ function _pnlTablesForTab() {
    ⭐ **E a resposta é derivável**: o backend carimba `prf_funds_ok` — os fundos que PODERIAM
    carregar aquela linha, pelas MESMAS regras do check de mandato. Se o único que pode é o
    fundo onde ela está, a concentração é a regra sendo cumprida (câmbio e ouro/prata só cabem
-   no Juros e Moeda) → **✓ só Juros e Moeda**. Se os outros também podiam, ela deveria ter
+   no Juros e Moeda) → **✓ só no JM**. Se os outros também podiam, ela deveria ter
    sido rateada → **⛔ ERRO**.
+   ⭐ **O fundo sai em SIGLA** (09/11/2026, pedido da mesa) — `fundSigla`, em pos-format.js.
+   A célula dizia `✓ só Juros e Moeda` numa coluna cujas demais células são `✓` ou
+   `±0,006%`: 15 caracteres de nome de fundo dentro de uma coluna de veredito, e a coluna
+   inteira alargava por causa de duas linhas de câmbio. O nome por extenso continua no
+   `title` — abreviar o veredito, nunca a explicação.
+   ⚠️ **O "só no" ficou** (mesma conversa, 2ª passada): sem ele a célula vira `✓ JM`, que se
+   lê como "o JM está ✓" — mais um fundo aprovado numa linha rateada — em vez de "esta linha
+   mora num fundo só, e é o certo". A sigla encurta o NOME; quem carrega o veredito é a
+   frase.
    ⚠️ Sem `prf_funds_ok` (payload antigo / snapshot) devolve `null` e o chamador mantém o
    comportamento anterior — melhor um rótulo velho que um veredito inventado. */
 function _checkNaoRateada(r, fundosComQtd) {
@@ -1895,7 +1989,7 @@ function _checkNaoRateada(r, fundosComQtd) {
       'SÓ o ' + lbl + ' pode carregar esta linha, e é onde ela está — não há rateio a '
       + 'conferir.' + _AL_NL + _AL_NL
       + 'Pelas regras dos fundos (mandato, praça e, em commodity, o metal), os demais não '
-      + 'podem tê-la. É o caso de câmbio e de ouro/prata.')}">✓ só ${lbl}</td>`;
+      + 'podem tê-la. É o caso de câmbio e de ouro/prata.')}">✓ só no ${fundSigla(onde[0])}</td>`;
   }
   const outros = podem.filter(f => f !== onde[0]).map(f => fundLabelMesa(f, true));
   return `<td class="check-cell alloc-bad" title="${_escHtml(
@@ -1946,7 +2040,6 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   // Fundo que recebe 100% do dólar (backend: `portfoliorf_offshore_fund`). Sem ele —
   // payload antigo / snapshot estático — o check cai no comportamento anterior.
   const offFund  = (offshoreFund && fundNavs[offshoreFund] != null) ? offshoreFund : null;
-  let   usedOffOnly = false;
 
   // Index fund rows by key -> {fund_label -> row}
   const fundIndex = {};
@@ -1972,6 +2065,16 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
 
     const k           = `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
     const byFund      = fundIndex[k] ?? {};
+    /* Fundos que de fato CARREGAM a linha — a entrada do `_checkNaoRateada` nos dois ramos
+       de linha não rateada (offshore e dólar).
+       ☠️ **É por QUANTIDADE, não por existir linha no break** (09/11/2026). A nota de
+       05/11 já dizia "os fundos vêm do que TEM QUANTIDADE", mas o código perguntava
+       `byFund[fl]` — a linha EXISTE —, e posição **zerada continua no break** (a mesma
+       armadilha do elo da nota de corretagem, em §"A NOTA adianta o futuro"). Resultado:
+       linha que esteve em dois fundos e hoje está num só saía de "concentrada" para
+       "rateada entre dois" por causa de uma linha de qty 0, perdendo o veredito e caindo
+       no rótulo mudo. O `dolarFundoErrado` ao lado já media por quantidade (com eps). */
+    const _ondeQtd    = fundLabels.filter(fl => _frSum(byFund, fl, 'final_qty') !== 0);
     const isSleeve    = !!r.is_rf_sleeve;
     const totalQty    = r.final_qty || 0;
     const totalNavSum = fundLabels.reduce((s, fl) => s + (fundNavs[fl] ?? 0), 0);
@@ -1980,7 +2083,6 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     // Linha cuja alocação vai 100% para o fundo offshore por desenho (hoje: dólar).
     // O sleeve offshore (`is_offshore`) segue no ramo próprio, sem check.
     const offOnly     = !!r.alloc_offshore_only && !r.is_offshore && !!offFund;
-    if (offOnly) usedOffOnly = true;
     /* ⛔ Dólar com quantidade em fundo que não opera dólar — ver `dolarFundoErrado` acima.
        ⚠️ O gatilho é `dollar_kind`, com o dólar de CAIXA (`dolar_caixa`) isento — não
        `alloc_offshore_only`; ver a nota de 30/10/2026 em `dolarFundoErros`. Vale para a
@@ -2150,12 +2252,11 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
          `_checkNaoRateada` nunca via uma linha offshore RATEADA entre os dois veículos —
          ela saía ⛔ ERRO mesmo repartida certo. Com os donos reais, linha em mais de um
          fundo cai no check normal (desvio em pp), que é o veredito dela. */
-      const _ondeOff = fundLabels.filter(fl => _frTem(byFund, fl));
-      checkPlCell = _checkNaoRateada(r, _ondeOff.length ? _ondeOff : [r.alloc_fund || offFund])
+      checkPlCell = _checkNaoRateada(r, _ondeQtd.length ? _ondeQtd : [r.alloc_fund || offFund])
         ?? `<td style="color:var(--text-muted);text-align:right;font-size:11px"${
           r.alloc_fund ? ` title="${_escHtml('100% no ' + fundLabelMesa(r.alloc_fund, true)
             + '. O #PL é calculado sobre o NAV desse fundo, não sobre a soma dos três.')}"` : ''
-          }>${r.alloc_fund ? 'só ' + fundLabelMesa(r.alloc_fund, true) : '—'}</td>`;
+          }>${r.alloc_fund ? 'só no ' + fundSigla(r.alloc_fund) : '—'}</td>`;
     } else if (offOnly && r.dolar_caixa) {
       /* ☠️ **Dólar de CAIXA não tem alvo de rateio** (03/11/2026). Ele é o hedge do caixa em
          BRL de CADA fundo — medido no dia: −50 no Juros Global e −41 no Juros e Moeda —, e o
@@ -2171,21 +2272,77 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       // Só o fundo dono entra: os demais não carregam a posição por desenho, então
       // compará-los com o #PL do grupo acusaria a ausência esperada.
       const _alvoFd = r.alloc_fund ?? offFund;
+      /* ⭐ **MESMO VEREDITO DAS MOEDAS OFFSHORE** (09/11/2026, pedido da mesa: *"e a regra do
+         mini dólar? não tá aparecendo só no JM... dos futuros de BRL em geral, grande ou
+         mini... deveria ser a mesma lógica das moedas offshore"*). Dólar contra BRL (UC/DOL
+         cheio, WDO mini, opção de DOL/USDBRL, NDF) e moeda offshore são a MESMA pergunta —
+         *"a linha está no único fundo que pode carregá-la?"* —, e estavam respondendo em
+         dois idiomas: a moeda com o veredito por `prf_funds_ok` (`✓ só no JM`) e o dólar com
+         um número, por viver num ramo que nasceu antes do `_checkNaoRateada`.
+         ☠️ **E o número do dólar não dizia nada: ele só sabia imprimir `✓`.** O ramo mede
+         `|#PL(fundo do dólar) − #PL(livro)|`, mas (a) quantidade em QUALQUER outro fundo é
+         pega antes pelo `dolarErro`, com precedência, e (b) desde 09/11 o denominador do
+         `#PL` é o NAV dos fundos ONDE A QUANTIDADE ESTÁ — ou seja, chegando aqui vale
+         `fund_qty == totalQty` e `refNav == navF`, e a conta é `#PL × 1 × 1`, idêntica por
+         construção. Um check que não tem como reprovar é um check que não existe.
+         ⚠️ A conta FICA como fallback (`??`), para o caso em que o break não fecha com a
+         quantidade da linha principal: ali o `±` é o único aviso de que as duas visões
+         discordam, e apagá-lo seria esconder inconsistência de dado atrás de um ✓. */
+      const _vere = _checkNaoRateada(r, _ondeQtd.length ? _ondeQtd : [_alvoFd]);
+      if (_vere) { checkPlCell = _vere; } else {
       const fpOff  = fundPlArr[fundLabels.indexOf(_alvoFd)];
       const devPl  = (groupPl != null && fpOff != null) ? Math.abs(fpOff - groupPl) : null;
       // ⚠️ A cor passou a viver no `<td>` (classe `check-cell …`), não num `<span>` dentro:
       // o fundo tingido é da CÉLULA, e um span colorido por cima dele brigaria com o contraste.
+      // Mesma régua do ramo geral e do Check EMota — ver `rfExpoClass`.
+      const _dCls = rfExpoClass(devPl, r);
+      const _dTol = rfMirrorTol(r);
+      const _dUn  = r.pl_type === 'pct' ? '% do NAV' : '% do NAV por 100 bps';
       checkPlCell = devPl == null
         ? `<td class="num" style="color:var(--text-muted);text-align:right" title="Dólar — #PL conferido só em ${
             shortLabel(offFund)}">—</td>`
-        : `<td class="check-cell ${devPl < 0.01 ? 'alloc-ok' : allocClass(devPl)}" title="Dólar — #PL conferido só em ${
-            shortLabel(offFund)}">${devPl < 0.01 ? '✓'
-              : `±${(devPl * 100).toLocaleString('en-US', {maximumFractionDigits:2})}pp`}</td>`;
+        : `<td class="check-cell ${_dCls}" title="${_escHtml(
+            `DÓLAR — #PL conferido só no ${fundLabelMesa(_alvoFd, true)}: os demais não `
+            + `carregam a posição por desenho, e compará-los acusaria a ausência esperada.\n\n`
+            + `  ${fundLabelMesa(_alvoFd, true)}: ${_mirrorExpTxt(fpOff, r.pl_type)}\n`
+            + `  livro: ${_mirrorExpTxt(groupPl, r.pl_type)}   (${_dUn})\n\n`
+            + `Divergência: ${_mirrorDiffTxt(devPl, r.pl_type, true).replace('+', '')}.\n`
+            + `Verde até ${_mirrorDiffTxt(_dTol, r.pl_type, true).replace('+', '')}, amarelo até `
+            + `${_mirrorDiffTxt(2 * _dTol, r.pl_type, true).replace('+', '')}, vermelho além — `
+            + `a MESMA faixa do Check EMota.`)}">${
+            _dCls === 'alloc-ok' ? '✓'
+              : '±' + _mirrorDiffTxt(devPl, r.pl_type).replace('+', '')}</td>`;
+      }
     } else if (groupPl != null && fundPlArr.every(p => p != null)) {
-      const devs   = fundPlArr.map(fp => Math.abs(fp - groupPl));
-      const maxDev = Math.max(...devs);
-      checkPlCell = `<td class="check-cell ${maxDev < 0.01 ? 'alloc-ok' : allocClass(maxDev)}">${
-        maxDev < 0.01 ? '✓' : `±${(maxDev * 100).toLocaleString('en-US', {maximumFractionDigits:2})}pp`}</td>`;
+      /* ⭐ **MESMA RÉGUA DO CHECK EMOTA** (09/11/2026) — ver `rfExpoClass` em pos-helpers.js.
+         ☠️ Esta coluna vivia em 0,02/0,04 (o `ALLOC_TOL`, que é de outra grandeza: fatia em
+         pp) enquanto o EMota mede **diferença de #PL**. Resultado medido em 09/11: o
+         `ONE-DAY BANK DEP Jan31` tinha 0,0051 de desvio e saía **amarelo no EMota e verde
+         aqui**, células vizinhas, o mesmo número.
+         ☠️ **E o sufixo "pp" estava errado em linha de juros seco**: a célula fazia
+         `desvio × 100` e escrevia pp — verdade em linha de PRÊMIO (fração do NAV → pontos
+         percentuais), falso em PL por 100 bps, que não é fração: 0,0051 saía como
+         **±0,51pp**, que não é meio ponto de nada. O `_mirrorDiffTxt` resolve os dois casos
+         porque decide o sufixo pelo `pl_type`. */
+      const maxDev = Math.max(...fundPlArr.map(fp => Math.abs(fp - groupPl)));
+      const _plCls = rfExpoClass(maxDev, r);
+      const _tolPl = rfMirrorTol(r);
+      const _un    = r.pl_type === 'pct' ? '% do NAV' : '% do NAV por 100 bps';
+      /* A célula não tinha TOOLTIP nenhum: imprimia o maior desvio sem dizer de QUAL fundo,
+         nem quanto era cada um. Agora lista os três contra o grupo. */
+      const _det = fundLabels.map((fl, i) => `  ${fundLabelMesa(fl, true)}: `
+        + `${_mirrorExpTxt(fundPlArr[i], r.pl_type)}  `
+        + `(${_mirrorDiffTxt(fundPlArr[i] - groupPl, r.pl_type)})`).join('\n');
+      const _tip = `RATEIO ENTRE OS FUNDOS — o #PL de cada um contra o do livro `
+        + `(${_mirrorExpTxt(groupPl, r.pl_type)}, ${_un}). Linha rateada na proporção dos NAVs `
+        + `dá o MESMO #PL nos três, então qualquer diferença é desvio de rateio.\n\n`
+        + _det + `\n\nMaior divergência: ${_mirrorDiffTxt(maxDev, r.pl_type, true)}.\n`
+        + `Verde até ${_mirrorDiffTxt(_tolPl, r.pl_type, true).replace('+', '')}, amarelo até `
+        + `${_mirrorDiffTxt(2 * _tolPl, r.pl_type, true).replace('+', '')}, vermelho além — `
+        + `a MESMA faixa do Check EMota, porque é a mesma grandeza.`;
+      checkPlCell = `<td class="check-cell ${_plCls}" title="${_escHtml(_tip)}">${
+        _plCls === 'alloc-ok' ? '✓'
+          : '±' + _mirrorDiffTxt(maxDev, r.pl_type).replace('+', '')}</td>`;
     } else {
       checkPlCell = '<td style="color:var(--text-muted);text-align:right">—</td>';
     }
@@ -2212,21 +2369,25 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   }).join('');
   const subHeaders = fundLabels.map(() => '<th>Qty</th><th>#PL</th>').join('');
 
-  // Rodapé: diz por que aquelas linhas não seguem o rateio por NAV (a tela não pode
-  // trocar o alvo do check em silêncio).
   // ⛔ Sem o `1 +` da coluna Instrumento, que saiu em 05/11/2026 (ver o `<thead>`).
   const NC = 2 * fundLabels.length + 1 + (mirrorCols ? 1 : 0) + (rfSleeveCols ? 1 : 0);
-  const footTr = usedOffOnly
-    ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px;color:var(--text-muted)"><div>`
-      + `US$ dólar (WDO/UC, opção DOL/USDBRL, spot-fwd USD/BRL): alocação vai 100% para `
-      + `${shortLabel(offFund)} — o check usa esse alvo, não o rateio por NAV, e a exposição `
-      + `(#PL) da tabela principal é calculada sobre o NAV desse fundo. `
-      + `Quantidade em qualquer outro fundo é ⛔ <b>ERRO</b>, não desvio de rateio — `
-      + `só esse fundo tem o veículo offshore.</div></td></tr>`
-    : '';
-  const rfFootTr = rfSleeveCols
-    ? `<tr><td class="aux-foot" colspan="${NC}" style="font-size:11px"><div>${rfTargetNote(rfCfg)}</div></td></tr>`
-    : '';
+  /* ⚰️ **OS DOIS RODAPÉS SAÍRAM (09/11/2026, mesa: *"acho que esses avisos não precisam
+     mais né? temos as regras todas embaixo"*).** Eram o do dólar ("alocação vai 100% para
+     o Juros e Moeda…") e o do alvo do espelho ("Alvo de hoje por book: 5,9% em juros…"),
+     dois parágrafos na largura da auxiliar, todo dia.
+     ⭐ **Os dois nasceram ANTES do painel de regras do topo (03/11/2026) e viraram cópia
+     dele** — que é exatamente o 2º lugar de onde a regra pode divergir do que o código faz,
+     a razão pela qual o painel foi derivado do `funds.PORTFOLIORF_REGRAS` em vez de
+     digitado. Conferido texto a texto antes de remover, para não sumir com fato nenhum:
+       · dólar → linha "dólar direcional só no Juros e Moeda" do painel, cujo ⓘ (`tipDolar`)
+         já traz a frase inteira, **inclusive** a do `#PL` sobre o NAV daquele fundo; e,
+         desde 09/11, o veredito `✓ só no JM` na própria célula, com o porquê no `title`;
+       · alvo do espelho → coluna "Espelho PAbinader (10,0% da exp.)" do painel, com o alvo
+         de CADA fundo na linha dele e o ⓘ (`tipAbi`) dizendo que juros vai aos dois e
+         câmbio só ao Juros e Moeda — mais o alvo da LINHA impresso na própria célula de
+         `Check Abi` e repetido no `title` dela.
+     ⚠️ O `rfTargetNote` FICA: ele ainda é o rodapé da tabela de alocação da aba do
+     PAbinader, que não tem painel de regras (lá a frase é a única fonte). */
   /* ⚠️ **Fundo da aba SEM NAV não vira coluna aqui — e a posição dele não pode sumir calada.**
      As colunas saem do `fund_navs` de propósito: sem NAV não há `#PL`, e uma coluna a mais
      com "—" apagaria o `Check #PL` de TODAS as linhas (ele exige `#PL` em todos os fundos).
@@ -2270,7 +2431,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       <tr>${headers}<th rowspan="2">Check #PL</th>${mirrorCols ? mirrorCheckHead(mirrorCfg).replace('<th ', '<th rowspan="2" ') : ''}${rfSleeveCols ? rfCheckHead(rfCfg, true).replace('<th ', '<th rowspan="2" ') : ''}</tr>
       <tr>${subHeaders}</tr>
     </thead>
-    <tbody>${rows}${footTr}${rfFootTr}${navFootTr}</tbody>
+    <tbody>${rows}${navFootTr}</tbody>
   </table>`;
 }
 

@@ -992,12 +992,25 @@ function renderTable(rows, tbodyId) {
 
     const safeKey    = rKeyFull.replace(/"/g, '&quot;');
     const safeIk     = instKey(r).replace(/"/g, '&quot;');   // chave por instrumento (preço compartilhado)
+    /* ☠️ **Chave da MARRETA — `ovrKey`, não `rowKey`** (09/11/2026). No modo "por fundo"
+       as duas sintéticas de uma linha têm o MESMO `rowKey` (o fundo não entra nele), então
+       editar a "Qtd operada" de um bloco gravava a marreta do LIVRO: no re-render ela voltava
+       rateada pelos dois blocos, o número digitado nunca aparecia na célula e o outro fundo
+       mudava junto — que é como se lê "não deixa alterar". O `ovrKey` põe o fundo na chave
+       (ver pos-helpers.js); fora do split ele É o `rowKey`, então nada muda no Consolidado. */
+    const safeOvrKey = ovrKey(r).replace(/"/g, '&quot;');
+    /* ⚠️ **O PREÇO é a exceção e continua no LIVRO.** Ele vale por INSTRUMENTO, e o #PL que
+       dele deriva é gravado na linha do livro justamente para DESCER rateado a todos os
+       blocos (o `buildFundSplitRows` lê `effectiveRowPl` da principal). Por isso `cf`/`nav`/
+       `fq` da célula de preço saem da linha PRINCIPAL: com os da sintética, o #PL derivado
+       sairia na fatia e no NAV de um fundo só e contaminaria o livro inteiro. */
+    const rPrice     = r._fsMain ?? r;
     const openingCell = `<td class="col-pnl num" style="cursor:pointer" title="Clique para editar"
-            data-swapkey="${safeKey}" data-opening="${effOpening ?? ''}"
+            data-swapkey="${safeOvrKey}" data-opening="${effOpening ?? ''}"
             onclick="event.stopPropagation();swapStartEdit(this,'opening',this.dataset.swapkey,parseFloat(this.dataset.opening))">
            ${fmtFinalQty(effOpening, qtyDec(r))}</td>`;
     const tradedCell = `<td class="num" style="cursor:pointer" title="Clique para editar"
-            data-swapkey="${safeKey}" data-traded="${effTraded ?? ''}"
+            data-swapkey="${safeOvrKey}" data-traded="${effTraded ?? ''}"
             onclick="event.stopPropagation();swapStartEdit(this,'traded',this.dataset.swapkey,parseFloat(this.dataset.traded))">
            ${fmtTradedQty(effTraded, qtyDec(r))}</td>`;
 
@@ -1021,7 +1034,7 @@ function renderTable(rows, tbodyId) {
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
       <td class="col-detail num" ${d}>${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
-      <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(rKeyFull) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? `<span ${IMG_SKIP} style="color:var(--accent);font-size:10px">★ </span>` : ''}${simMark}${r.instrument_name ?? '—'}</td>
+      <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(ovrKey(r)) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? `<span ${IMG_SKIP} style="color:var(--accent);font-size:10px">★ </span>` : ''}${simMark}${r.instrument_name ?? '—'}</td>
       <!-- fmtOptMaturity, e nao fmtDate(r.maturity): a coluna tem de mostrar a MESMA data que
            ORDENA a linha (sortMaturityKey). Sem isso as opcoes abertas hoje, que chegam sem
            maturity do JRS, ficavam com um traco no meio do bloco, ordenadas por um criterio
@@ -1036,15 +1049,15 @@ function renderTable(rows, tbodyId) {
         const priceStr      = isFxOpt ? fmtPricePct(dispPriceLive) : fmtPrice(dispPriceLive);
         return `<td class="num" style="cursor:pointer"${tipAttr}${!tip ? ' title="Clique para editar preço"' : ''}
           data-instkey="${safeIk}" data-rowkey="${safeKey}"
-          data-cf="${r.calc_factor ?? ''}" data-nav="${r.nav ?? ''}"
-          data-fq="${r.final_qty ?? ''}" data-plt="${r.pl_type ?? ''}"
+          data-cf="${rPrice.calc_factor ?? ''}" data-nav="${rPrice.nav ?? ''}"
+          data-fq="${rPrice.final_qty ?? ''}" data-plt="${rPrice.pl_type ?? ''}"
           data-isfx="${isFxOpt ? 1 : 0}" data-isopt="${r.is_option ? 1 : 0}"
           onclick="event.stopPropagation();posPriceStartEdit(this)">
           ${priceStr}</td>`;
       })()}
       ${isSwap
         ? `<td class="num" style="cursor:pointer" title="Clique para marretar o DV01 (o #PL segue)"${tipAttr}
-             data-swapkey="${safeKey}" data-dv01="${effDv01 ?? ''}"
+             data-swapkey="${safeOvrKey}" data-dv01="${effDv01 ?? ''}"
              onclick="event.stopPropagation();swapStartEdit(this,'dv01',this.dataset.swapkey,parseFloat(this.dataset.dv01))">${fmtDv01(effDv01)}</td>`
         : `<td class="num"${tipAttr}>${fmtDv01(effDv01)}</td>`}
       ${(() => {
@@ -1056,10 +1069,38 @@ function renderTable(rows, tbodyId) {
         // backend ao lado de um #PL marretado faria a célula se contradizer no title.
         const delta    = r.is_option ? effectiveDelta(r) : r.option_delta;
         const deltaOvr = r.is_option && deltaOverrides.has(instKey(r));
-        const plTip    = delta != null
+        /* ⭐ **O DENOMINADOR do #PL vai no hover** (09/11/2026). Na aba do PortfolioRF ele
+           deixou de ser fixo: é a soma dos NAVs dos fundos ONDE A QUANTIDADE ESTÁ, linha a
+           linha (ver `nav_funds` em router.py). Com três fundos, duas linhas vizinhas podem
+           estar sobre bases diferentes — e um % sem dizer de que NAV ele é convida a somar o
+           que não soma. ⚠ Só o PortfolioRF carimba `nav_funds`; nas demais abas o hover
+           segue como era. */
+        /* ⚠ A linha do SLEEVE já derivava o denominador por outro caminho
+           (`rf_sleeve_owner_funds`, os veículos que ela toca) — entra aqui para a aba inteira
+           declarar a base do mesmo jeito, em vez de metade das linhas dizer e metade não. */
+        const _navSrc = (Array.isArray(r.nav_funds) && r.nav_funds.length) ? r.nav_funds
+          : (Array.isArray(r.rf_sleeve_owner_funds) && r.rf_sleeve_owner_funds.length)
+            ? r.rf_sleeve_owner_funds : null;
+        const _navFundos = _navSrc
+          ? (typeof fundLabelMesa === 'function'
+              ? _navSrc.map(f => fundLabelMesa(f, true)).join(' + ') : _navSrc.join(' + '))
+          : null;
+        const _navTip = _navFundos
+          ? `\n\nDenominador: ${_navFundos}`
+            + (r.nav != null && typeof fmtMoneyTxt === 'function' ? ` = ${fmtMoneyTxt(r.nav)}` : '')
+            + (r.is_rf_sleeve
+                ? ' — o(s) fundo(s) dono(s) do(s) veículo(s) que esta linha toca. NÃO soma com o '
+                  + '#PL das demais linhas da aba: denominador diferente.'
+                : ' — os fundos que DE FATO carregam esta linha.')
+          : (r.nav_sem_break
+              ? '\n\n⚠ Denominador: soma de TODOS os fundos do RF — esta linha não tem break por '
+                + 'fundo (swap consolidado), então não dá para saber quem a carrega. O #PL é '
+                + 'aproximação.'
+              : '');
+        const plTip    = (delta != null
           ? `Delta: ${delta}${deltaOvr ? ' ★ marreta manual (Análise de Opções)' : ''} (clique para editar #PL)`
-          : 'Clique para editar #PL';
-        return `<td class="col-final num" data-rowkey="${safeKey}" onclick="event.stopPropagation();posPlStartEdit(this)" style="cursor:pointer" title="${plTip}">${fmtPL(dispPl, dispType)}</td>`;
+          : 'Clique para editar #PL') + _navTip;
+        return `<td class="col-final num" data-rowkey="${safeOvrKey}" onclick="event.stopPropagation();posPlStartEdit(this)" style="cursor:pointer" title="${plTip}">${fmtPL(dispPl, dispType)}</td>`;
       })()}
     </tr>`;
   }).join('');

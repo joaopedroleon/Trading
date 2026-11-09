@@ -6,6 +6,24 @@ function rowKey(r) {
   return [r.group, r.trader, r.instrument_reference, r.area, r.subarea, r.strategy, r.maturity].join('||');
 }
 
+/* ── Chave da MARRETA de quantidade/#PL ──────────────────────────────────────────────
+   ☠️ **No modo "por fundo" a marreta é DO FUNDO, e por isso a chave leva o fundo.**
+   O `rowKey` não o contém (de propósito: a linha do livro é uma só), então as sintéticas
+   dos dois blocos compartilhavam a chave da principal — editar a "Qtd operada" de UM fundo
+   gravava a marreta do LIVRO INTEIRO, que no re-render voltava rateada pelos dois blocos: o
+   número digitado nunca aparecia na célula e os dois fundos mudavam juntos. Lia-se como
+   "não deixa alterar" (mesa, 09/11/2026).
+   ⚠️ O prefixo `FS|` separa os dois espaços: marreta do livro (visao Consolidado) e
+   marreta por fundo (visao Por fundo) convivem nos MESMOS mapas sem se misturar — e por
+   isso são limpas juntas na troca de aba. **Uma não vaza para a outra**: o que a mesa
+   marreta no bloco de um fundo vale naquele bloco (e nos nets/checks dele), e o Consolidado
+   continua mostrando o livro como o backend o entrega, com a marreta do livro por cima.
+   O PREÇO fica fora disto — é por INSTRUMENTO (`instKey`) e, quando deriva #PL, grava na
+   chave do LIVRO para descer rateado a todos os blocos (ver `posPriceApplyEdit`). */
+function ovrKey(r) {
+  return r._fundSplit ? `FS|${r._fsFund}|${rowKey(r)}` : rowKey(r);
+}
+
 // Quantidades EFETIVAS de um SWAP (a "qtd" É o DV01) aplicando as marretas de abertura/
 // operada/dv01-total — MESMA regra da tabela de Posição (pos-render). Usado também pelo PnL
 // para refletir a marreta no ESTOQUE (=DV01 de abertura × Δtaxa) e na qtd exibida.
@@ -28,13 +46,14 @@ function swapEffQty(r) {
    DV01 (a célula de DV01 continua mostrando o derivado da quantidade). Quem quer o número
    COMO A COLUNA MOSTRA chama `effectiveRowPl`. */
 function effectiveRowValues(r) {
-  /* ☠️ **Linha SINTÉTICA do split por fundo (pos-fundsplit.js) devolve valores CRUS.**
-     O `rowKey` não tem o fundo, então as duas sintéticas de uma linha compartilham a chave
-     da principal — e reaplicar a marreta aqui daria o valor CHEIO em CADA tabela, ou seja o
-     dobro do livro, sem erro nenhum. A marreta já entrou lá, UMA vez, pela proporção do
-     fundo. Sem marreta a razão é 1 e o Σ dos fundos bate o consolidado exatamente. */
+  /* ☠️ **Linha SINTÉTICA do split por fundo (pos-fundsplit.js) já chega EFETIVA.**
+     Não se pode reaplicar marreta aqui: a do LIVRO entrou lá UMA vez, pela proporção do
+     fundo (reaplicá-la daria o valor CHEIO em CADA bloco, o dobro do livro, sem erro
+     nenhum), e a marreta DO FUNDO — que é keyed por `ovrKey`, com o fundo dentro — também
+     já foi lida lá, porque é ela que manda nas quantidades, no DV01 e no #PL rateado.
+     O `_fsQtyOvr` existe só para o ★ e para quem pergunta "esta linha está marretada?". */
   if (r._fundSplit) {
-    return { isSwap: r.swap_detail != null, qtyOvr: false,
+    return { isSwap: r.swap_detail != null, qtyOvr: !!r._fsQtyOvr,
              opening: r.opening_qty, traded: r.traded_qty, final: r.final_qty,
              dv01: r.usd_dv01, pl: r.pl, plType: r.pl_type };
   }
@@ -77,9 +96,12 @@ function effectiveRowValues(r) {
    (`plOverrides`, sempre fração do NAV) domina; senão o derivado das marretas de
    quantidade. `eff` é opcional, só p/ não recalcular quem já tem. */
 function effectiveRowPl(r, eff) {
-  // Sintética do split por fundo: a marreta de #PL já entrou rateada (mesmo motivo do
-  // guard em `effectiveRowValues` — a chave não distingue os dois fundos).
+  /* Sintética do split por fundo: a marreta DIRETA de #PL é lida na chave COM o fundo
+     (`ovrKey`) — é o #PL daquele bloco, fração do NAV daquele fundo. A marreta de #PL do
+     LIVRO não entra aqui de novo: ela já desceu rateada pelo `buildFundSplitRows`. */
   if (r._fundSplit) {
+    const ovFs = plOverrides.get(ovrKey(r));
+    if (ovFs !== undefined) return { pl: ovFs, type: 'pct' };
     const e = eff || effectiveRowValues(r);
     return { pl: e.pl, type: e.plType };
   }
@@ -369,6 +391,21 @@ const GROUP_ORDER = ['MM', 'MM Prev', 'MM Allocation', 'Todos', 'RF Offshore'];
 /* ── Allocation targets ──────────────────────────────────────────────────── */
 const ALLOC_TARGETS = { EMota: 0.70, ECotrim: 0.60, PAbinader: 0.30, LAguiar: 0.30 };
 const ALLOC_TOL     = 0.02;
+/* ☠️ **Faixa PRÓPRIA do `Check Qtd`** (09/11/2026, mesa: *"≤ 1pp verde, ≤ 2pp amarelo,
+   > 2pp vermelho"*). Não dá para apertar o `ALLOC_TOL` para isso: ele é compartilhado por
+   **seis** outros checks (Check #PL, Check Prev, o #PL do dólar, os baldes de câmbio do
+   `pos-fxlegs`), e mudar lá apertaria todos de uma vez — nenhum deles foi pedido. Uma
+   constante nova é mais barata que um efeito colateral em 6 colunas. */
+const RF_QTD_TOL    = 0.01;   // 1pp — rateio da linha entre os fundos (modo Por fundo)
+
+/* Faixa do `Check Qtd`: verde até 1pp, amarelo até 2pp, vermelho além. */
+function rfQtdClass(dev) {
+  if (dev == null) return '';
+  const a = Math.abs(dev);
+  if (a <= RF_QTD_TOL)     return 'alloc-ok';
+  if (a <= 2 * RF_QTD_TOL) return 'alloc-warn';
+  return 'alloc-bad';
+}
 
 /* ── Sleeve de RF: o book de um trader de MM espelhado no veículo do RF ───────────────
    O PAbinader boleta ~4% do ticket dele de MM também no `JGP Offshore Segregated
@@ -638,6 +675,44 @@ function rfSleeveFundLabel(cfg) {
    existe "a mais/a menos": a célula diz isso por extenso. */
 const RF_MIRROR_REL_TOL = 0.05;   // fallback; o valor que vale vem do payload (`rel_tol`)
 
+/* ☠️ **A FAIXA É ABSOLUTA, EM #PL — não relativa à exposição do EMota** (09/11/2026, mesa:
+   *"no check EMota do Juros Local hoje está amarelo, mas a divergência parece muito
+   pequena... se o EMota tem 0.10 PL, menor de 0.005 PL pode ficar verde, entre 0.005 e 0.01
+   amarelo, e maior que isso vermelho"*).
+   ☠️ **Por que a relativa falhava:** ±5% de uma exposição de 0,04% do NAV é 0,002% — um
+   décimo do que a mesa considera ruído. Medido no dia: o Juros Local saía **⚠ amarelo com
+   −0,00% de diferença**, porque a razão era 94,1% (−5,9%) numa linha cujo desvio absoluto
+   é invisível. A faixa relativa aperta onde a posição é pequena — exatamente onde não
+   importa — e afrouxa onde ela é grande, que é onde importa.
+   ⭐ **A escala muda com a UNIDADE da linha**, porque as duas não são comparáveis: juros
+   seco é PL por 100 bps (sem `%`) e opção/digital é **% do NAV de prêmio**. O número 0,005
+   é o mesmo nos dois, mas em `pct` ele vale **0,005% do NAV**, não 0,005 do NAV. */
+const RF_MIRROR_TOL_PL  = 0.005;     // linha `nominal`: 0,005 de PL por 100 bps
+const RF_MIRROR_TOL_PCT = 0.00005;   // linha `pct`: 0,005% do NAV (prêmio de opção)
+
+/* Limiar de VERDE desta linha, na unidade dela. Amarelo vai até o dobro; vermelho além. */
+function rfMirrorTol(row) {
+  return row?.pl_type === 'pct' ? RF_MIRROR_TOL_PCT : RF_MIRROR_TOL_PL;
+}
+
+/* ⭐ **A RÉGUA ÚNICA DE TODO CHECK DE EXPOSIÇÃO DA ABA** (09/11/2026, mesa: *"faz essa regra
+   igual à que acabamos de mexer no por fundo e também na lógica do EMota, todos os checks de
+   exposição consistentes"*). Usam-na o **Check EMota** (livro × EMota) e o **Check #PL**
+   (fundo × grupo) — as duas perguntas são diferentes, mas a GRANDEZA é a mesma: diferença
+   de #PL na unidade da linha.
+   ☠️ **Antes o Check #PL vivia em 0,02/0,04 e o EMota em 0,005/0,010**, e isso produzia duas
+   cores para o MESMO número: medido em 09/11, o `ONE-DAY BANK DEP Jan31` tinha **0,0051** de
+   desvio e saía **amarelo no EMota e verde no Check #PL**, células vizinhas. Faixa de check
+   é propriedade da GRANDEZA, não da coluna. */
+function rfExpoClass(diff, row) {
+  if (diff == null) return '';
+  const t = rfMirrorTol(row);
+  const a = Math.abs(diff);
+  if (a <= t)     return 'alloc-ok';
+  if (a <= 2 * t) return 'alloc-warn';
+  return 'alloc-bad';
+}
+
 /* Config do espelho na aba (ou null). Uma porta só, como o `rfSleeveCfg`. */
 function rfMirrorCfg(tabId) {
   const d = posDataByTab[tabId ?? currentRenderTab()] ?? positionsData;
@@ -676,24 +751,36 @@ function rfMirrorEval(row, cfg) {
   // Exposição do EMota no NAV DELE, derivada da do RF pela razão (o `k` do instrumento
   // cancela): exp_EM = exp_RF × qEq / qRf.
   out.expMm = out.expRf != null ? out.expRf * (out.qEq / qRf) : null;
-  // ⚠️ **Arredondamento de LOTE não é desalinhamento.** Um contrato de diferença é o mínimo
-  // que a boleta consegue, então a tolerância nunca é menor que isso — num vértice de 20
-  // contratos, 5% seria 1 contrato e a coluna acusaria o que não dá para corrigir. Em
-  // instrumento cotado em NOCIONAL (1/|qEq| ~ 0) a guarda é inerte sozinha.
   out.tol = Math.max(out.tol, Math.abs(1 / out.qEq));
   if (out.ratio < 0) { out.caso = 'oposto'; return out; }
   // ☠️ O sinal é o da RAZÃO, não o da subtração — ver o ☠️ do cabeçalho.
   out.diff = (out.expRf != null && out.expMm != null)
     ? Math.sign(out.rel) * Math.abs(Math.abs(out.expRf) - Math.abs(out.expMm)) : null;
-  out.caso = Math.abs(out.rel) <= out.tol ? 'ok' : 'fora';
+  // ☠️ **O VEREDITO É O DESVIO ABSOLUTO EM #PL** (ver o ☠️ do `RF_MIRROR_TOL_PL`).
+  // ⚠️ A faixa RELATIVA sobrevive só como fallback de quando não há #PL dos dois lados
+  // (linha sem preço, DV01 ausente): ali a diferença em #PL não existe para medir, e um
+  // 'ok' por falta de dado seria pior do que o veredito antigo.
+  out.tolAbs = rfMirrorTol(row);
+  // #PL de UM contrato desta linha — não decide a cor, mas o tooltip o declara: abaixo
+  // disso a boleta não desce, e a mesa precisa saber quando o desvio é incorrigível.
+  out.plLote = (out.expRf != null && qRf) ? Math.abs(out.expRf / qRf) : null;
+  out.caso = (out.diff != null)
+    ? (Math.abs(out.diff) <= out.tolAbs ? 'ok' : 'fora')
+    : (Math.abs(out.rel) <= out.tol ? 'ok' : 'fora');
   return out;
 }
 
-/* Faixa de cor do espelho: verde dentro da tolerância, amarelo até o dobro, vermelho além. */
+/* Faixa de cor do espelho: verde dentro da tolerância, amarelo até o dobro, vermelho além.
+   ⚠️ A régua é o desvio ABSOLUTO em #PL (`diff` × `tolAbs`); a relativa só entra quando
+   não há #PL dos dois lados — o mesmo fallback do `rfMirrorEval`. */
 function rfMirrorClass(e) {
   if (!e || e.caso == null) return '';
   if (e.caso === 'ok') return 'alloc-ok';
   if (e.caso === 'oposto' || e.caso === 'so_rf' || e.caso === 'zerado_rf') return 'alloc-bad';
+  // Mesma régua do Check #PL — uma função só, para as duas não divergirem de novo.
+  if (e.diff != null && e.tolAbs) {
+    return Math.abs(e.diff) <= 2 * e.tolAbs ? 'alloc-warn' : 'alloc-bad';
+  }
   const a = Math.abs(e.rel ?? 0);
   return a <= 2 * e.tol ? 'alloc-warn' : 'alloc-bad';
 }
