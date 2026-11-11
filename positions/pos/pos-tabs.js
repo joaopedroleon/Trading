@@ -635,7 +635,12 @@ function _renderSectionsForTab(tabId, allRows) {
   const rfCcy    = (typeof renderRfCcyCheck === 'function') ? renderRfCcyCheck(rfCfg, tabId) : '';
 
   if (!sections.length) {
-    container.innerHTML = rfBanner + '<div class="card no-data">Não há posição para este trader.</div>' + rfCcy;
+    /* ⚠️ A faixa do que FALTA sai aqui também — e é justamente aqui que ela mais diz: aba
+       sem nenhuma linha com o book de MM cheio é o caso extremo de "o RF não espelhou". */
+    const _falt0 = (typeof renderRfFaltantes === 'function')
+      ? renderRfFaltantes(data, displayRows) : '';
+    container.innerHTML = rfBanner + '<div class="card no-data">Não há posição para este trader.</div>'
+      + _falt0 + rfCcy;
     return;
   }
 
@@ -785,7 +790,17 @@ function _renderSectionsForTab(tabId, allRows) {
     </div>`);
   });
 
-  container.innerHTML = rfBanner + mainCards.join('') + rfCcy;
+  /* ⚠ O QUE O BOOK DE MM TEM E O RF NÃO — faixa LOGO ABAIXO da tabela principal (pedido da
+     mesa, 11/11/2026). Fica aqui, e não no `rfAlertas` do topo, porque acima da Posição a
+     mesa só quer ERRO, e isto é divergência de alocação — ela pode ter decidido não
+     espelhar. ⭐ Silêncio é o estado normal: sem nada faltando, não renderiza nada.
+     ⚠️ Recebe `displayRows` (as linhas DESTA aba, sleeve incluído): quem decide se o ativo
+     existe no RF é o JS, que é o único que conhece a marreta de quantidade da mesa.
+     Ver `renderRfFaltantes` (pos-fundtables.js). */
+  const rfFalt = (typeof renderRfFaltantes === 'function')
+    ? renderRfFaltantes(data, displayRows) : '';
+
+  container.innerHTML = rfBanner + mainCards.join('') + rfFalt + rfCcy;
   if (prevContainer) prevContainer.innerHTML = prevCards.join('');
 
   for (const s of sections) {

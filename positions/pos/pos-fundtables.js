@@ -1909,6 +1909,143 @@ function renderPrfEscopoAlerta(data) {
   </div>`;
 }
 
+/* ── ⚠ O QUE O BOOK DE MM TEM E O RF NÃO (11/11/2026) ─────────────────────────────────
+   Pedido da mesa: *"se tiver alguma posição de juros do EMota que não está no RF, eu quero
+   que avise na página do RF — um aviso absolutamente direto abaixo da tabela principal. O
+   mesmo para o Abinader em juros e moeda"*.
+
+   ⭐ **É o ponto cego das duas colunas de espelho da auxiliar.** `Check EMota` e `Check Abi`
+   são POR LINHA, e uma posição que só existe no book de MM **não tem linha** — não sai
+   cinza, não sai vermelha, não aparece. O `zerado_rf` do `rfMirrorEval` cobre metade do fato
+   (a linha existe e está zerada); o instrumento que nunca entrou no RF é invisível.
+
+   ⚠️ **ABAIXO da tabela, e não na faixa de alertas do topo**, por duas razões que se somam:
+   a mesa já fixou que acima da Posição *"só os ERROS"* (05/11/2026) — e isto não é erro, é
+   divergência de alocação, que ela pode ter decidido não espelhar; e o lugar de ler "falta
+   isto" é logo depois da lista do que existe.
+
+   ☠️ **Quem decide se a linha EXISTE é AQUI, não o backend** — o payload traz só o lado do
+   MM (escopo + equivalência + piso aplicados em `rf_faltantes.py`). A razão é a MARRETA: a
+   quantidade que a mesa digita na célula vive no `effectiveRowValues`, e um veredito
+   calculado no servidor contradiria a tabela logo acima dele no primeiro número digitado.
+   ⚠️ E casa por `instrument_reference` **ou** por `instrument_name`: o ref é a chave boa
+   (é a do `rf_mirror.qty`), mas ele não sobrevive a toda linha do pipeline — numa linha que
+   hoje é só boleta ele pode ser outro. Casar pelos dois só reduz falso positivo; é o nome,
+   não o ref, que a mesa lê na tabela. */
+function _rfFaltLadoRows(bloco, mainRows) {
+  /* ⛔ O lado da tabela onde a contraparte DEVE estar. Misturar os dois faria a faixa do
+     EMota ser absolvida por uma linha do sleeve (que é do PAbinader, e tem o check dela). */
+  return (bloco?.via === 'sleeve')
+    ? (mainRows || []).filter(r => r.is_rf_sleeve && r.trader === bloco.trader)
+    : (mainRows || []).filter(r => !r.is_rf_sleeve);
+}
+
+/* O estado do ativo no RF: `null` = está lá (nada a dizer), 'zerada' = a linha existe e a
+   quantidade efetiva é zero, 'ausente' = não há linha nenhuma. */
+function _rfFaltEstado(item, lado) {
+  const ref  = item.instrument_reference;
+  const nome = item.instrument_name;
+  const cand = lado.filter(r => (ref && r.instrument_reference === ref)
+                             || (nome && r.instrument_name === nome));
+  if (!cand.length) return 'ausente';
+  const temQtd = cand.some(r => {
+    const q = (typeof effectiveRowValues === 'function' ? effectiveRowValues(r).final
+                                                        : r.final_qty) ?? 0;
+    return Math.abs(q) > 0;
+  });
+  return temQtd ? null : 'zerada';
+}
+
+function renderRfFaltantes(data, mainRows) {
+  const cfg = data?.rf_faltantes;
+  if (!cfg?.blocos?.length) return '';
+
+  const blocos = cfg.blocos.map(b => {
+    const lado = _rfFaltLadoRows(b, mainRows);
+    const ativos = (b.ativos || [])
+      .map(x => ({ ...x, estado: _rfFaltEstado(x, lado) }))
+      .filter(x => x.estado);
+    /* ⛔ **As MOEDAS não passam pelo teste de linha** — elas já vêm decididas do agregado
+       por moeda (`_rf_ccy_check`), que é a única régua válida em câmbio linear: o mesmo euro
+       é montado com pares diferentes em cada livro, então procurar "a linha do EUR" na
+       tabela não responde nada. É o espelho exato do veredito `rf_sem_par` de lá. */
+    const moedas = b.moedas || [];
+    return { b, ativos, moedas };
+  }).filter(x => x.ativos.length || x.moedas.length);
+
+  if (!blocos.length) return '';           // ⭐ silêncio é o estado normal
+
+  const usd = v => v == null ? '—'
+    : (v < 0 ? '(' : '') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      + (v < 0 ? ')' : '');
+  /* 2 casas, como a tabela "Exposição por moeda" — o `fmtPct` da aba tem 1, e numa exposição
+     de 0,31 % do NAV ela arredonda para 0,3 %, que não casa com o número da outra tabela. */
+  const pct2 = v => v == null ? '—'
+    : (v < 0 ? '(' : '') + Math.abs(v * 100).toLocaleString('en-US',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' + (v < 0 ? ')' : '');
+
+  /* ⭐ **UMA LINHA POR ITEM, e o resto em ⓘ** (11/11/2026, mesa: *"te pedi pra ser direto e
+     você escreveu esse texto enorme. É pra ser simples e direto, só pontuando"*). A 1ª versão
+     imprimia a regra do espelho, o escopo, a área/subárea, o rateio por fundo e um rodapé de
+     quatro linhas sobre os cortes — tudo verdade, e tudo ruído na faixa que tem de ser lida
+     de relance. É a regra da casa (`explicações em ⓘ, nunca soltas na tela`) aplicada aqui:
+     a LINHA diz o ativo e os dois números, o `title` diz o porquê. */
+  const skip = (cfg.skip_subareas || []).join(' e ') || 'caixa e hedge';
+  const tipBloco = b => _escHtml(
+    `${b.regra}.\n\nEscopo: ${b.escopo === 'juros'
+      ? 'juros. O dólar do livro é hedge próprio e não entra.'
+      : 'juros e moeda — ativo a ativo em juros, opção e futuro; por MOEDA no câmbio linear, '
+        + 'porque o mesmo euro é montado com pares diferentes em cada livro.'}\n\n`
+    + 'O "→ RF" é a quantidade equivalente de hoje: o ticket do MM trazido pela régua do '
+    + 'espelho e pelos NAVs do dia, repartida só nos fundos cujo mandato aceita o ativo.\n\n'
+    + `Ficam fora: ${skip} (hedge do caixa em BRL do próprio book, não alocação), o que não é `
+    + 'mandato do RF (bolsa, commodities) e o que equivale a menos de '
+    + `${String(cfg.min_qty_eq).replace('.', ',')} unidade — aí não há boleta a fazer.`);
+
+  const cards = blocos.map(({ b, ativos, moedas }, iB) => {
+    const n = ativos.length + moedas.length;
+    const liAtivos = ativos.map(x => {
+      const dec = (typeof qtyDec === 'function') ? qtyDec(x) : 0;
+      /* O rateio por fundo vem do backend e já respeita o MANDATO de cada um (praça do
+         juros, câmbio só onde é mandato) — é o número que desce na boleta. Vai no `title`:
+         na linha ele dobrava a altura da faixa e não é o que se lê primeiro. */
+      const porFundo = (x.fundos || []).filter(f => f.qty_eq != null)
+        .map(f => `${fundLabelMesa(f.fund, true)} ${fmtFinalQtyTxt(f.qty_eq, dec)}`).join(' · ');
+      const tip = `${x.area ?? '—'}${x.subarea ? ' · ' + x.subarea : ''}`
+        + (porFundo ? `\n\nNo RF: ${porFundo}` : '')
+        + (x.estado === 'zerada'
+            ? '\n\nA linha EXISTE na tabela acima, zerada — o check da auxiliar já a marca.'
+            : '\n\nNão há linha deste ativo no RF: nenhuma coluna de check consegue acusá-lo.');
+      return `<li style="margin:1px 0" title="${_escHtml(tip)}"><b>${_escHtml(x.instrument_name ?? '—')}</b>`
+        + (x.estado === 'zerada'
+            ? ' <span style="font-size:10px;color:var(--text-muted)">zerada</span>' : '')
+        + ` <span style="color:var(--text-muted)">—</span> ${_escHtml(b.label)}`
+        + ` <b>${fmtFinalQtyTxt(x.qty_mm, dec)}</b>`
+        + ` <span style="color:var(--text-muted)">→ RF</span> <b>${fmtFinalQtyTxt(x.qty_eq, dec)}</b></li>`;
+    }).join('');
+    const liMoedas = moedas.map(m => `<li style="margin:1px 0" title="${_escHtml(
+        `Câmbio LINEAR: o check é por MOEDA, não por vértice.\n\n${b.label}: US$ `
+        + `${usd(m.mm_usd)} (${pct2(m.mm_pct)} do NAV dele)\nRF: US$ ${usd(m.rf_usd)}`
+        + `\n\nMesma régua da tabela "Exposição por moeda", no fim da aba.`)}">`
+      + `<b>${_escHtml(m.ccy)}</b>`
+      + ` <span style="font-size:10px;color:var(--text-muted)">moeda</span>`
+      + ` <span style="color:var(--text-muted)">—</span> ${_escHtml(b.label)}`
+      + ` <b>US$ ${usd(m.mm_usd)}</b>`
+      + ` <span style="color:var(--text-muted)">→ RF</span> <b>US$ ${usd(m.rf_alvo_usd)}</b></li>`).join('');
+    return `<div style="margin-top:${iB ? 8 : 0}px">
+      <b style="color:var(--yellow);font-size:13px">⚠ ${_escHtml(b.label)} tem ${n}`
+      + ` ${n > 1 ? 'posições' : 'posição'} de ${_escHtml(b.escopo)} que o RF não tem</b>`
+      + ` <span style="color:var(--text-muted);cursor:help;font-weight:400" title="${tipBloco(b)}">ⓘ</span>
+      <ul style="margin:3px 0 0 18px;padding:0">${liAtivos}${liMoedas}</ul>
+    </div>`;
+  });
+
+  return `<div class="card" data-html2canvas-ignore="true"
+       style="border-left:4px solid var(--yellow);background:color-mix(in srgb, var(--yellow) 7%, var(--bg-card));flex:0 0 auto">
+    <div style="font-size:12px;line-height:1.55">${cards.join('')}</div>
+  </div>`;
+}
+
 /* ⛔ FAIXA VERMELHA no topo da aba. Mesma forma do alerta de escopo do sleeve, e pelo mesmo
    motivo: não é desvio de proporção, é posição que não deveria existir naquele fundo — a
    célula pintada na auxiliar não basta, porque a auxiliar pode estar filtrada ou o livro
