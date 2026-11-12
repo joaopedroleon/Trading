@@ -512,7 +512,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
       ${totalCell}
       ${showBoleta ? dealCell : ''}
       ${finalCell}
-      ${showRf ? rfCheckCell(rfCfg, { mmQty: mmFinal, rfQty: rfAll.length ? rfFinal : null,
+      ${showRf ? rfCheckCell(rfCfg, { mmQty: mmFinal, mmRow: mm, rfQty: rfAll.length ? rfFinal : null,
                                       row: rfLineRow(rfCfg, mm, rfAll) }) : ''}
     </tr>`;
   }).join('');
@@ -586,7 +586,7 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
      • **câmbio linear** (spot · NDF · forward) → o veredito vem do agregado **por MOEDA**
        (`ccy_check`), porque o mesmo euro é montado com pares diferentes em cada livro;
      • **opção e o resto** → linha a linha, pela **quantidade**, contra o alvo da boleta. */
-function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
+function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
   const muted = (txt, tip) =>
     `<td class="num" style="color:var(--text-muted);text-align:right" title="${_escHtml(tip)}">${txt}</td>`;
   const alvoExp = cfg?.exposure_ratio;
@@ -750,6 +750,27 @@ function rfCheckCell(cfg, { mmQty, rfQty, row } = {}) {
           + 'também não está.')
       + `\n\n${_linTxt}\n${_aggTxt}` + _rodape)}">${
       cls === 'alloc-ok' ? 'OK ✓' : _vere(fatia, '⚠')}</td>`;
+  }
+
+  /* ⭐ **ZERADO NOS DOIS LADOS é ✓, e virou caso próprio porque a tela dizia o CONTRÁRIO**
+     (12/11/2026, achado da mesa). O PAbinader zerou o `3MO EURO EURIBOR Dec27` e o
+     `3 MONTH SOFR FUT Dec27` no book de MM no mesmo pregão em que o RF zerou os dele — e
+     esta coluna marcava **"⚠ nada no RF"**, que é o vermelho de quem NÃO espelhou o que
+     devia. A causa de raiz estava no lado do MM (o `final_qty` vinha só com a abertura, sem
+     a boleta do dia — ver o ☠️ em `get_trader_qty_by_fund`); com ela corrigida, a `allocPct`
+     passa a ser `0/0` e o caminho de baixo cairia no "sem posição no MM para comparar", que
+     é um traço mudo dizendo o que não é verdade: a linha EXISTE no book de MM, zerada.
+     ⚠️ **Não confundir com `mmQty == null`** — aquilo é linha que não tem par no book de MM,
+     e lá o check continua não sendo afirmado. Aqui há par, e os dois estão em zero. */
+  if (mmQty != null && Math.abs(mmQty) < 1e-9 && Math.abs(rfQty ?? 0) < 1e-9) {
+    const _zerouHoje = mmRow && Math.abs(mmRow.traded_qty ?? 0) > 1e-9;
+    return `<td class="check-cell alloc-ok" title="${_escHtml(
+      '✓ Zerado nos dois lados — não há exposição a espelhar.'
+      + (_zerouHoje
+          ? '\n\n  MM: zerado HOJE (abertura ' + fmtFinalQtyTxt(mmRow.opening_qty)
+            + ', operada ' + fmtFinalQtyTxt(mmRow.traded_qty) + ')'
+          : '\n\n  MM: zero')
+      + '\n  RF: zero')}">zerado ✓</td>`;
   }
 
   // ── o resto (opção incluída): linha a linha, pela QUANTIDADE ─────────────────────
@@ -2337,7 +2358,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
         ${mirrorCols ? _checkVazio('—', 'Linha de outro trader: o espelho de juros confere o '
             + 'livro do PortfolioRF contra o EMota, e esta linha é do outro trader — o check '
             + 'dela é a coluna ao lado.') : ''}
-        ${rfSleeveCols ? rfCheckCell(rfCfg, { mmQty: mmRf?.final_qty ?? null,
+        ${rfSleeveCols ? rfCheckCell(rfCfg, { mmQty: mmRf?.final_qty ?? null, mmRow: mmRf,
             rfQty: effectiveRowValues(r).final ?? r.final_qty ?? 0,
             /* ⚠️ O alvo vem por ELEGIBILIDADE (`rfLineRow`), igual à aba de quem boleta: a
                linha de JUROS deve espelhar nos DOIS fundos, então o alvo é 4,5% + 1,4%
