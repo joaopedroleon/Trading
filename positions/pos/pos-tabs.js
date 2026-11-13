@@ -92,6 +92,11 @@ function showTraderTab(tabId) {
     const cfg = TRADER_TABS.find(t => t.id === tabId);
     if (cfg?.fxFromDeals && !fxDealsByTab[tabId]) loadFxDealsForTab(tabId);
   }
+  /* ⭐ Mesmo gatilho do `fxFromDeals` acima, pelo mesmo motivo: o "% boletado" do painel de
+     REGRAS sai do `/enquadramento-rf`, que é caro (BBG + Oracle) e por isso NÃO roda no
+     prefetch — abrir a aba é o gatilho. Inerte fora da aba do PortfolioRF (o painel só existe
+     lá) e quando o dado já está em cache. Ver `_rfPreencheLimites` (pos-fundtables.js). */
+  if (typeof _rfPreencheLimites === 'function') _rfPreencheLimites();
   renderRestoreBtn();
   if (typeof _syncPnlRestoreBtn === 'function') _syncPnlRestoreBtn();
   if (typeof simSync === 'function') simSync();   // grupos/contador da ferramenta de simulação
@@ -518,6 +523,14 @@ function _renderSectionsForTab(tabId, allRows) {
   const prevContainer = document.getElementById(`posPrevContainer-${tabId}`);
   const navMap     = data?.traders ?? {};
 
+  /* ☠️ ABRIGA a caixa de linha simulada ANTES de qualquer reescrita de `innerHTML` daqui
+     para baixo. Ela mora dentro do card (pedido da mesa, 13/11/2026) e o `innerHTML` do
+     container APAGA a subárvore: sem isto o `#simTool` deixa de existir no 1º re-render,
+     levando junto o que a mesa digitou. O `simSync()` no fim a traz de volta.
+     ⚠️ Tem de ficar aqui no topo, não só antes do `innerHTML` final: há dois early-returns
+     ("erro do payload" e "não há posição") que também reescrevem o container. */
+  if (typeof simStash === 'function') simStash();
+
   const hasFundBreak  = tabId === 'portfoliorf' && !!(data?.fund_rows?.length);
   /* ── Sleeve de RF (out/2026) — o book de outro trader dentro do veículo do RF ──────
      As linhas dele NUNCA se somam às do trader da aba — `trader` é chave em `_AGG_KEYS`, então
@@ -649,6 +662,11 @@ function _renderSectionsForTab(tabId, allRows) {
   // ordem do GROUP_ORDER — que é o comportamento antigo.
   const prevCards = [];
   const mainCards = [];
+  /* ⭐ O "+" de adicionar ativo e a caixa de linha simulada vivem no 1º card de Posição
+     (13/11/2026, pedido da mesa) — ver `_simToolsHtml` e a realocação do `#simTool` abaixo.
+     Só no PRIMEIRO: a ferramenta é da ABA (ela tem um <select> de grupo), e repeti-la em cada
+     card de grupo daria N botões abrindo a MESMA caixa. */
+  let simPosto = false;
   sections.forEach((s, _i) => {
     const isRfSleeve = s.group === rfGroupId;
     // ☠️ O NAV do card do sleeve NÃO é o do trader (o `navMap` traria o NAV de MM dele, ~2×
@@ -672,6 +690,10 @@ function _renderSectionsForTab(tabId, allRows) {
     const temSleeveAqui = !!rfMergeInto && !isRfSleeve
                        && sectionRows(s).some(r => r.group === rfGroupId);
     const donoSleeve = (rfCfg?.traders ?? []).join(' · ') || 'sleeve de RF';
+    /* ⚠️ `typeof` porque o SNAPSHOT publicado carrega este módulo SEM o pos-simular.js: lá o
+       botão não pode nascer (ele chamaria uma função inexistente e, num script clássico, o
+       clique só daria ReferenceError no console depois de a mesa já ter clicado). */
+    const simAqui = !simPosto && !isMmPrev && typeof toggleSimBox === 'function';
 
     if (isMmPrev) {
       (prevContainer ? prevCards : mainCards).push(`
@@ -707,6 +729,7 @@ function _renderSectionsForTab(tabId, allRows) {
        o alvo do print é `width: fit-content`, e uma tira mais larga que a tabela DITARIA o
        `fit-content` do pai — a imagem sairia com faixa branca morta à direita e a tira nunca
        quebraria de linha. É a mesma trava do `.jgp-tbl-note`, pelo mesmo motivo. */
+    if (simAqui) simPosto = true;
     mainCards.push(`
     ${hasFund && typeof fundSplitBarHtml === 'function'
         ? fundSplitBarHtml(tabId,
@@ -714,6 +737,14 @@ function _renderSectionsForTab(tabId, allRows) {
             typeof fundSplitWarnHtml === 'function' ? fundSplitWarnHtml(tabId, s, data) : '')
         : ''}
     <div class="card">
+      ${simAqui ? `<!-- Host da caixa de linha simulada. A caixa e REALOCADA para ca (o no vive
+           no positions.html), nunca recriada: este innerHTML e reescrito a cada render e a
+           destruiria, perdendo o que o usuario tivesse digitado.
+           FORA do .section-copy-target de proposito: aquele alvo e width:fit-content para
+           medir a TABELA, e a caixa (width:max-content, ~700px) passaria a DITAR a largura do
+           print — a mesma armadilha do .jgp-tbl-note e da .net-summary.
+           (Sem crase neste comentario: ele vive dentro de um template literal.) -->
+      <div class="sim-host" data-html2canvas-ignore="true"></div>` : ''}
       <!-- Par principal + auxiliar. ⭐ flex-wrap:wrap + flex-shrink:0 nos dois:
            quando não couberem lado a lado, a auxiliar DESCE INTEIRA para baixo da principal
            em vez de a página rolar de lado. O flex-shrink:0 é o que garante isso — sem ele
@@ -751,6 +782,20 @@ function _renderSectionsForTab(tabId, allRows) {
                  DENTRO do branco no consolidado e FORA no por fundo, pulando de lugar a cada
                  clique. Aqui so ficam as ferramentas DESTA tabela.
                  (Sem crase neste comentario: ele vive dentro de um template literal.) -->
+            ${simAqui ? `<!-- ⭐ "+" de ADICIONAR ATIVO (linha simulada). Veio da toolbar em
+                 13/11/2026: ela ficava a dois cards de distância da tabela que a ferramenta
+                 altera. Fica ANTES do Copiar porque é ação de edição, não de saída.
+                 ☠ CLASSE, nunca id: este render roda para TODA aba (o prefetch monta o DOM
+                 das outras em background), então um id aqui vira DUPLICADO — medido, 2 com
+                 duas abas carregadas e 5 com todas. É a mesma lição do id do card por moeda.
+                 Quem sincroniza os dois (disabled, grupos, contador) e REALOCA a caixa para a
+                 aba ATIVA e o simSync, chamado no fim deste render e na troca de aba.
+                 (Sem crase neste comentario: ele vive dentro de um template literal.) -->
+            <button class="btn btn-secondary sim-toggle" onclick="toggleSimBox()"
+                    title="Adicionar um ativo nesta tabela como linha SIMULADA (posição hipotética a partir de um ticker Bloomberg). Não altera o Oracle e some ao recarregar a página."
+                    style="padding:2px 9px;font-size:13px;line-height:1.1">+</button>
+            <span class="filter-chip on sim-clear" onclick="clearSimRows()"
+                  title="Remove todas as linhas simuladas desta aba" style="display:none;cursor:pointer"></span>` : ''}
             <button class="btn btn-secondary" style="padding:2px 10px;font-size:12px" onclick="copyCardImage(this)">⎘ Copiar</button>
             </span>
           </div>
@@ -802,6 +847,14 @@ function _renderSectionsForTab(tabId, allRows) {
 
   container.innerHTML = rfBanner + mainCards.join('') + rfFalt + rfCcy;
   if (prevContainer) prevContainer.innerHTML = prevCards.join('');
+
+  /* ⭐ O "+" e o chip de simulação são nós NOVOS a cada render — é só aqui que dá para ligar
+     o `disabled`, os grupos do <select> e a contagem de "⚡ N simuladas". O `simSync` também
+     REALOCA a caixa (`#simTool`) para o `.sim-host` da aba ATIVA; ela é um nó só, declarado no
+     positions.html, e é MOVIDA, nunca recriada: este `innerHTML` acabou de ser reescrito e uma
+     caixa nascida no template seria destruída a cada filtro, ✕ de linha ou marreta — levando
+     junto o que a mesa tivesse digitado. Ver `pos-simular.js`. */
+  if (typeof simSync === 'function') simSync();
 
   for (const s of sections) {
     const rows = filterRows(sortRows(sectionRows(s)));

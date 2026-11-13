@@ -1207,9 +1207,23 @@ let _rfLimPedido = false;
 function _rfPreencheLimites() {
   const d = (typeof ENQ_RF_TAB_KEY !== 'undefined') ? posDataByTab[ENQ_RF_TAB_KEY] : null;
   if (!d?.funds?.length) {
-    // Uma tentativa só: a aba de enquadramento é cara (BBG + Oracle) e um retry em loop
-    // numa tela que re-renderiza a cada ⟳ viraria tráfego de fundo permanente.
-    if (!_rfLimPedido && typeof loadEnquadramentoRF === 'function') {
+    /* ☠️ **SÓ COM A ABA ABERTA** (13/11/2026). O painel nasce junto com o card, e o card
+       nasce no **PREFETCH** — o boot monta o DOM das 5 abas em background. Então este
+       `loadEnquadramentoRF()` disparava sempre, mesmo com a mesa parada no EMota: medido,
+       um 6º request no boot custando **2,9 s de Oracle + Bloomberg** para preencher um
+       PARÊNTESE que só existe na aba do PortfolioRF — e competindo pelo terminal com os
+       prefetches que vêm depois. ⚠️ Não atrasa a tabela da aba ativa (ela já pintou quando
+       este sai, aos ~5,2 s), mas é trabalho inteiramente desperdiçado quando ninguém abre
+       aquela aba, que é o caso comum.
+       ⭐ É o MESMO padrão da 2ª onda de câmbio do PAbinader (`loadFxDealsForTab`): a query
+       cara não roda no prefetch, e **abrir a aba é o gatilho** — o `showTraderTab` chama
+       esta função ao abrir. Com o dado já em cache (a mesa tendo passado pela aba Check
+       Enquadramento) o painel preenche na hora, sem request nenhum.
+       ⚠️ Uma tentativa só (`_rfLimPedido`): a aba é cara e um retry em loop numa tela que
+       re-renderiza a cada ⟳ viraria tráfego de fundo permanente. */
+    const _abaAberta = (typeof activeTraderTab !== 'undefined')
+                    && document.getElementById(`rfRegrasContainer-${activeTraderTab}`);
+    if (_abaAberta && !_rfLimPedido && typeof loadEnquadramentoRF === 'function') {
       _rfLimPedido = true;
       Promise.resolve(loadEnquadramentoRF()).then(_rfPreencheLimites).catch(() => {});
     }
@@ -2005,6 +2019,26 @@ function renderRfFaltantes(data, mainRows) {
     : (v < 0 ? '(' : '') + Math.abs(v * 100).toLocaleString('en-US',
         { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' + (v < 0 ? ')' : '');
 
+  /* ⭐ **O QUANTO, na régua do `#PL`** (13/11/2026, pedido da mesa: *"além da qtd mostre
+     entre parênteses a exposição equivalente no gestor — os 200k de MXN são quanto de
+     exposição pro Abi? o CDS é quanto no EMota?"*). A quantidade sozinha não dimensiona
+     nada: 14,5 CDS e 952 DI são unidades diferentes, e sem o #PL a mesa não sabe qual das
+     duas linhas é a que dói.
+     ⚠️ **As DUAS unidades da casa, com e sem `%`** — juros em % do NAV por 100 bps (sem
+     `%`), câmbio/bolsa em fração do NAV (com `%`). Mesmo critério do `fmtPL`; aqui o sinal
+     sai como `−` em vez de parêntese porque o número já vive dentro de um.
+     ⚠️ Em CINZA e depois da quantidade, de propósito: quem boleta lê a quantidade, o #PL é
+     o calibre. */
+  const _expNum = (v, t) => Math.abs(v * (t === 'pct' ? 100 : 1)).toLocaleString('en-US',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (t === 'pct' ? '%' : '');
+  const expo = (v, t) => v == null ? ''
+    : ` <span style="color:var(--text-muted)">(#PL ${v < 0 ? '\u2212' : ''}${_expNum(v, t)})</span>`;
+  const expoTxt = (v, t) => v == null ? '—'
+    : (v < 0 ? '\u2212' : '') + _expNum(v, t);
+  const _UNIT_TXT = t => t === 'pct' ? 'fração do NAV, com %'
+                                     : '% do NAV por 100 bps, sem %';
+  const _SRC_TXT = { dv01: 'DV01 × taxa', bbg: 'preço da Bloomberg', d1: 'marcação de D-1' };
+
   /* ⭐ **UMA LINHA POR ITEM, e o resto em ⓘ** (11/11/2026, mesa: *"te pedi pra ser direto e
      você escreveu esse texto enorme. É pra ser simples e direto, só pontuando"*). A 1ª versão
      imprimia a regra do espelho, o escopo, a área/subárea, o rateio por fundo e um rodapé de
@@ -2032,7 +2066,19 @@ function renderRfFaltantes(data, mainRows) {
          na linha ele dobrava a altura da faixa e não é o que se lê primeiro. */
       const porFundo = (x.fundos || []).filter(f => f.qty_eq != null)
         .map(f => `${fundLabelMesa(f.fund, true)} ${fmtFinalQtyTxt(f.qty_eq, dec)}`).join(' · ');
+      /* O #PL dos dois lados no hover: na LINHA fica só o do gestor (foi o que a mesa
+         pediu), mas é o par que mostra a régua do bloco valendo — 1:1 no EMota, 1/10 no
+         sleeve. E a PROCEDÊNCIA junto, como em toda marcação desta tela. */
+      const tipExp = x.pl_mm == null
+        ? '\n\nExposição não afirmada: falta o insumo de preço/risco deste instrumento '
+          + 'nesta passagem (opção sem delta, título do Tesouro — que precisa do pricer). '
+          + 'A quantidade acima é o fato; o calibre não é inventado.'
+        : `\n\nExposição — #PL em ${_UNIT_TXT(x.pl_type)}:`
+          + `\n  ${b.label}: ${expoTxt(x.pl_mm, x.pl_type)}`
+          + `\n  equivalente no RF: ${expoTxt(x.pl_eq, x.pl_type)}`
+          + `\n  fonte: ${_SRC_TXT[x.pl_src] ?? x.pl_src ?? '—'} — a MESMA cadeia da coluna #PL da tabela.`;
       const tip = `${x.area ?? '—'}${x.subarea ? ' · ' + x.subarea : ''}`
+        + tipExp
         + (porFundo ? `\n\nNo RF: ${porFundo}` : '')
         + (x.estado === 'zerada'
             ? '\n\nA linha EXISTE na tabela acima, zerada — o check da auxiliar já a marca.'
@@ -2041,17 +2087,23 @@ function renderRfFaltantes(data, mainRows) {
         + (x.estado === 'zerada'
             ? ' <span style="font-size:10px;color:var(--text-muted)">zerada</span>' : '')
         + ` <span style="color:var(--text-muted)">—</span> ${_escHtml(b.label)}`
-        + ` <b>${fmtFinalQtyTxt(x.qty_mm, dec)}</b>`
+        + ` <b>${fmtFinalQtyTxt(x.qty_mm, dec)}</b>${expo(x.pl_mm, x.pl_type)}`
         + ` <span style="color:var(--text-muted)">→ RF</span> <b>${fmtFinalQtyTxt(x.qty_eq, dec)}</b></li>`;
     }).join('');
+    /* ⭐ Na moeda o "quanto é isso de exposição" já existia dos dois lados (`mm_pct` vem do
+       agregado por moeda) — só não estava na LINHA. Aqui o % é do NAV do gestor, a mesma
+       pergunta que o `#PL` responde nas linhas de juros. */
     const liMoedas = moedas.map(m => `<li style="margin:1px 0" title="${_escHtml(
         `Câmbio LINEAR: o check é por MOEDA, não por vértice.\n\n${b.label}: US$ `
         + `${usd(m.mm_usd)} (${pct2(m.mm_pct)} do NAV dele)\nRF: US$ ${usd(m.rf_usd)}`
+        + `\n  alvo: US$ ${usd(m.rf_alvo_usd)} (${pct2(m.rf_alvo_pct)} do NAV do RF)`
         + `\n\nMesma régua da tabela "Exposição por moeda", no fim da aba.`)}">`
       + `<b>${_escHtml(m.ccy)}</b>`
       + ` <span style="font-size:10px;color:var(--text-muted)">moeda</span>`
       + ` <span style="color:var(--text-muted)">—</span> ${_escHtml(b.label)}`
       + ` <b>US$ ${usd(m.mm_usd)}</b>`
+      + (m.mm_pct == null ? ''
+          : ` <span style="color:var(--text-muted)">(${pct2(m.mm_pct)} do NAV)</span>`)
       + ` <span style="color:var(--text-muted)">→ RF</span> <b>US$ ${usd(m.rf_alvo_usd)}</b></li>`).join('');
     return `<div style="margin-top:${iB ? 8 : 0}px">
       <b style="color:var(--yellow);font-size:13px">⚠ ${_escHtml(b.label)} tem ${n}`
