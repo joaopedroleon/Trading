@@ -423,6 +423,19 @@ function prefetchPriorityTabs() {
     if (id === activeTraderTab || posDataByTab[id]) continue;
     loadPositionsForTab(id, { background: true });   // sem await → em paralelo com a ativa
   }
+  /* ⭐ **BOLETAS DO DIA entra no boot** (16/11/2026, pedido da mesa: *"junto às abas que
+     carregam automaticamente no F5, sem precisar entrar, se junte a Boletas do Dia — pode ser
+     carregada logo de cara junto com as principais"*). Sem `await`, como as duas acima: ela
+     não pode entrar na frente da aba que a mesa está lendo.
+     ⚠️ **Não dá para pôr o id em `PRIORITY_PREFETCH_TABS`** — aquele laço chama
+     `loadPositionsForTab`, que é das abas de TRADER (monta `?trader=` do `TRADER_TABS`, onde a
+     Boletas não está, porque ela não é posição: é o que foi boletado no dia).
+     ⚠️ `typeof` porque o SNAPSHOT publicado não carrega o `pos-boletas.js` — este módulo vai
+     para o ar e aquele não (ver a allowlist em snapshot/pipeline.py). */
+  if (typeof loadBoletas === 'function' && typeof BOLETAS_TAB_ID !== 'undefined'
+      && !posDataByTab[BOLETAS_TAB_ID]) {
+    loadBoletas({ background: true });
+  }
 }
 
 /* ── 2ª ONDA: as seções de câmbio da aba do PAbinader ──────────────────────────────────
