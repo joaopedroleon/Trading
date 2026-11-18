@@ -127,7 +127,14 @@ const HIDE_SO_PREV_TRADERS = new Set();
    ⚠️ Diferente do `HIDE_SO_PREV_TRADERS` acima, aqui o que some é uma COLUNA derivada e
    não LINHAS de posição — não há o risco de uma posição inteira desaparecer da tela sem
    aviso, que foi o que aquele Set custou. */
-const HIDE_CHECK_BOLETA_TRADERS = new Set(['PAbinader']);
+/* ⚠️ **O LAguiar entrou em 18/11/2026, pela MESMA condição** — não por pedido à parte.
+   Ao virar espelhador do RF ele ganhou a coluna `Check RF`, e a aba dele passou a ter as
+   TRÊS (Boleta, Prev, RF) que a mesa mandou reduzir a duas na do PAbinader. Ou seja: o
+   estado "três colunas" nasceu com a mudança de hoje, e isto o devolve ao que a mesa pediu
+   — duas abas de câmbio, a mesma leitura.
+   ⚠️ É o ÚNICO item desta mudança que NÃO é derivado do dado: se a mesa quiser o
+   `Check Boleta` de volta na aba dele, tirar 'LAguiar' deste Set basta. */
+const HIDE_CHECK_BOLETA_TRADERS = new Set(['PAbinader', 'LAguiar']);
 
 /* ── Check MM×Prev do DÓLAR: futuro e NDF contam JUNTOS (out/2026) ───────────────────
    ☠️ **O mesmo dólar é montado com instrumentos diferentes em cada veículo.** Medido no
@@ -512,7 +519,8 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
       ${totalCell}
       ${showBoleta ? dealCell : ''}
       ${finalCell}
-      ${showRf ? rfCheckCell(rfCfg, { mmQty: mmFinal, mmRow: mm, rfQty: rfAll.length ? rfFinal : null,
+      ${showRf ? rfCheckCell(rfCfgDoTrader(rfCfg, mm.trader), { mmQty: mmFinal, mmRow: mm,
+                                      rfQty: rfAll.length ? rfFinal : null,
                                       row: rfLineRow(rfCfg, mm, rfAll) }) : ''}
     </tr>`;
   }).join('');
@@ -587,8 +595,22 @@ function renderAllocTable(allRows, trader, filterFn = applyFilters) {
        (`ccy_check`), porque o mesmo euro é montado com pares diferentes em cada livro;
      • **opção e o resto** → linha a linha, pela **quantidade**, contra o alvo da boleta. */
 function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
+  /* ⭐ **De QUEM é esta linha** (18/11/2026). São DOIS espelhadores (PAbinader e
+     LAguiar) e a coluna confere os dois, com o cabeçalho dizendo "Check Abi · LAg" — sem
+     o nome aqui, duas linhas do mesmo instrumento com alvos diferentes (porque os NAVs de
+     MM deles diferem) leem-se como erro de conta.
+     ⚠️ **Carimba em TODOS os tooltips desta célula, não só no último**: ela tem 16 saídas
+     e o caso mais comum no livro de quem espelha é o do CÂMBIO, que é outro ramo.
+     ⚠️ Sai só quando há MAIS DE UM trader com linha: com um só o nome está no cabeçalho
+     e repeti-lo em toda célula é ruído — e é o que mantém a tela de hoje idêntica à de
+     antes enquanto o LAguiar não boletar. */
+  const _trsCel = (typeof rfSleeveTradersDaColuna === 'function')
+    ? rfSleeveTradersDaColuna(cfg) : (cfg?.traders ?? []);
+  const _dono = (_trsCel.length > 1 && row?.trader)
+    ? `Espelho de ${cfg?.labels?.[row.trader] ?? row.trader}.\n` : '';
+  const _tt = t => _escHtml(_dono + t);
   const muted = (txt, tip) =>
-    `<td class="num" style="color:var(--text-muted);text-align:right" title="${_escHtml(tip)}">${txt}</td>`;
+    `<td class="num" style="color:var(--text-muted);text-align:right" title="${_tt(tip)}">${txt}</td>`;
   const alvoExp = cfg?.exposure_ratio;
 
   /* ⭐ **O % que está no RF vem ANTES da marca** (04/11/2026, pedido da mesa: *"fica com a
@@ -624,11 +646,11 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
     /* ⭐ Aqui o alvo é ZERO, e o 0,0 % ao lado do ✓ é o que torna isso legível: a mesa vê que
        o certo é não ter nada, em vez de confiar que o ✓ está olhando a coisa certa. */
     return temRf
-      ? `<td class="check-cell alloc-bad" title="${_escHtml(
+      ? `<td class="check-cell alloc-bad" title="${_tt(
           `⛔ FORA DO ESCOPO: o veículo de RF carrega só os books de ${books}, e esta linha é de `
           + `${row.area ?? '—'} — mas tem ${fmtFinalQtyTxt(rfQty)} lá. Ver a faixa no topo da aba.`)}">${
           _vere(_share(rfQty ?? 0, mmQty), '⛔')}</td>`
-      : `<td class="check-cell alloc-ok" title="${_escHtml(
+      : `<td class="check-cell alloc-ok" title="${_tt(
           `✓ Correto: ${row.area ?? 'este ativo'} não vai para o RF (o veículo carrega só os books `
           + `de ${books}), então zero aqui é o esperado — não é desvio de alocação.`
           + '\n\nO % ao lado é a fatia que está no RF: aqui o alvo é 0 %.')}">${
@@ -699,7 +721,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
        que o MM não tem. Mesma regra do dólar direcional: presença de posição onde ela não
        deveria existir não tem faixa de tolerância. */
     if (uteis.some(l => l.veredito === 'rf_sem_par')) {
-      return `<td class="check-cell alloc-bad" title="${_escHtml(
+      return `<td class="check-cell alloc-bad" title="${_tt(
         `⛔ ${_vert} NÃO está na proporção correta no RF — e o agregado da moeda também não: `
         + 'o RF carrega moeda que o book de MM não tem, então não há alocação a espelhar.'
         + `\n\n${_linTxt}\n${_aggTxt}` + _rodape)}">s/ par ⛔</td>`;
@@ -712,7 +734,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
     if (eLin.allocPct != null && eLin.allocTarget
         && rfAllocClass(eLin.allocPct, eLin.allocTarget) === 'alloc-ok') {
       const dppL = (eLin.allocPct - eLin.allocTarget) * 100;
-      return `<td class="check-cell alloc-ok" title="${_escHtml(
+      return `<td class="check-cell alloc-ok" title="${_tt(
         `✓ ${_vert} está na proporção correta no RF.`
         + `\n\n${_linTxt}  (${dppL >= 0 ? '+' : ''}${
             dppL.toLocaleString('en-US', {maximumFractionDigits: 2})}pp)` + _rodape)}">${
@@ -724,7 +746,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
     if (!mat.length) {
       if (!uteis.length) return muted('—', 'Par sem moeda conferível (só a perna de USD, que '
         + 'é o numerário dos dois NAVs e fica fora do veredito).');
-      return `<td class="check-cell alloc-ok" title="${_escHtml(
+      return `<td class="check-cell alloc-ok" title="${_tt(
         `✓ ${_vert} não está na proporção vértice a vértice — mas foi conferido o agregado: as `
         + 'moedas do par estão em resíduo nos dois lados (no MM o net se cancela entre pares), '
         + 'então não há exposição a espelhar.'
@@ -742,7 +764,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
     /* ⭐ Dentro do alvo o balde diz "OK", não um %: chegar aqui significa que a LINHA não
        fechou, então o % dela é justamente o que não bate e o do balde é de outra coisa.
        Fora do alvo o % FICA — ali ele é a medida do desvio. */
-    return `<td class="check-cell ${cls}" title="${_escHtml(
+    return `<td class="check-cell ${cls}" title="${_tt(
       (cls === 'alloc-ok'
         ? `✓ ${_vert} não está na proporção vértice a vértice — mas foi conferido o agregado, `
           + 'e as moedas do par estão batidas com o que deveriam ser.'
@@ -764,7 +786,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
      e lá o check continua não sendo afirmado. Aqui há par, e os dois estão em zero. */
   if (mmQty != null && Math.abs(mmQty) < 1e-9 && Math.abs(rfQty ?? 0) < 1e-9) {
     const _zerouHoje = mmRow && Math.abs(mmRow.traded_qty ?? 0) > 1e-9;
-    return `<td class="check-cell alloc-ok" title="${_escHtml(
+    return `<td class="check-cell alloc-ok" title="${_tt(
       '✓ Zerado nos dois lados — não há exposição a espelhar.'
       + (_zerouHoje
           ? '\n\n  MM: zerado HOJE (abertura ' + fmtFinalQtyTxt(mmRow.opening_qty)
@@ -807,7 +829,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
      a conta para saber o tamanho do que está faltando. */
   if (!Math.abs(rfQty ?? 0)) {
     const falta = mmQty * (e.allocTarget ?? 0);
-    return `<td class="check-cell ${cls}" title="${_escHtml(
+    return `<td class="check-cell ${cls}" title="${_tt(
       `⚠ NADA NO RF nesta linha.\n\n  MM: ${fmtFinalQtyTxt(mmQty)}\n  RF: zero\n`
       + `  Pelo alvo de ${fmtPct(e.allocTarget)}, deveria haver ~${fmtFinalQtyTxt(falta)}.`
       + (expUsd != null ? `\n\nExposição no MM: ${fmtMoneyTxt(expUsd)}.` : ''))}">⚠ nada no RF</td>`;
@@ -828,7 +850,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
     + `vermelho além — faixa RELATIVA ao alvo, porque ±2pp num alvo de ${fmtPct(e.allocTarget)} `
     + 'aceitaria quase o dobro e quase a metade dele.';
   // ⭐ A fatia vem ANTES da marca, no verde e no amarelo — a coluna inteira se lê igual.
-  return `<td class="check-cell ${cls}" title="${_escHtml(tip)}">${
+  return `<td class="check-cell ${cls}" title="${_tt(tip)}">${
     _vere(e.allocPct, cls === 'alloc-ok' ? '✓' : '⚠')}</td>`;
 }
 
@@ -845,7 +867,18 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
        desalinhou as duas tabelas linha a linha — foi o que a mesa reportou.
    Quem passar `quebra` numa auxiliar nova tem de garantir o alinhamento medido. */
 function rfCheckHead(cfg, merged, quebra) {
-  const tr  = cfg?.traders?.[0];
+  /* ☠️ **O rótulo nomeia TODOS os espelhadores, não o primeiro** (18/11/2026). Com o
+     LAguiar ao lado do PAbinader, `traders[0]` continuaria dizendo "Abi" numa coluna que
+     confere os dois — e um cabeçalho que nomeia uma pessoa só é lido como se toda a coluna
+     fosse dela. ⭐ A regra é a mesma que esta função já aplica ao alvo logo abaixo:
+     **anuncie o que for único**. Um trader → "Check Abi", como sempre; dois → "Abi · LAg",
+     com o dono de cada linha no hover da célula.
+     ⚠️ **Cadastrado-e-sem-linha ENTRA** — ele nasceu de fora ("não prometer um veredito
+     que não existe"), e isso se inverteu quando a coluna virou permanente: ali "ele espelha
+     e não há nada no RF" é justamente o veredito. */
+  const _trs = (typeof rfSleeveTradersDaColuna === 'function')
+    ? rfSleeveTradersDaColuna(cfg) : (cfg?.traders ?? []);
+  const tr  = cfg?._trader ?? _trs[0] ?? cfg?.traders?.[0];
   /* ☠️ **O rótulo só anuncia um % quando existe UM alvo** (04/11/2026). Ele nasceu com o
      alvo embutido ("Check Abi 4,5%") porque havia um veículo só e o número valia para toda
      linha da coluna. Com dois, o alvo depende do que a linha É — juros espelha no Juros e
@@ -861,7 +894,10 @@ function rfCheckHead(cfg, merged, quebra) {
   // auxiliar. O rótulo é o mais largo da coluna (as células são ✓ ou "⚠ 9,9%").
   // ⚠️ Fallback sem a palavra "sleeve" (vocabulário interno que a mesa mandou tirar em
   // 05/11/2026): sem rótulo de trader, a coluna se chama pelo que ela confere.
-  const nome = merged ? (cfg?.labels?.[tr] ?? tr ?? 'espelho') : 'RF';
+  const _nomeTrs = _trs.map(t => cfg?.labels?.[t] ?? t).filter(Boolean);
+  const nome = merged
+    ? (_nomeTrs.length ? _nomeTrs.join(' · ') : (cfg?.labels?.[tr] ?? tr ?? 'espelho'))
+    : 'RF';
   const lbl  = nome + (quebra && alvo ? '<br>' + alvo.trim() : alvo);
   const _fundo = rfSleeveFundLabel(cfg);
   /* A lista de alvos por área vai para o hover — é lá que cabe dizer POR QUE são dois, e
@@ -969,6 +1005,96 @@ const _rfUsd = v => v == null ? '—'
    juros/câmbio/bolsa, e distinguir juros do Brasil de juros lá fora exige a `subarea`. O que
    o código acusa sozinho é bolsa/commodities em qualquer um e câmbio onde não pode; o resto é
    regra escrita. O ⓘ do mandato diz isso, para ninguém ler o painel como se fosse check. */
+/* ── O ALVO DO ESPELHO por (trader, fundo) — a MESMA fonte da coluna do painel de regras ──
+   ⛔ Nenhuma conta aqui: `rf_sleeve.alloc_target_por_fundo_por_trader` já vem pronto do
+   `funds.rf_sleeve_alloc_target`, que é o único lugar onde a fórmula mora (`10% × NAV do
+   fundo ÷ NAV de MM do trader`). Refazê-la no JS seria a 2ª cópia que a nota daquela função
+   proíbe — e as duas divergiriam no dia em que o alvo deixasse de ser derivado dos NAVs. */
+function _rfAlvoFundo(cfg, trader, fund) {
+  const v = cfg?.alloc_target_por_fundo_por_trader?.[trader]?.[fund];
+  return v == null ? null : v;
+}
+
+/* O escopo que AQUELE fundo recebe do espelho ("juros e câmbio" × "só juros"), por extenso. */
+function _rfEscopoFundo(cfg, fund) {
+  const bk = { Rates: 'juros', Currencies: 'câmbio', Equities: 'bolsa', Commodities: 'commodities' };
+  const a = cfg?.sleeve_escopo_por_fundo?.[fund] || [];
+  return a.length ? a.map(x => bk[x] ?? x).join(' e ') : null;
+}
+
+/* ── RESUMO POR TRADER — o texto que a mesa MANDA para quem espelha (18/11/2026) ───────
+   Pedido da mesa: *"cria um resuminho nas alocações de cada trader, Abinader ou Lucas, com
+   os % dos fundos e as estratégias de alocação, porque eu quero mandar o resumo pro Lucas"*.
+
+   ⭐ **O destinatário não é a mesa — é o TRADER DE MM**, e isso muda o que entra: ele não
+   conhece os fundos de RF pelo nome do JRS, não sabe que o alvo se move com os NAVs, e o que
+   ele decide na hora da boleta é UMA coisa — em que estratégia boletar. Então o resumo diz,
+   nesta ordem: a regra (1/10 da exposição), quanto do ticket dele vai para cada fundo, e a
+   estratégia de cada caso.
+   ⭐ **E é aqui que o % do alvo vive, junto com a coluna `Espelho MM` do painel de regras.**
+   A matriz de estratégias acima NÃO o mostra (pedido da mesa): lá a pergunta é "recebe?" e a
+   tabela é dos dois traders ao mesmo tempo; aqui cada cartão tem um dono só, que é a
+   condição para o número significar alguma coisa.
+   ⛔ **A pastilha "sem boleta" SAIU a pedido da mesa** (18/11/2026, no mesmo dia em que
+   nasceu). Ela marcava a linha cuja regra ainda não tem exemplar no JDS — as duas de RF do
+   LAguiar, que são o combinado com a mesa. O que a derrubou é que este texto é uma
+   **INSTRUÇÃO**, não um laudo: ele existe justamente para dizer ao trader onde boletar a
+   partir de agora, então "ele ainda não boletou aqui" é a premissa da mensagem, não uma
+   ressalva sobre ela. ⚠️ O campo **`medido` continua no `funds.ALLOC_ESTRATEGIAS`** (e no
+   payload): é o registro da medição, que é o que sustenta a regra "se o destino medido
+   divergir, manda o MEDIDO" — repor a marca na tela é uma linha, se um dia fizer falta.
+   ⚠️ O texto sai em UMA unidade só: **% do ticket de MM**. O mesmo 5,8% em "% do NAV" é
+   outro número e outra pergunta (é o que a tabela por moeda confere) — misturar as duas num
+   texto que vai por WhatsApp é como se lê exposição no lugar de quantidade. */
+const _rfResumoTxt = new Map();
+
+function _rfAllocResumoTexto(data, cfg, trader) {
+  const lbl   = cfg?.labels?.[trader] ?? trader;
+  const expR  = cfg?.exposure_ratio;
+  const navMm = cfg?.mm_nav?.[trader];
+  const navs  = Object.fromEntries((data?.portfoliorf_regras ?? []).map(r => [r.fund, r.nav]));
+  const linhas = (data?.portfoliorf_alloc ?? []).filter(e => e.trader === trader);
+  /* Os fundos que recebem espelho deste trader, na ORDEM da tela — nunca a ordem em que
+     aparecem nas estratégias, que seria a 2ª ordem da aba. */
+  const cols = (_pnlTablesForTab() ?? []).map(t => t.fund);
+  const recebem = cols.filter(f => (cfg?.sleeve_escopo_por_fundo?.[f] || []).length);
+
+  const out = [];
+  out.push(`Alocação no RF — ${trader}${lbl && lbl !== trader ? ` (${lbl})` : ''}`);
+  if (data?.portfoliorf_nav_date) out.push(`NAVs de ${fmtDate(data.portfoliorf_nav_date)}`);
+  out.push('');
+  out.push(`O PortfolioRF espelha ${fmtPct(expR)} da exposição que você carrega no MM,`);
+  out.push('cada lado medido em % do NAV do seu próprio livro.');
+  out.push('');
+  out.push('Quanto de cada ticket seu de MM cai em cada fundo:');
+  for (const f of recebem) {
+    const a = _rfAlvoFundo(cfg, trader, f);
+    const esc = _rfEscopoFundo(cfg, f);
+    out.push(`  - ${fundLabelMesa(f, true)}: ${a == null ? '—' : fmtPct(a)} do ticket`
+      + `${esc ? `  (${esc} · NAV ${_rfUsd(navs[f])})` : ''}`);
+  }
+  if (navMm != null) {
+    out.push(`  NAV de MM (${trader}): ${_rfUsd(navMm)}`);
+    out.push(`  alvo = ${fmtPct(expR)} x NAV do fundo / NAV de MM — anda com os dois NAVs,`);
+    out.push('  não é constante.');
+  }
+  out.push('');
+  out.push('Em que estratégia boletar:');
+  for (const e of linhas) {
+    /* ⚠️ O fundo é nomeado UMA vez, com o alvo dele colado. A 1ª versão repetia a lista
+       ("Juros Global + Juros e Moeda (Juros Global 1.9% · Juros e Moeda 5.8%)") — verdade,
+       e ilegível num texto de chat, que é exatamente onde ele vai ser lido. */
+    const dest = (e.fundos ?? []).length
+      ? e.fundos.map(f => {
+          const a = _rfAlvoFundo(cfg, trader, f);
+          return `${fundLabelMesa(f, true)}${a == null ? '' : ' ' + fmtPct(a)}`;
+        }).join(' + ')
+      : 'não chega ao RF';
+    out.push(`  - ${e.estrategia}: ${dest}`);
+  }
+  return out.join('\n');
+}
+
 /* ── GUIA DE ALOCAÇÃO — em que estratégia boletar para cair em quais fundos ─────────
    ⭐ Pedido da mesa (05/11/2026): "um guiazinho bem simples e direto junto às regras dos
    fundos". O trader não boleta fundo a fundo — boleta numa ESTRATÉGIA e o sistema reparte —,
@@ -976,59 +1102,189 @@ const _rfUsd = v => v == null ? '—'
    não aparecia em lugar nenhum da tela.
    ⚠️ As colunas são as do payload (`pnl_fund_tables`), na MESMA ordem do resto da aba —
    Local → Global → Juros e Moeda. Ordenar aqui por conta seria a 2ª ordem da tela.
-   ⚠️ No bloco do trader do espelho a coluna é "o que chega no RF": as três estratégias
-   repartem também no MM e no Prev dele, e dizer "nenhum" ali significa "nenhum RF", não
-   "nada". Está escrito na linha, porque a confusão é natural. */
-function renderRfAllocGuia(data) {
+   ⚠️ Na tabela dos espelhadores a coluna é "o que chega no RF": as três estratégias repartem
+   também no MM e no Prev deles, e dizer "nenhum" ali significa "nenhum RF", não "nada".
+   Está escrito embaixo da tabela, porque a confusão é natural.
+
+   ⭐ **DUAS TABELAS LADO A LADO, e os espelhadores num grupo SÓ** (18/11/2026, pedido da
+   mesa). Eram três blocos empilhados — PortfolioRF, PAbinader, LAguiar — e os dois últimos
+   repetiam, linha por linha, a MESMA regra: mesmas três estratégias, mesmos destinos. Lado a
+   lado a comparação que interessa fica no olho (o que o RF boleta × o que chega do espelho) e
+   a seção encurta de ~16 linhas para 7.
+   ⛔ **O % do alvo NÃO entra aqui** (pedido da mesa no mesmo dia): ele é POR TRADER e esta
+   tabela agora tem dois — repetir `Abi x% / LAg y%` em cada célula devolveria a altura que a
+   fusão acabou de economizar. O % vive onde ele é de um dono só: a coluna `Espelho MM` do
+   painel de regras (por fundo) e os cartões de resumo (por trader).
+   ☠️ **A fusão é CONDICIONAL, e isso não é zelo:** duas linhas só viram uma quando
+   estratégia, moeda **e lista de fundos** batem. Hoje batem, mas é justamente o tipo de coisa
+   que muda sem avisar (a do PAbinader mudou em 11/11/2026) — e uma fusão cega mostraria o
+   destino de um trader sob o nome dos dois. Divergindo, a linha se separa sozinha e declara
+   de quem ela é. */
+function renderRfAllocGuia(data, cfg) {
   const guia = data?.portfoliorf_alloc;
   if (!guia?.length) return '';
   const cols = (_pnlTablesForTab() ?? []).map(t => t.fund);
   if (!cols.length) return '';
+
+  /* ⛔ ✓ e nada mais: aqui a pergunta é "recebe?", não "quanto". */
   const marca = (e, f) => (e.fundos ?? []).includes(f)
     ? '<td class="num" style="text-align:center;color:var(--green);font-weight:700">✓</td>'
     : '<td class="num" style="text-align:center;color:var(--text-muted)">—</td>';
-  const bloco = (titulo, itens, nota) => !itens.length ? '' : `
-    <tr class="area-divider"><td colspan="${2 + cols.length}"
-        style="font-weight:600;color:var(--text-muted)">${titulo}</td></tr>
-    ${itens.map(e => `<tr>
-      <td><b>${e.estrategia}</b></td>
-      <td class="num" style="text-align:center;color:var(--text-muted)">${
-        e.moeda === 'XXX' ? 'moeda est.' : (e.moeda ?? '—')}</td>
-      ${cols.map(f => marca(e, f)).join('')}
-    </tr>`).join('')}
-    ${nota ? `<tr><td class="aux-foot" colspan="${2 + cols.length}"
-        style="font-size:11px;color:var(--text-muted)"><div>${nota}</div></td></tr>` : ''}`;
-  const doRf  = guia.filter(e => e.trader === 'PortfolioRF');
-  const outros = [...new Set(guia.filter(e => e.trader !== 'PortfolioRF').map(e => e.trader))];
-  return `
-    <div style="margin-top:14px">
-      <div style="font-size:12px;font-weight:600">Em que estratégia boletar
-        ${_rfInfo('O trader boleta numa ESTRATÉGIA de alocação e o sistema reparte entre os '
-          + 'fundos — ela é o único lugar onde se decide quais fundos entram no trade. '
-          + 'A tabela diz, para cada uma, quais fundos de RF recebem.')}
-      </div>
+
+  /* Uma tabela: `comMoeda` desliga a coluna Moeda onde ela seria "—" em toda linha (é o caso
+     dos espelhadores) — numa tabela que agora divide a largura com outra, coluna muda custa. */
+  const tabela = (titulo, tip, itens, nota, comMoeda) => !itens.length ? '' : `
+    <div style="flex:0 1 auto;min-width:0">
+      <div style="font-size:12px;font-weight:600">${titulo} ${_rfInfo(tip)}</div>
       <table class="data-table" style="width:auto;margin-top:5px;white-space:nowrap">
         <thead><tr>
-          <th>Estratégia</th><th>Moeda</th>
+          <th>Estratégia</th>${comMoeda ? '<th>Moeda</th>' : ''}
           ${cols.map(f => `<th>${fundLabelMesa(f, true)}</th>`).join('')}
         </tr></thead>
         <tbody>
-          ${bloco('PortfolioRF', doRf, '')}
-          ${outros.map(t => bloco(t + ' — o que chega no RF',
-              guia.filter(e => e.trader === t),
-              'As três repartem também no MM e no Prev do ' + t
-              + '; a tabela mostra só a perna que chega ao RF — "—" em toda a linha quer dizer '
-              + '<b>nenhum RF</b>, não "nada boletado".')).join('')}
+          ${itens.map(e => `<tr>
+            <td><b>${_escHtml(e.estrategia)}</b>${e.so_de
+              ? ` <span style="color:var(--text-muted);font-size:10px">só ${_escHtml(e.so_de)}</span>`
+              : ''}</td>
+            ${comMoeda ? `<td class="num" style="text-align:center;color:var(--text-muted)">${
+              e.moeda === 'XXX' ? 'moeda est.' : (e.moeda ?? '—')}</td>` : ''}
+            ${cols.map(f => marca(e, f)).join('')}
+          </tr>`).join('')}
+          ${nota ? `<tr><td class="aux-foot" colspan="${(comMoeda ? 2 : 1) + cols.length}"
+              style="font-size:11px;color:var(--text-muted);white-space:normal"
+              ><div style="max-width:430px">${nota}</div></td></tr>` : ''}
         </tbody>
       </table>
     </div>`;
+
+  const doRf = guia.filter(e => e.trader === 'PortfolioRF');
+  const esp  = guia.filter(e => e.trader !== 'PortfolioRF');
+  const trs  = [...new Set(esp.map(e => e.trader))];
+  const lbl  = t => cfg?.labels?.[t] ?? t;
+
+  /* Fusão por (estratégia, moeda, destinos) — ver o ☠️ do cabeçalho. A ordem é a da 1ª
+     aparição, que é a do `funds.ALLOC_ESTRATEGIAS`. */
+  const grupos = new Map();
+  for (const e of esp) {
+    const k = `${e.estrategia}|${e.moeda ?? ''}|${(e.fundos ?? []).join(',')}`;
+    const g = grupos.get(k) ?? { ...e, traders: [] };
+    g.traders.push(e.trader);
+    grupos.set(k, g);
+  }
+  const espLinhas = [...grupos.values()].map(g => ({
+    ...g,
+    /* Só rotula quando a linha NÃO cobre todo mundo — com os dois juntos o rótulo seria ruído. */
+    so_de: g.traders.length < trs.length ? g.traders.map(lbl).join(' e ') : null,
+  }));
+  const espTit = trs.length ? `Espelho MM — ${trs.map(lbl).join(' e ')}` : '';
+
+  return `
+    <div style="margin-top:14px">
+      <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+        ${tabela('Em que estratégia boletar',
+          'O trader boleta numa ESTRATÉGIA de alocação e o sistema reparte entre os fundos — '
+          + 'ela é o único lugar onde se decide quais fundos entram no trade. A tabela diz, '
+          + 'para cada uma, quais fundos de RF recebem.', doRf, '', true)}
+        ${tabela(espTit,
+          'As mesmas estratégias valem para os dois traders que espelham o book de MM no RF, '
+          + 'com os MESMOS destinos — por isso uma linha só. Linha que valesse para um só '
+          + 'apareceria rotulada com o nome dele.\n\n'
+          + 'O QUANTO de cada ticket cai em cada fundo é por trader e está nos resumos abaixo '
+          + '(e, por fundo, na coluna "Espelho MM" do painel de regras acima).',
+          espLinhas,
+          'As três repartem também no MM e no Prev de cada um; a tabela mostra só a perna que '
+          + 'chega ao RF — "—" em toda a linha quer dizer <b>nenhum RF</b>, não "nada '
+          + 'boletado".', false)}
+      </div>
+      ${_rfAllocResumos(data, cfg, trs)}
+    </div>`;
+}
+
+/* ── Os cartões de RESUMO, um por trader que espelha ──────────────────────────────────
+   ⭐ **É a MESMA informação da tabela acima, remontada para quem recebe a mensagem.** A
+   tabela é uma matriz (estratégia × fundo) e serve para conferir; o resumo é uma instrução,
+   e por isso lê na ordem da decisão: a regra → quanto cai em cada fundo → qual estratégia
+   usar. ⛔ Nenhum número novo: tudo sai do `rf_sleeve` e do `portfoliorf_alloc` que a tabela
+   já usou — um resumo com conta própria seria o 2º lugar de onde o alvo pode divergir.
+   ⚠️ O botão copia **TEXTO PURO** (`_copyText`, que já trata o `file://`), não imagem: o
+   destino é o chat do Bloomberg / WhatsApp, onde um print não se responde linha a linha. */
+function _rfAllocResumos(data, cfg, traders) {
+  if (!traders?.length || !cfg) return '';
+  const cols = (_pnlTablesForTab() ?? []).map(x => x.fund);
+  const recebem = cols.filter(f => (cfg?.sleeve_escopo_por_fundo?.[f] || []).length);
+  const cards = traders.map(t => {
+    _rfResumoTxt.set(t, _rfAllocResumoTexto(data, cfg, t));
+    const lbl = cfg?.labels?.[t] ?? t;
+    const fundos = recebem.map(f => {
+      const a = _rfAlvoFundo(cfg, t, f);
+      return `<div><b style="color:var(--green)">${a == null ? '—' : fmtPct(a)}</b>`
+        + ` <span style="color:var(--text-muted)">do ticket →</span> `
+        + `<b>${fundLabelMesa(f, true)}</b>`
+        + ` <span style="color:var(--text-muted)">(${_rfEscopoFundo(cfg, f) ?? '—'})</span></div>`;
+    }).join('');
+    const estr = (data?.portfoliorf_alloc ?? []).filter(e => e.trader === t).map(e => {
+      const dest = (e.fundos ?? []).length
+        ? e.fundos.map(f => fundLabelMesa(f, true)).join(' + ')
+        : '<span style="color:var(--text-muted)">não chega ao RF</span>';
+      return `<div><b>${_escHtml(e.estrategia)}</b>`
+        + ` <span style="color:var(--text-muted)">→</span> ${dest}</div>`;
+    }).join('');
+    return `<div style="flex:0 1 430px;min-width:300px;border:1px solid var(--border);
+         border-radius:4px;padding:7px 9px">
+      <div style="display:flex;align-items:baseline;gap:8px;justify-content:space-between">
+        <b style="font-size:12px">Resumo para ${_escHtml(lbl)}</b>
+        <button type="button" data-jgp-expand-skip data-jgp-busy-skip
+          style="font-size:11px;padding:1px 7px;cursor:pointer"
+          onclick="rfCopiarResumoAlloc('${_escHtml(t)}', this)">⎘ Copiar</button>
+      </div>
+      <div style="margin-top:4px;color:var(--text-muted);font-size:11px">Quanto de cada
+        ticket de MM dele cai em cada fundo</div>
+      <div style="margin-top:2px">${fundos || '—'}</div>
+      <div style="margin-top:5px;color:var(--text-muted);font-size:11px">Estratégias</div>
+      <div style="margin-top:2px">${estr || '—'}</div>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:10px">
+      <div style="font-size:12px;font-weight:600">Resumo por trader
+        ${_rfInfo('A mesma informação da tabela acima, remontada para MANDAR ao trader que '
+          + 'espelha: a regra, quanto do ticket dele cai em cada fundo e em que estratégia '
+          + 'boletar. O botão copia o texto puro, para colar no chat.\n\n'
+          + 'O % é do TICKET de MM (quantidade), não do NAV — em % do NAV é outro número, e é '
+          + 'o que a tabela "Exposição por moeda" confere.')}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;font-size:11px">
+        ${cards}
+      </div>
+    </div>`;
+}
+
+/* ⚠️ O texto é montado no RENDER e guardado no `_rfResumoTxt` — não remontado no clique.
+   Remontar exigiria o `data`/`cfg` da aba aqui dentro, e quem lê `activeTraderTab` fora do
+   render decide pela aba errada quando o prefetch desenhou outra (a armadilha do
+   `currentRenderTab`). O mapa é por trader e é reescrito a cada render, então o texto
+   copiado é sempre o da última pintura — a mesma que está na tela. */
+function rfCopiarResumoAlloc(trader, btn) {
+  const txt = _rfResumoTxt.get(trader);
+  if (!txt) return;
+  const antes = btn ? btn.textContent : null;
+  Promise.resolve(_copyText(txt)).then(() => {
+    if (!btn) return;
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => { btn.textContent = antes; }, 1400);
+  }).catch(() => { if (btn) btn.textContent = '✕ falhou'; });
 }
 
 function renderRfRegrasPanel(data, cfg) {
   const regras = data?.portfoliorf_regras;
   if (!regras?.length) return '';
-  const tr     = cfg?.traders?.[0] ?? null;
+  /* ⚠️ **São DOIS espelhadores desde 18/11/2026**, cada um com o SEU NAV de MM — logo com
+     o seu alvo em cada fundo. `tr`/`navMm` seguem como os do trader de REFERÊNCIA (o 1º),
+     porque as frases do painel que falam de "o trader" continuam valendo para ele; o que é
+     POR TRADER sai de `_trsEsp` e do `sleeve_alvo_por_trader` de cada linha. */
+  const _trsEsp = (cfg?.traders ?? []).filter(Boolean);
+  const tr     = _trsEsp[0] ?? null;
   const navMm  = tr ? cfg?.mm_nav?.[tr] : null;
+  const _lbl   = t => cfg?.labels?.[t] ?? t;
   const expR   = cfg?.exposure_ratio;
   const navTot = regras.reduce((a, r) => a + (r.nav ?? 0), 0) || null;
   const sim = '<span style="color:var(--green);font-weight:600">sim</span>';
@@ -1045,18 +1301,32 @@ function renderRfRegrasPanel(data, cfg) {
           ? `Falta o NAV do ${r.label} ou o de MM do ${tr ?? 'trader'} nesta data — sem os dois `
             + 'não há alvo a afirmar.'
           : `O ${r.label} não recebe espelho do ${tr ?? 'trader'}.`)
-      : `${fmtPct(expR)} da exposição do ${tr} em ${escopo}, medida em % do NAV de cada fundo.`
+      : `${fmtPct(expR)} da exposição em ${escopo}, medida em % do NAV de cada fundo.`
         + NL + NL
         + `  NAV do ${r.label}:  ${_rfUsd(r.nav)}` + NL
-        + `  NAV de MM do ${tr}: ${_rfUsd(navMm)}` + NL
-        + `  alvo = ${fmtPct(expR)} × ${_rfUsd(r.nav)} ÷ ${_rfUsd(navMm)} = ${fmtPct(r.sleeve_alvo)}`
+        /* A conta aberta para CADA espelhador: o NAV de MM é o único termo que muda entre
+           eles, e é ele que faz os alvos divergirem. */
+        + _trsEsp.map(t =>
+            `  NAV de MM do ${t}: ${_rfUsd(cfg?.mm_nav?.[t])}` + NL
+            + `  alvo ${_lbl(t)} = ${fmtPct(expR)} × ${_rfUsd(r.nav)} ÷ ${_rfUsd(cfg?.mm_nav?.[t])}`
+            + ` = ${fmtPct(r.sleeve_alvo_por_trader?.[t] ?? r.sleeve_alvo)}`).join(NL)
         + NL + NL
         + 'É a fração do TICKET de MM que a boleta tem de replicar aqui. Muda com os dois '
         + 'NAVs — não é constante.';
-    const alvoCel = r.sleeve_escopo?.length
-      ? `<b>${r.sleeve_alvo != null ? fmtPct(r.sleeve_alvo) : '—'}</b>`
-        + ` <span style="color:var(--text-muted)">de ${escopo}</span> ${_rfInfo(alvoTip)}`
-      : '<span style="color:var(--text-muted)">—</span>';
+    /* ⭐ **Um alvo POR ESPELHADOR** (18/11/2026). Com um só, a célula é idêntica à de antes
+       ("4,5% de juros e câmbio"); com dois, sai uma linha por trader rotulada — porque o
+       alvo deles DIFERE (é `10% × NAV_fundo ÷ NAV_MM_dele`) e um número único aqui seria
+       lido como valendo para a boleta dos dois. */
+    const _alvoPorTr = r.sleeve_alvo_por_trader;
+    const _multi = _trsEsp.length > 1 && _alvoPorTr;
+    const alvoCel = !r.sleeve_escopo?.length
+      ? '<span style="color:var(--text-muted)">—</span>'
+      : _multi
+        ? _trsEsp.map(t => `<div><span style="color:var(--text-muted)">${_escHtml(_lbl(t))}</span> `
+            + `<b>${_alvoPorTr[t] != null ? fmtPct(_alvoPorTr[t]) : '—'}</b></div>`).join('')
+            + `<div style="color:var(--text-muted);font-size:10px">de ${escopo} ${_rfInfo(alvoTip)}</div>`
+        : `<b>${r.sleeve_alvo != null ? fmtPct(r.sleeve_alvo) : '—'}</b>`
+          + ` <span style="color:var(--text-muted)">de ${escopo}</span> ${_rfInfo(alvoTip)}`;
 
     const pr = r.pracas_ok || [];
     const mandTip = `O ${r.label} carrega ${(r.areas_ok || []).map(a => bk[a] ?? a).join(' e ')}`
@@ -1140,12 +1410,14 @@ function renderRfRegrasPanel(data, cfg) {
     + '⚠️ Câmbio NÃO tem esse propósito: ele só existe no Juros e Moeda, então não há rateio '
     + 'a conferir. E o caixa (Rates · Cash, Hedge_Cambial) fica fora dos dois: é tesouraria, '
     + 'não alocação.';
-  const tipAbi = tr
-    ? `Os trades de ${tr} seguem o padrão dele: ${fmtPct(expR)} da exposição que ele carrega no `
-      + 'MM, em cada fundo que recebe espelho, medida em % do NAV de cada um.' + NL + NL
-      + 'Os de JUROS vão para o Juros e Moeda E para o Juros Global (ele costuma operar fora do '
+  const tipAbi = _trsEsp.length
+    ? `Os trades de ${_trsEsp.join(' e ')} seguem o mesmo padrão: ${fmtPct(expR)} da exposição `
+      + 'que cada um carrega no MM, em cada fundo que recebe espelho, medida em % do NAV de '
+      + 'cada um.' + NL + NL
+      + 'Os de JUROS vão para o Juros e Moeda E para o Juros Global (eles operam fora do '
       + 'Brasil, então não entram no Juros Local); os de CÂMBIO só para o Juros e Moeda.' + NL + NL
-      + `NAV de MM do ${tr}: ${_rfUsd(navMm)} — é o denominador do lado dele em todos os alvos.`
+      + _trsEsp.map(t => `NAV de MM do ${t}: ${_rfUsd(cfg?.mm_nav?.[t])}`).join(NL)
+      + NL + '— é o denominador do lado de cada um, e por isso os alvos deles DIFEREM.'
     : 'Sem trader de espelho configurado.';
 
   /* ⚠️ O HTML é devolvido como STRING e inserido pelo chamador — os spans do % só existem
@@ -1169,16 +1441,16 @@ function renderRfRegrasPanel(data, cfg) {
         <thead><tr>
           <th>Fundo</th><th>Mandato</th><th>Daytrade</th>
           <th>Limite 100%<br>NAV deriv.</th><th>Offshore</th>
-          <th>Espelho ${tr ?? 'MM'} (${fmtPct(expR)} da exp.)</th>
+          <th>Espelho ${_trsEsp.length > 1 ? 'MM' : (tr ?? 'MM')} (${fmtPct(expR)} da exp.)</th>
         </tr></thead>
         <tbody>${linhas}</tbody>
       </table>
-      ${renderRfAllocGuia(data)}
+      ${renderRfAllocGuia(data, cfg)}
       <div style="margin-top:6px;color:var(--text-muted);font-size:11px">
         ${_fraseBolsa} ${_rfInfo(tipBolsa)}
         &nbsp;·&nbsp; dólar direcional só no <b>Juros e Moeda</b> ${_rfInfo(tipDolar)}
         &nbsp;·&nbsp; juros <b>alinhados entre os três</b> e espelhando o <b>EMota 1:1</b> ${_rfInfo(tipJuros)}
-        &nbsp;·&nbsp; trades do <b>${tr ?? 'MM'}</b> no padrão dos ${fmtPct(expR)} ${_rfInfo(tipAbi)}
+        &nbsp;·&nbsp; trades do <b>${_trsEsp.length ? _trsEsp.join(' e ') : 'MM'}</b> no padrão dos ${fmtPct(expR)} ${_rfInfo(tipAbi)}
       </div>
     </div>
   </div>`;
@@ -1277,7 +1549,24 @@ function _rfPreencheLimites() {
    dos dois lados, cada um sobre o NAV do SEU fundo. É a régua do câmbio, porque a mesma
    exposição é montada com contratos diferentes em cada livro. A conta vem pronta do backend
    (`rf_sleeve.ccy_check` → `_rf_ccy_check`); aqui é só apresentação. */
+/* ── Despachante: UM CARD POR TRADER DE SLEEVE (18/11/2026) ──────────────────────────
+   ☠️ **Esta tabela é POR TRADER e sempre foi** — cada lado é medido sobre o NAV do SEU
+   fundo, e o do MM é o do trader que espelha. Com PAbinader e LAguiar, um card só mostraria
+   o agregado de um deles sob um título que diz "RF × …" — o outro espelho simplesmente não
+   teria onde ser conferido.
+   ⭐ Com um trader só (o caso de hoje: o LAguiar ainda não boletou) sai exatamente o card de
+   antes, pelo mesmo caminho — o laço roda uma vez. */
 function renderRfCcyCheck(cfg, tabId) {
+  const checks = cfg?.ccy_checks;
+  if (checks && typeof checks === 'object') {
+    return Object.keys(checks)
+      .map(t => _rfCcyCheckCard(rfCfgDoTrader(cfg, t), tabId))
+      .join('');
+  }
+  return _rfCcyCheckCard(cfg, tabId);   // payload antigo / snapshot estático
+}
+
+function _rfCcyCheckCard(cfg, tabId) {
   const c = cfg?.ccy_check;
   if (!c?.linhas?.length) return '';
   const alvo = cfg.exposure_ratio;
@@ -1432,6 +1721,19 @@ function renderRfCcyCheck(cfg, tabId) {
     .map(([k, n]) => `${n}× ${k}`).join(' · ');
   const foraRf = Object.entries({ ...(c.fora?.rf ?? {}) })
     .map(([k, n]) => `${n}× ${k}`).join(' · ');
+  /* ☠️ **"RF zerado" e "RF sem dado" não podem desenhar igual** (18/11/2026). Desde que o
+     card passou a sair também para quem ainda NÃO espelha (pedido da mesa: *"nessa parte
+     precisa mostrar as do LAguiar também"*), a coluna do RF vem toda em zero e a razão em
+     0,00% contra o alvo de 10% — o que está certo e é justamente o que se quer ver, mas lido
+     sem contexto vira "a tela não carregou o lado do RF". Uma linha resolve. ⭐ Em ÂMBAR e não
+     em vermelho: não é erro de dado nem posição proibida, é alocação que ainda não começou —
+     a mesma cor e a mesma distinção da faixa `rf_faltantes` (`sem_espelho`). */
+  const semEspelho = c.sem_rf
+    ? `<div class="jgp-tbl-note" style="font-size:11px;color:var(--yellow);margin-top:4px;white-space:normal">`
+      + `⚠ <b>${_escHtml(trdLbl)} ainda não espelhou nada no RF</b> — a coluna RF está zerada `
+      + `por isso, não por falta de dado. A coluna MM é o book dele de hoje: é o que teria de `
+      + `ser espelhado.</div>`
+    : '';
   const nota = (foraTxt || foraRf)
     ? `<div class="jgp-tbl-note" style="font-size:11px;color:var(--text-muted);margin-top:6px;white-space:normal">`
       + `⛔ Fora desta conta (só câmbio linear entra): `
@@ -1460,7 +1762,11 @@ function renderRfCcyCheck(cfg, tabId) {
      — dois elementos com o MESMO id no documento. O `getElementById` devolve sempre o
      primeiro (o da aba do PortfolioRF, escondido), então a setinha da aba do PAbinader
      abria o card da outra e, na tela, não acontecia nada. */
-  const wrapId = `rfCcyWrap_${tabId || currentRenderTab()}`;
+  /* ⚠️ **O trader entra no id** (18/11/2026): com dois cards na mesma aba o id por aba
+     voltaria a ser duplicado — exatamente o defeito que a nota acima descreve, só que agora
+     dentro de UMA aba, onde os dois estão visíveis e a setinha de um abriria o outro. */
+  const wrapId = `rfCcyWrap_${tabId || currentRenderTab()}_${
+    String(c.trader || 'mm').replace(/[^A-Za-z0-9]/g, '')}`;
   return `<div class="card" style="flex:0 0 auto">
     <div class="section-copy-target">
       <div style="cursor:pointer;user-select:none" onclick="(function(btn,wrap){
@@ -1516,7 +1822,7 @@ function renderRfCcyCheck(cfg, tabId) {
         </thead>
         <tbody>${tr}</tbody>
       </table>
-      ${nota}${semSpot}
+      ${semEspelho}${nota}${semSpot}
       </div>
     </div>
   </div>`;
@@ -2105,9 +2411,18 @@ function renderRfFaltantes(data, mainRows) {
       + (m.mm_pct == null ? ''
           : ` <span style="color:var(--text-muted)">(${pct2(m.mm_pct)} do NAV)</span>`)
       + ` <span style="color:var(--text-muted)">→ RF</span> <b>US$ ${usd(m.rf_alvo_usd)}</b></li>`).join('');
+    /* ☆ **"Ainda não espelhou NADA" é outra notícia** (18/11/2026, com o LAguiar
+       recém-cadastrado como espelhador). Sem posição nenhuma no RF, a lista abaixo é o
+       book INTEIRO dele em escopo — e sob a manchete normal ("tem 5 posições que o RF
+       não tem") lia-se como cinco esquecimentos pontuais, em vez de "o espelho dele
+       não começou". Mesma lista, mesma cor; o que muda é a frase que a encabeça. */
+    const _manchete = b.sem_espelho
+      ? `⚠ ${_escHtml(b.label)} ainda NÃO espelhou nada no RF — ${n}`
+        + ` ${n > 1 ? 'posições' : 'posição'} de ${_escHtml(b.escopo)} a boletar`
+      : `⚠ ${_escHtml(b.label)} tem ${n}`
+        + ` ${n > 1 ? 'posições' : 'posição'} de ${_escHtml(b.escopo)} que o RF não tem`;
     return `<div style="margin-top:${iB ? 8 : 0}px">
-      <b style="color:var(--yellow);font-size:13px">⚠ ${_escHtml(b.label)} tem ${n}`
-      + ` ${n > 1 ? 'posições' : 'posição'} de ${_escHtml(b.escopo)} que o RF não tem</b>`
+      <b style="color:var(--yellow);font-size:13px">${_manchete}</b>`
       + ` <span style="color:var(--text-muted);cursor:help;font-weight:400" title="${tipBloco(b)}">ⓘ</span>
       <ul style="margin:3px 0 0 18px;padding:0">${liAtivos}${liMoedas}</ul>
     </div>`;
@@ -2211,15 +2526,35 @@ function _checkNaoRateada(r, fundosComQtd) {
 
 function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFund, rfCfg) {
   if (!fundRows?.length || !fundNavs) return '';
-  // Colunas do sleeve: só quando há linha dele na tabela E o lado do MM veio no payload.
-  const rfSleeveCols = !!rfCfg?.mm_rows?.length && mainRows.some(r => r.is_rf_sleeve);
+  /* ☠️ **A COLUNA DE CHECK EXISTE QUANDO O TRADER ESPELHA — ponto** (18/11/2026, pedido
+     da mesa: *"o que eu quero é que a tabela auxiliar com os checks sempre tenha as colunas
+     dos checks, mesmo que não tenha posição que seja em relação àquele check"*).
+
+     Era `mainRows.some(r => r.is_rf_sleeve)` — o que sobrou DEPOIS DOS FILTROS. A tabela de
+     Posição corta FX pequeno por padrão (`no_fx_tiny`, 0,20 % do NAV) e o sleeve é 1/10 da
+     exposição do MM **por definição**, então quase nunca passa desse piso (medido em
+     18/11/2026: 0,006-0,013 %). A coluna inteira sumia da aba do RF.
+     ⚠️ **E a correção NÃO é deixar a linha pequena aparecer** — foi a 1ª tentativa, e a mesa
+     recusou no mesmo dia: o filtro existe para esconder, e esconder continua certo. O que
+     não pode é o corte de EXIBIÇÃO decidir se um CONTROLE existe.
+     ⚠️ Pelo mesmo motivo não serve `n_rows > 0` (há linha de sleeve no payload): no dia em
+     que o trader zera o RF, "ele espelha e não há nada lá" é o veredito que mais importa, e
+     a coluna não pode ser justamente o que some. É a mesma lição que o `mirrorCols` logo
+     abaixo e o `showRf` da aba do trader já aplicam — e que a nota do `Check RF` registra
+     desde 08/10/2026, quando ela sumiu ao a mesa zerar o RF. Este é o 3º caminho pelo qual
+     a mesma coluna desaparece: payload vazio, filtro da tela e, aqui, as duas coisas.
+     ⚠️ O `mm_rows` deixou de ser condição (ele só alimenta o LOOKUP do lado do MM): sem
+     ele o `lookupMmRf` fica `null` e a célula diz que não há com o que comparar — que é
+     informação, e não o sumiço do controle. */
+  const rfSleeveCols = !!rfCfg && (rfCfg.traders ?? []).length > 0;
   /* Espelho de juros (PortfolioRF × EMota). ⭐ A coluna existe quando o PAYLOAD traz o
      espelho — não quando há linha em escopo. É a mesma lição do `Check RF`: no dia em que o
      livro de juros estiver vazio, "não há juros no RF" é o veredito, e some justamente a
      coluna que tinha o que dizer. */
   const mirrorCfg  = (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(currentRenderTab()) : null;
   const mirrorCols = !!mirrorCfg;
-  const lookupMmRf   = rfSleeveCols ? makeMirrorLookup(rfCfg.mm_rows) : null;
+  const lookupMmRf   = (rfSleeveCols && rfCfg.mm_rows?.length)
+    ? makeMirrorLookup(rfCfg.mm_rows) : null;
 
   /* ⚠️ **A ordem das colunas é a do `pnl_fund_tables`, não alfabética** (30/10/2026). Com
      DOIS fundos o `sort()` por acaso dava a mesma ordem dos blocos do modo "Por fundo"; com
@@ -2410,7 +2745,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
         ${mirrorCols ? _checkVazio('—', 'Linha de outro trader: o espelho de juros confere o '
             + 'livro do PortfolioRF contra o EMota, e esta linha é do outro trader — o check '
             + 'dela é a coluna ao lado.') : ''}
-        ${rfSleeveCols ? rfCheckCell(rfCfg, { mmQty: mmRf?.final_qty ?? null, mmRow: mmRf,
+        ${rfSleeveCols ? rfCheckCell(rfCfgDoTrader(rfCfg, r.trader), { mmQty: mmRf?.final_qty ?? null, mmRow: mmRf,
             rfQty: effectiveRowValues(r).final ?? r.final_qty ?? 0,
             /* ⚠️ O alvo vem por ELEGIBILIDADE (`rfLineRow`), igual à aba de quem boleta: a
                linha de JUROS deve espelhar nos DOIS fundos, então o alvo é 4,5% + 1,4%

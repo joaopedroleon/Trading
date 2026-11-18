@@ -456,6 +456,48 @@ function rfSleeveCfg(tabId) {
   const d = posDataByTab[tabId ?? currentRenderTab()] ?? positionsData;
   return d?.rf_sleeve ?? null;
 }
+
+/* ── A config VISTA DE UM TRADER (18/11/2026) ──────────────────────────────────────────
+   ☠️ **São DOIS espelhadores desde 18/11/2026** (PAbinader e LAguiar), e quase tudo no
+   sleeve é POR TRADER — o alvo da boleta e o agregado por moeda têm o NAV de MM dele no
+   denominador. As funções desta tela recebem `cfg` e decidem; passar o `cfg` cru a uma
+   linha do LAguiar faria o veredito dela sair medido contra o NAV e as moedas do
+   PAbinader: números plausíveis, da pessoa errada.
+
+   ⭐ **Em vez de mudar a assinatura de cada consumidor, resolve-se na BORDA**: este helper
+   devolve uma VISTA do cfg com os campos por-trader já escolhidos, e quem desenha uma linha
+   passa `rfCfgDoTrader(cfg, row.trader)`. Com um trader só (ou sem trader) devolve o próprio
+   objeto — então o caminho de hoje é byte a byte o de antes, sem cópia e sem custo.
+   ⚠️ O `ccy_check` singular do payload só existe quando há UM trader com linha; a fonte é o
+   `ccy_checks`. Ver `_rf_ccy_checks` no router. */
+function rfCfgDoTrader(cfg, trader) {
+  if (!cfg || !trader) return cfg;
+  const ccy = cfg.ccy_checks?.[trader];
+  const alvo = cfg.alloc_targets?.[trader];
+  const porVeic = cfg.alloc_target_por_veiculo_por_trader?.[trader];
+  const porFundo = cfg.alloc_target_por_fundo_por_trader?.[trader];
+  if (ccy === undefined && alvo === undefined && !porVeic && !porFundo) return cfg;
+  return {
+    ...cfg,
+    /* `?? null` e não `?? cfg.ccy_check`: trader de sleeve SEM linha não herda o agregado do
+       outro — sem check por moeda a régua volta a ser a quantidade da linha, que é o
+       comportamento correto de quem ainda não espelha. */
+    ccy_check:   ccy ?? null,
+    alloc_target: alvo ?? cfg.alloc_target,
+    alloc_target_por_veiculo: porVeic ?? cfg.alloc_target_por_veiculo,
+    alloc_target_por_fundo:   porFundo ?? cfg.alloc_target_por_fundo,
+    _trader: trader,
+  };
+}
+
+/* Traders que a coluna de check do sleeve CONFERE — os cadastrados, tenham linha hoje ou
+   não. ⚠️ Isto mudou em 18/11/2026 junto com a coluna virar permanente: ela nasceu lendo
+   só quem tinha linha, para "não prometer um veredito que não existe" — mas com a coluna
+   sempre presente **"ele espelha e não há nada no RF" é um veredito**, e esconder o nome
+   dele do cabeçalho é que seria calar o caso que mais importa. */
+function rfSleeveTradersDaColuna(cfg) {
+  return (cfg?.traders ?? []).filter(Boolean);
+}
 /* Selo do DONO numa linha de sleeve — só quando ela está na tabela de OUTRO trader
    (08/10/2026). Com as linhas do Abinader dentro da tabela do PortfolioRF, a coluna
    Instrumento passou a ter duas procedências e o selo é o que as separa a olho: sem ele a

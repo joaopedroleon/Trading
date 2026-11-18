@@ -142,29 +142,64 @@ function renderOptionsAnalysis() {
     return { price, delta, src, premium, dPct, dUsd, nPct, nUsd, edited, ref, res, bps };
   };
 
-  // agrupar por ativo objeto + vencimento, com exceções:
-  //  • DOL e USDBRL no mesmo bloco
-  //  • ações do mesmo ativo objeto no mesmo bloco (ignora vencimento)
+  /* ☠️ **UM BLOCO POR ATIVO OBJETO — o vencimento SAIU da chave** (18/11/2026, pedido da
+     mesa: *"o ideal é que elas fossem listadas juntas, com só um total embaixo; dessa forma
+     tem vários totais — queria como se fosse o do IWWZ6"*).
+
+     Era `ativo objeto + VENCIMENTO`, e com isso o `USDCLP` virava DOIS blocos de uma linha
+     cada, com dois "Total" de uma linha só — enquanto o `IWWZ6`, cujas três opções não têm
+     `maturity` no JRS, caía num bloco único e era exatamente a leitura que ela queria. Ou
+     seja: a tela já fazia as duas coisas, e qual delas você via dependia de o JRS trazer ou
+     não o vencimento daquela família — que é um detalhe de cadastro, não uma decisão de
+     leitura.
+     ⛔ **A 1ª tentativa foi acrescentar um subtotal do ativo embaixo dos blocos, e a mesa
+     recusou no mesmo dia** (*"foi adicionado um total embaixo... dessa forma tem vários
+     totais"*): ela não queria mais um nível, queria MENOS — as linhas juntas e um Total só.
+     ⭐ A regra que fica: **quando o pedido é "um total só", a resposta é juntar as LINHAS,
+     não somar os totais.** Acrescentar um nível resolve a aritmética e piora a leitura, que
+     era justamente a queixa.
+     ⚠️ As duas exceções antigas continuam: DOL e USDBRL no mesmo bloco; ações do mesmo
+     objeto juntas. A de ações *era* "ignora vencimento" — hoje isso vale para todos, e ela
+     sobrevive só como o caso que já se comportava assim.
+     ⚠️ O vencimento **continua sendo lido** (`optMaturity`): ele rótula o bloco quando é
+     único e vira a contagem quando não é — e o `~` de "vencimento lido do NOME" segue
+     valendo para o bloco. */
+  /* ☠️ **A CHAVE é o ativo objeto CANÔNICO (`option_undl_group`), não o ticker dele**
+     (18/11/2026, pedido da mesa: *"tudo que na prática tenha o mesmo underlying entra
+     junto num mesmo bloco"*). O `option_undl` cru é o root do `OPT_UNDL_TICKER`, ou seja
+     **cadeia + vencimento**: o ouro saía em `GCZ6` · `GCG7` · `XATZ6` · `XAWZ6` · `XGRZ6`
+     — cinco blocos e cinco "Total" para o mesmo metal —, e a opção sobre o futuro E-mini
+     (`IWWZ6`) ficava longe da opção listada do mesmo índice (`SPX US`). O backend resolve
+     o canônico pela BBG (`instruments.undl_group_key`); aqui ele é só a chave.
+     ⚠️ Fallback para `option_undl` de propósito: com a BBG fora o campo degrada para o
+     rótulo de antes e a tela volta a quebrar por cadeia — que é feio e verdadeiro, melhor
+     do que juntar por um palpite nosso de qual ticker é o mesmo ativo.
+     ⚠️ `option_undl` continua sendo lido: é ele que diz, no hover do cabeçalho, QUAIS
+     objetos entraram no bloco — sem isso "Gold — 2 vencimentos" não se audita. */
   const groups = new Map();
   for (const r of opts) {
-    const sub  = r.option_subtype;
-    let undl   = r.option_undl || r.instrument_name || '—';
-    // Vencimento EFETIVO (JRS, ou lido do nome quando o JRS não traz — ver `optMaturity`):
-    // sem isso a opção aberta hoje caía num bloco "sem vencimento" separado do resto da
-    // mesma série, e o Total do bloco não era o da série.
+    let undl   = r.option_undl_group || r.option_undl || r.instrument_name || '—';
+    // Vencimento EFETIVO (JRS, ou lido do nome quando o JRS não traz — ver `optMaturity`).
+    // Não entra mais na CHAVE: serve ao rótulo do bloco e à contagem de vencimentos.
     const om   = optMaturity(r);
-    let mat    = om.iso || '';
-    let matDrv = om.derived;
     if (_isDolUsdbrlOpt(r)) undl = 'DOL / USDBRL';
-    if (sub === 'us_equity') { mat = ''; matDrv = false; }   // ações: mesmo objeto junto, mesmo com vencimentos diferentes
-    const gkey = `${undl}||${mat}`;
-    if (!groups.has(gkey)) groups.set(gkey, { undl, mat, matDrv: false, rows: [] });
-    groups.get(gkey).rows.push(r);
-    if (matDrv) groups.get(gkey).matDrv = true;
+    if (!groups.has(undl)) groups.set(undl, { undl, mat: '', matDrv: false, mats: new Set(), undls: new Set(), rows: [] });
+    const g = groups.get(undl);
+    g.rows.push(r);
+    if (r.option_undl) g.undls.add(r.option_undl);
+    if (om.iso) g.mats.add(om.iso);
+    if (om.derived) g.matDrv = true;
+  }
+  // O rótulo mostra o vencimento quando o bloco tem UM só (o caso comum, e o que a tela
+  // sempre mostrou); com vários, a DATA some do cabeçalho — ela está no nome de cada linha.
+  for (const g of groups.values()) {
+    const ms = [...g.mats].sort();
+    g.mat    = ms.length === 1 ? ms[0] : '';
+    g.nMats  = ms.length;
+    if (ms.length !== 1) g.matDrv = false;   // o "~" é sobre UMA data; sem ela não diz nada
   }
   const sorted = [...groups.values()].sort((a, b) =>
-    a.undl.localeCompare(b.undl, 'en-US', { sensitivity: 'base' }) ||
-    String(a.mat).localeCompare(String(b.mat)));
+    a.undl.localeCompare(b.undl, 'en-US', { sensitivity: 'base' }));
 
   /* Seleção default (só na 1ª vez que a linha aparece): marcada se AINDA TEM POSIÇÃO
      **e não for opção contra o BRL** (`_isBrlOpt`) — DOL BMF, USDBRL e também EURBRL.
@@ -310,10 +345,23 @@ function renderOptionsAnalysis() {
     }).join('');
     // Subgrupo = faixa clara DENTRO do corpo (padrão `um-table`). O respiro entre blocos
     // vem do padding-top da própria faixa — não há mais linha vazia de 18px.
-    const matLbl = g.mat ? ` — ${fmtDate(g.mat)}${g.matDrv ? '~' : ''}` : '';
-    const matTip = g.matDrv
-      ? ' title="Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste bloco."' : '';
-    const header = `<tr class="grp" data-optgrp="${gi}"><td colspan="${NCOL}"${matTip}>${g.undl}${matLbl}</td></tr>`;
+    const matLbl = g.mat
+      ? ` — ${fmtDate(g.mat)}${g.matDrv ? '~' : ''}`
+      : (g.nMats > 1 ? ` — ${g.nMats} vencimentos` : '');
+    /* Hover do cabeçalho: QUAIS ativos objeto foram consolidados neste bloco. Só sai
+       quando houve consolidação de fato (>1) — num bloco de um objeto só, repetir o que
+       o rótulo já diz é ruído. É o que torna "Gold" auditável sem pôr 5 tickers na tela:
+       a linha diz o fato, o tooltip diz de onde ele veio. */
+    const undlLst = [...g.undls].sort();
+    const tips = [];
+    if (undlLst.length > 1)
+      tips.push(`Consolidado pelo ativo objeto — ${undlLst.length} contratos no bloco: ${undlLst.join(' · ')}`);
+    if (g.matDrv)
+      tips.push('Vencimento (~) lido do NOME do instrumento — o JRS não trouxe maturity para ao menos uma linha deste bloco.');
+    const hdrTip = tips.length ? ` title="${tips.join(' | ').replace(/"/g, '&quot;')}"` : '';
+    const nUndl  = undlLst.length > 1
+      ? ` <span style="font-weight:400;color:var(--text-muted)">(${undlLst.length} contratos)</span>` : '';
+    const header = `<tr class="grp" data-optgrp="${gi}"><td colspan="${NCOL}"${hdrTip}>${g.undl}${matLbl}${nUndl}</td></tr>`;
     const totalRow = (prem, nUsd, nPct, dUsd, dPct, res, bps, cls, kind) => `<tr class="tot${cls}" data-optgrp="${gi}" data-tot="${kind}">
         <td class="sel col-sel"></td>
         <td class="lbl">Total</td>
@@ -329,6 +377,7 @@ function renderOptionsAnalysis() {
       </tr>`;
     const total = totalRow(tPrem, tNUsd, tNPct, tDUsd, tDPct, tRes, tBps, '', 'all')
                 + totalRow(sPrem, sNUsd, sNPct, sDUsd, sDPct, sRes, sBps, ' tot-print', 'sel');
+
     return header + rowsHtml + total;
   }).join('');
 
@@ -348,9 +397,16 @@ function renderOptionsAnalysis() {
          Inline, e nao no CSS: .section-copy-target veste outros 3 blocos da tela. -->
     <div class="section-copy-target" style="max-width:100%">
       <p class="csub jgp-tbl-note" style="margin:0 0 8px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
-        Um subgrupo por <b>ativo objeto + vencimento</b>, com Total próprio. Toda conta derivada
-        (Prêmio, as duas exposições e o <b>Resultado</b>) sai do <b>MID</b> — BID e ASK ficam ao
-        lado só como referência de mercado, e por isso o MID aparece entre os dois.
+        Um subgrupo por <b>ativo objeto</b>, com Total próprio — <b>cadeias e vencimentos do
+        mesmo underlying ficam juntos no mesmo bloco</b> (as semanais de ouro com o
+        <code>GC</code>, a opção sobre o futuro E-mini com a opção listada de <code>SPX</code>),
+        e o cabeçalho traz a data quando ela é única. Quando houve consolidação, ele diz
+        quantos contratos entraram e o <i>hover</i> lista quais. O ativo objeto sai da
+        Bloomberg (<code>UNDL_SPOT_TICKER</code> / <code>ID_EXCH_SYMBOL</code> do objeto),
+        não de uma lista nossa.
+        Toda conta derivada (Prêmio, as duas exposições e o <b>Resultado</b>) sai do
+        <b>MID</b> — BID e ASK ficam ao lado só como referência de mercado, e por isso o MID
+        aparece entre os dois.
       </p>
       <!-- Rolagem lateral DENTRO do card, nunca da pagina: com o bloco Resultado a tabela
            passa de 1.100 p/ ~1.340px e, abaixo de ~1.370px de viewport, o document inteiro
@@ -414,8 +470,9 @@ function optSelWithPosition() {
 async function copyOptAnalysisImage(btn) {
   const card   = btn.closest('.card');
   const target = card.querySelector('.section-copy-target') ?? card;
-  // Bloco (ativo objeto + vencimento) sem NENHUMA linha marcada sai inteiro — senão a
-  // imagem leva um cabeçalho de grupo seguido de um "Total" vazio, que só ocupa espaço.
+  // Bloco (ativo objeto) sem NENHUMA linha marcada sai inteiro — senão a imagem leva um
+  // cabeçalho de grupo seguido de um "Total" vazio, que só ocupa espaço. O cabeçalho não
+  // tem `data-optsel`, então é o teste de `liveGrp` que o derruba junto com as linhas.
   const liveGrp = new Set([...target.querySelectorAll('tr[data-optrow][data-optsel="1"]')]
                           .map(tr => tr.dataset.optgrp));
   const hidden = [...target.querySelectorAll('tr[data-optgrp]')]

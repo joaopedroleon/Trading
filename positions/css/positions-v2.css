@@ -450,6 +450,7 @@ html.theme-v2 .jgp-tbl td.val { font-weight: 700; }
    (que nesta tela também é a cor de célula clicável). */
 html.theme-v2 .jgp-tbl tbody tr.tot td.lbl { color: var(--text); }
 
+
 /* Subtotal de VENCIMENTO — régua fina de 1px em vez da de 2px do subtotal de bloco, p/ o
    olho ler a hierarquia (vencimento < bloco < total geral) sem contar linhas. */
 html.theme-v2 .jgp-tbl tbody tr.tot.tot-sub td {
