@@ -92,6 +92,15 @@ const fmtPricePct = v =>
 const fmtOptPx = v =>
   v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
+/* Spread de CDS na coluna de preço da tabela de Posição (23/11/2026) — ver o ⭐ do CDS em
+   `pos-render.js`. Sufixo `bp` porque a coluna vizinha de toda outra linha é PREÇO: sem a
+   unidade, 173,33 ao lado de 96,76 se lê como mais um preço.
+   ⚠️ 2 casas: a BBG publica o spread com 4 (173,3356) e o movimento de um dia é de bps
+   inteiros — a 3ª casa é ruído de tela, mas arredondar para 0 esconderia um dia parado. */
+const fmtCdsSpread = v =>
+  v == null ? '—' : v.toLocaleString('pt-BR',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' bp';
+
 function fmtDv01(v) {
   if (v == null) return '—';
   const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });

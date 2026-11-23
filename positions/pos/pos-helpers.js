@@ -483,6 +483,14 @@ function rfCfgDoTrader(cfg, trader) {
        outro — sem check por moeda a régua volta a ser a quantidade da linha, que é o
        comportamento correto de quem ainda não espelha. */
     ccy_check:   ccy ?? null,
+    /* ⭐ **O piso de materialidade também é por trader desde 23/11/2026** — ele virou
+       `0,40% × NAV de MM`, e os dois espelhadores têm NAVs diferentes (60,98 MM × 45,74 MM),
+       logo pisos de US$ 243.924 e US$ 182.943. Era um escalar absoluto na raiz do `rf_sleeve`
+       (US$ 200 mil, igual para os dois); deixá-lo lá mediria a linha de um pelo livro do
+       outro, que é o erro que este helper existe para evitar.
+       ⚠️ Sem `ccy_check` (trader que ainda não espelha) vale o mapa já resolvido pelo
+       backend; sem os dois, `null` — e o consumidor NÃO aplica piso em vez de inventar um. */
+    min_usd:     ccy?.min_usd ?? cfg.min_usd_por_trader?.[trader] ?? null,
     alloc_target: alvo ?? cfg.alloc_target,
     alloc_target_por_veiculo: porVeic ?? cfg.alloc_target_por_veiculo,
     alloc_target_por_fundo:   porFundo ?? cfg.alloc_target_por_fundo,
@@ -907,8 +915,9 @@ function prevShortBrEquityFactor() {
 }
 
 /* ☠️ **Os filtros SÓ DE TAMANHO, e por que eles têm de ser nomeados num lugar só.**
-   `no_fx_small` (200 mil absolutos) e `no_fx_tiny` (0,20 % do NAV) escondem LINHA PEQUENA na
-   tabela de Posição — são corte de EXIBIÇÃO. Os demais filtros da aba (`no_hedge_cambial`,
+   `no_fx_tiny` (0,40 % do NAV, a régua única — ver `FX_RESIDUO_PCT`) esconde LINHA PEQUENA
+   na tabela de Posição — é corte de
+   EXIBIÇÃO. (Tinha um irmão absoluto, `no_fx_small`, aposentado em 23/11/2026 — ver lá.) Os demais filtros da aba (`no_hedge_cambial`,
    `no_cash`) são corte de ESCOPO: ali a linha não é pequena, é de outra natureza, e tirá-la
    muda legitimamente o que a aba mede.
    A distinção não é estética: um filtro de tamanho aplicado onde se SOMA apaga número.
@@ -921,9 +930,30 @@ function prevShortBrEquityFactor() {
      · Posição por moeda  → NÃO aplica (ela tem corte próprio, no AGREGADO por moeda).
    Irmão do achado dos baldes de alocação: filtro de escopo entra na conta, filtro de
    exibição não. */
-const FILTROS_SO_TAMANHO = new Set(['no_fx_small', 'no_fx_tiny']);
+const FILTROS_SO_TAMANHO = new Set(['no_fx_tiny']);
 
-const _FX_TINY_PL = 0.002;   // 0,20 % do NAV — piso do filtro `no_fx_tiny`
+/* ⭐ **A RÉGUA ÚNICA DE RESÍDUO DE CÂMBIO — uma constante para a tela inteira** (23/11/2026,
+   pedido da mesa: *"acho que tem ferramenta que usa 0,20 e ferramenta que usa 0,40 … quero que
+   passe a ser tudo 0,40, sejam os filtros de tela ou análises de resíduo"*).
+   ☠️ **Eram DUAS réguas para a mesma pergunta** — "isto é resíduo de rolagem?" —, e por
+   acidente histórico: o filtro de LINHA nasceu em 0,10 % (08/10/2026), subiu para 0,20 %
+   (09/10) e o corte por MOEDA nasceu em 0,40 % no dia seguinte, sem que ninguém reconciliasse
+   os dois. O efeito era a tela se contradizer: linha escondida da Posição por ser pequena e,
+   ao lado, a mesma moeda tratada como material na tabela por moeda (e vice-versa).
+   ⭐ Hoje **todos** os pisos da família saem daqui: o filtro `no_fx_tiny` (abaixo), o corte de
+   exibição da "Posição por moeda" (`_FX_CCY_MIN_PCT`) e o piso que afirma o check MM × MM Prev
+   (`_ALLOC_MIN_PCT`), os dois em pos-fxlegs.js, que carrega DEPOIS deste arquivo.
+   ⚠️ **O gêmeo do backend é o `_RF_CCY_MIN_PCT` (positions/router.py)** — mesma régua, outra
+   linguagem, e por isso é o único lugar onde o número aparece duas vezes. O
+   `tests/test_residuo_pct.py` afere que os dois batem; mexendo aqui, mexa lá.
+   ⛔ **Não confundir com os pisos de LOTE** (`MIN_QTD_EQ`, `LIMIAR_KUSD_PADRAO`, `TOL`): eles
+   respondem *"a boleta desce?"* e seguem absolutos de propósito. */
+const FX_RESIDUO_PCT = 0.004;   // 0,40 % do NAV
+const _FX_TINY_PL = FX_RESIDUO_PCT;   // piso do filtro `no_fx_tiny` — ver acima
+/* Rótulo do corte, escrito a partir da constante: o chip dizia "0,20%" num literal, e um
+   número de régua escrito à mão é como ele diverge do que o código faz. */
+const _FX_RESIDUO_TXT = (FX_RESIDUO_PCT * 100).toLocaleString('pt-BR',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
 
 /* ── Filters ─────────────────────────────────────────────────────────────── */
 const FILTERS = [
@@ -936,25 +966,29 @@ const FILTERS = [
     fn:    r => r.subarea !== 'Hedge_Cambial',
   },
   {
-    id:    'no_fx_small',
-    label: 'Excluir FX < 200k',
-    title: 'Esconde a linha de FX que ficou pequena E não girou hoje: saldo final < 200k '
-         + 'e giro do dia < 200k. Corte ABSOLUTO (o irmão relativo é o de 0,20% do NAV).',
-    // exclui somente posições FX pequenas SEM atividade no dia
-    fn:    r => !(r.is_fx && Math.abs(r.final_qty ?? 0) < 200_000 && (r.gross_traded_qty ?? 0) < 200_000),
-  },
-  {
-    /* ⭐ Irmão RELATIVO do `no_fx_small` (pedido da mesa, 08/10/2026). O corte de 200k é
-       absoluto e foi calibrado para os livros grandes; num veículo pequeno ele deixa passar
-       resíduo de rolagem que ali já é material, e num livro maior esconderia posição que não
-       é. 0,10% do NAV é a mesma régua em qualquer fundo.
+    /* ⚰️ **`no_fx_small` ("Excluir FX < 200k") FOI APOSENTADO em 23/11/2026** (pedido da
+       mesa: *"quero justamente tirar esse filtro de 200k de exibição, quero que seja por %
+       assim como os outros"*). Ele escondia a linha de FX com `|final_qty| < 200.000` E
+       `giro < 200.000` — e o problema não era só ser absoluto: ele media **QUANTIDADE**, não
+       exposição, então 200 mil unidades valiam ~US$ 1,3 mil em JPY e ~US$ 230 mil em EUR.
+       Duas moedas, o mesmo chip, dois cortes 175× diferentes.
+       ⭐ **Não foi recalibrado, foi SUBSTITUÍDO pelo `no_fx_tiny` abaixo** — convertê-lo para %
+       criaria dois chips medindo a mesma coisa com dois números. As abas de EMota e ECotrim,
+       que o tinham no padrão, passaram a usar o relativo (ver `TRADER_TABS` em pos-state.js).
+       ⚠️ Id órfão em estado salvo é inócuo: `applyFilters` cruza `activeFilters` com `FILTERS`,
+       então id que não existe mais simplesmente não acha filtro. */
+    /* ⭐ Era o irmão RELATIVO dele (pedido da mesa, 08/10/2026), e hoje é o único corte de
+       tamanho da tela. O corte de 200k era absoluto e foi calibrado para os livros grandes;
+       num veículo pequeno ele deixava passar resíduo de rolagem que ali já é material, e num
+       livro maior esconderia posição que não é. 0,10% do NAV é a mesma régua em qualquer fundo.
        ⚠️ Mede o **#PL** (exposição, fração do NAV), não a quantidade — é o que torna o corte
        comparável entre moedas: 50 AUD e 50 JPY não são a mesma coisa.
        ⚠️ Linha SEM #PL calculável não é cortada: "não sei" não é "é pequeno" (seria sumir com
        a posição que a tela deveria estar denunciando). E linha com giro no dia fica, como no
        irmão: o que foi operado hoje é o que a mesa quer ver, por menor que tenha ficado. */
-    // ⚠️ Subiu de 0,10 % para 0,20 % em 09/10/2026, a pedido da mesa. Uma constante, não o
-    // literal espalhado: o número é calibração da mesa e muda de tempos em tempos.
+    // ⚠️ Calibração da mesa, e ela já mudou três vezes: 0,10 % (08/10/2026) → 0,20 % (09/10)
+    // → **0,40 % (23/11/2026)**, quando virou a régua ÚNICA de resíduo de câmbio da tela. Por
+    // isso é uma constante e não um literal espalhado — e hoje nem o rótulo do chip a repete.
     /* ☠️ **O corte é sobre o MAIOR dos três estados do dia — abertura, giro e final — não só
        sobre o saldo que sobrou** (12/10/2026, a mesa pegou). Medir só o final esconde a linha
        que ABRIU relevante e foi reduzida (0,25 % de abertura virando 0,19 % de saldo: o giro
@@ -966,10 +1000,11 @@ const FILTERS = [
        (`pnl.compute_pl`: `final_qty/nav`, ou `final_qty × preço × fator/nav` no cross): o
        mesmo #PL por unidade converte abertura e giro em fração do NAV, sem refazer preço. */
     id:    'no_fx_tiny',
-    label: 'Excluir FX < 0,20%',
+    label: 'Excluir FX < ' + _FX_RESIDUO_TXT,
     title: 'Esconde só o que foi irrelevante no dia INTEIRO: abertura, giro e saldo final '
-         + 'todos abaixo de 0,20% do NAV. Linha que abriu grande ou girou grande aparece, '
-         + 'mesmo que tenha sobrado quase nada. Corte RELATIVO (o irmão absoluto é o de 200k).',
+         + 'todos abaixo de ' + _FX_RESIDUO_TXT + ' do NAV. Linha que abriu grande ou girou '
+         + 'grande aparece, mesmo que tenha sobrado quase nada. Mede o #PL (exposição), não a '
+         + 'quantidade. É a MESMA régua do corte por moeda da seção de câmbio.',
     fn:    r => {
       if (!r.is_fx) return true;
       // ⚠️ Abriu e ZEROU hoje: o #PL é 0 por construção e a linha é sobre ATIVIDADE, não

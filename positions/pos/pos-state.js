@@ -18,13 +18,16 @@ const API_BASE = location.protocol === 'file:' ? 'http://localhost:8083' : '';
    física dos traders e não têm nada a ver com a base da JGP; um palmo abaixo do livro, o
    número convidava a somar. Nada de reintroduzir a flag: ver pos-margem.js. */
 const TRADER_TABS = [
-  { id: 'emota',       trader: 'EMota',      filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
-  { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_small'], useGroups: true  },
+  { id: 'emota',       trader: 'EMota',      filters: ['no_hedge_cambial','no_fx_tiny'], useGroups: true  },
+  { id: 'ecotrim',     trader: 'ECotrim',    filters: ['no_hedge_cambial','no_fx_tiny'], useGroups: true  },
   { id: 'portfoliorf', trader: 'PortfolioRF',filters: ['no_cash','no_fx_tiny'],            useGroups: false },
   { id: 'other',       trader: 'PAlves',     filters: ['no_hedge_cambial','no_fx_tiny'],  useGroups: false },
-  // ⚠️ SEM o `no_fx_small` (corte ABSOLUTO de 200k): no livro de câmbio a posição pequena é o
-  // resíduo de rolagem a liquidar, e ele é para ser visto. ⭐ Mas COM o `no_fx_tiny` desde
-  // 09/10/2026 (a mesa pediu): o corte RELATIVO de 0,20 % do NAV tira o ruído sem esconder
+  // ⚰️ O `no_fx_small` (corte ABSOLUTO de 200k) foi APOSENTADO em 23/11/2026 e as abas de
+  // EMota e ECotrim, as duas últimas que o tinham no padrão, passaram ao relativo — ver
+  // pos-helpers.js. ⚠️ A premissa desta aba não mudou: no livro de câmbio a posição pequena
+  // é o resíduo de rolagem a liquidar, e ele é para ser visto. ⭐ COM o `no_fx_tiny` desde
+  // 09/10/2026 (a mesa pediu): o corte RELATIVO de 0,40 % do NAV (`FX_RESIDUO_PCT`, a régua
+  // única desde 23/11/2026; eram 0,20 % até lá) tira o ruído sem esconder
   // resíduo que já é material — e, como todo chip, se desliga. ⭐ E desde 12/10/2026 ele mede
   // o dia INTEIRO (abertura, giro e saldo final), não só o que sobrou: a rolagem de EUR/USD
   // deste livro gira 10 MM e deixa 7 mil de resto, e sumia inteira do fim do dia.

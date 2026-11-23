@@ -8,7 +8,7 @@ const hiddenPnlRows = {};  // tabId → Set<rowKey>
 const _pnlRendered  = new Set();  // tabIds com PnL já renderizado (DOM presente)
 let activePnlTabId  = null;
 
-const SOURCE_LABELS = { bbg: 'BBG', boleta: 'Boleta', d1: 'D-1', jrs: 'JRS gerencial', manual: 'Marretado', marretado: 'Marretado' };
+const SOURCE_LABELS = { bbg: 'BBG', boleta: 'Boleta', d1: 'D-1', jrs: 'JRS gerencial', manual: 'Marretado', marretado: 'Marretado', cds: 'BBG (spread de CDS)' };
 
 // Preços da tabela de PnL em 4 casas (médios + live) — versões locais, NÃO mexem no fmtPrice
 // compartilhado (tabela de Posição segue em 2 casas).
@@ -34,8 +34,36 @@ const PRICE_KIND_LABELS = {
   fwd_interp:  'BBG live — interpolado na curva de forwards (PX_LAST dos pontos)',
   fwd_spot:    'BBG live — spot do par (PX_LAST; vencimento antes do 1º ponto da curva)',
 };
-function priceSrcLabel(src, kind) {
+/* ⭐ **CDS: o hover tem de dizer a CONTA, não só a fonte** (23/11/2026). O preço da linha de
+   CDS não existe na BBG — ele é DERIVADO (marca do gerencial de D-1 + Δspread × anuidade) e,
+   num número que a mesa confere contra a corretora, "BBG" sozinho esconde justamente o que
+   precisa ser auditado: qual vértice, qual Δ e qual anuidade entraram. `cds` é o bloco
+   `r.cds` do payload; sem ele o rótulo degrada para a fonte seca, como nos demais ramos. */
+function priceSrcLabel(src, kind, cds) {
   if (src === 'bbg') return PRICE_KIND_LABELS[kind] || 'BBG live';
+  if (src === 'cds' && cds) {
+    const d = (cds.spread_bp != null && cds.spread_d1_bp != null)
+      ? (cds.spread_bp - cds.spread_d1_bp) : null;
+    const n = v => v == null ? '—' : v.toLocaleString('pt-BR',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const partes = [
+      `${cds.name || cds.ticker || 'curva de CDS'}`,
+      `spread ${n(cds.spread_bp)} bp vs ${n(cds.spread_d1_bp)} de ${cds.asof_d1 || 'D-1'}`
+        + (d == null ? '' : ` (${d > 0 ? '+' : ''}${n(d)} bp)`),
+      `anuidade ${n(cds.annuity)} anos (SW_EQV_BPV)`,
+      `upfront % do nocional, ancorado na marcação do gerencial`,
+    ];
+    if (cds.price_bbg != null) {
+      partes.push(`BBG SW_MARKET_VAL: ${n(cds.price_bbg)}%`
+        + (cds.price_bbg_dif == null ? ''
+           : ` (${cds.price_bbg_dif > 0 ? '+' : ''}${n(cds.price_bbg_dif)} p.p. daqui)`));
+    }
+    if (!cds.exato) {
+      partes.push(cds.clamp ? '⚠ vencimento FORA da curva — vértice da ponta'
+                            : '⚠ vértice INTERPOLADO entre dois tenores');
+    }
+    return partes.join(' · ');
+  }
   return SOURCE_LABELS[src] || '—';
 }
 
@@ -558,7 +586,7 @@ function _pnlSummaryBody(map) {
       <td class="col-pnl"></td>
     </tr>`;
     for (const e of entries) {
-      const srcLabel   = priceSrcLabel(e.price_src, e.price_live_kind);
+      const srcLabel   = priceSrcLabel(e.price_src, e.price_live_kind, e.cds);
       const priceColor = priceLiveStyle(e.price_src);
       const rowKeysJson = JSON.stringify(e.rowKeys).replace(/"/g, '&quot;');
       const sk          = e.summaryKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -1057,7 +1085,7 @@ function renderPnlTable(rows, tbodyId) {
       <td class="num">${fmtQty(oq, qtyDec(r))}</td>
       <td class="num">${r.option_subtype === 'fx' ? fmtPricePct4(r.price) : fmtPrice4(r.price)}</td>
       <td class="num" data-key="${pnlRowKey(r).replace(/"/g, '&quot;')}"
-          title="Fonte: ${priceSrcLabel(src, r.price_live_kind)}"
+          title="Fonte: ${priceSrcLabel(src, r.price_live_kind, r.cds)}"
           onclick="pnlStartEdit(this)"
           style="cursor:pointer;${priceLiveStyle(src)}"
       >${r.option_subtype === 'fx' ? fmtPricePct4(ep) : fmtPrice4(ep)}</td>

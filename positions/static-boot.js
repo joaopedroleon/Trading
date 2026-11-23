@@ -273,7 +273,7 @@
       try {
         pnlData = payload;                 // globais lidos por renderPnlSummary/pnlFor
         activePnlTabId = id;               // _pnlTabFilterRows lê esta global p/ achar os filtros da aba
-        // MESMOS filtros da tela (por aba: no_hedge_cambial/no_fx_small; PortfolioRF: no_cash),
+        // MESMOS filtros da tela (por aba: no_hedge_cambial/no_fx_tiny; PortfolioRF: no_cash),
         // aplicados via a MESMA função do app → o snapshot fica idêntico à tela.
         const rows = payload.rows || [];
         const filtered = (typeof _pnlTabFilterRows === 'function' ? _pnlTabFilterRows(rows) : rows)

@@ -45,12 +45,32 @@ function allocClass(delta) {
    sobrevive quando ela tem abertura no JRS; numa linha que é só boleta ele vira o próprio par.
    Então a MESMA posição tem ref diferente conforme o fundo tenha ou não abertura, e o
    casamento falha calado. A identidade de FX é **par normalizado + data de liquidação** — a
-   mesma que o backend usa no `_FX_JOIN_KEYS`. (O `maturity` de FX já vem como `YYYY-MM-DD`
-   nos dois lados; fora de FX vem ISO com hora, igual nos dois.) */
+   mesma que o backend usa no `_FX_JOIN_KEYS` — e lá o `maturity` existe sempre (aferido: 0 de
+   55 linhas de FX sem ele), porque é a data de LIQUIDAÇÃO, que o par não determina.
+   ☠️ **FORA DE FX o `maturity` NÃO PODE ENTRAR NA CHAVE — ele é DESCRIÇÃO, e some na linha
+   que é só boleta** (23/11/2026, a mesa pegou: *"está falando que não tem posição no MM do
+   Abinader nem do Lucas, mas tem sim"*). O comentário antigo afirmava que "fora de FX vem ISO
+   com hora, igual nos dois lados" — falso justamente na linha NOVA: o vencimento vem do JRS, e
+   uma posição aberta HOJE não tem abertura no JRS, então chega com `maturity: null` enquanto o
+   outro lado, que já a carregava, traz a data. Medido no dia: o `SFRZ7 Comdty` do PAbinader
+   tinha **−420 no MM** e **−24 no RF** e a coluna dizia *"sem posição no book de MM para
+   comparar"*, porque as chaves eram `…||Directional||` contra `…||Directional||2028-03-14`.
+   ⭐ **Tirá-la não cria colisão, e isso foi MEDIDO antes**: fora de FX o vencimento é
+   **derivado** da `instrument_reference` (ela É o contrato — `SFRZ7 Comdty`, `ERZ7 Comdty`, ou
+   o id do Sophis no swap). Nas 164 linhas que a tela carrega hoje, as 37 chaves non-FX
+   non-swap têm UMA maturity cada, exceto 4 — e nas 4 a divergência é exatamente `null × data`,
+   ou seja, só o próprio defeito. **Zero casos de duas datas reais.**
+   ⚠️ Pelo mesmo motivo o `maturity` continua na chave de FX: ali o mesmo par vive em vários
+   vencimentos ao mesmo tempo (o USD/COP do LAguiar tem 5), e sem ele viravam uma linha só.
+   ⛔ Swap consolidado não passa por aqui — tem caminho próprio (`swapGroups`), que já casa
+   por base+área+estratégia com janela de 30 dias na data representativa.
+   É a mesma lição do §"JRS e JDS descrevem o mesmo instrumento com palavras diferentes": a
+   identidade é a **referência** (+ trader/área/sub-área/estratégia); nome, tipo, moeda e
+   vencimento são descrição, preenchida por quem tiver. */
 function _mirrorKey(r) {
   return r.is_fx
     ? `FX||${r.instrument_name}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`
-    : `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
+    : `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}`;
 }
 
 function makeMirrorLookup(mirrorRows) {
@@ -93,6 +113,31 @@ function makeMirrorLookup(mirrorRows) {
   fn.all = mm => (mm.swap_detail != null)
     ? [fn(mm)].filter(Boolean)
     : (byKeyAll[_mirrorKey(mm)] ?? []);
+  return fn;
+}
+
+/* A MESMA fábrica, mas com o lado do espelho PARTICIONADO POR TRADER.
+   ☠️ **A chave de espelho não tem o trader, e com DOIS espelhadores isso cruza os livros**
+   (23/11/2026, achado ao lado do bug do `maturity`). O `mm_rows` do sleeve carrega PAbinader
+   E LAguiar; `lookupMmRf(r)` devolvia a 1ª linha da chave, fosse de quem fosse — então uma
+   linha do RF de um deles podia ser conferida contra a QUANTIDADE do outro, com o `cfg` já
+   resolvido para o dono certo (`rfCfgDoTrader`): números plausíveis, da pessoa errada.
+   ⭐ Medido no dia: há **2 chaves em comum** entre os dois livros (o `WDOZ26 Curncy` de
+   `Hedge_Cambial`, em Currencies e em Rates — PAbinader 70/−46 contra LAguiar −35/−5). Hoje
+   não dói porque `Hedge_Cambial` está fora do escopo do sleeve, e o `USD/ZAR` que os dois
+   carregam cai em `strategy` diferente (`ZAR` × `Directional`) — ou seja, o que nos salva é
+   coincidência de cadastro, não desenho.
+   ⚠️ **Nas abas do DONO nada muda**: lá o `rfRows`/`prevRows` já chega filtrado por trader
+   (ver `renderFundBreakTable`), então particionar seria no-op — por isso o helper é só para
+   os dois call sites do sleeve, em vez de o trader entrar no `_mirrorKey` de todo mundo (ali
+   ele mudaria também o espelho MM × MM Prev, que é do MESMO trader nos dois lados). */
+function makeMirrorLookupPorTrader(mirrorRows) {
+  const porTrader = {};
+  for (const r of (mirrorRows ?? [])) (porTrader[r.trader ?? ''] ??= []).push(r);
+  const lookups = {};
+  const de = t => (lookups[t] ??= makeMirrorLookup(porTrader[t] ?? []));
+  const fn = mm => de(mm?.trader ?? '')(mm);
+  fn.all = mm => de(mm?.trader ?? '').all(mm);
   return fn;
 }
 
@@ -268,6 +313,25 @@ function _checkCellVere(pct, delta, tip) {
 
 // Quebra de linha para `title` (que não aceita HTML).
 const _AL_NL = String.fromCharCode(10);
+
+/* ⭐ **A régua de resíduo do lado do MM, dizendo de onde o número saiu** (23/11/2026).
+   O piso deixou de ser US$ 200 mil absolutos e passou a ser **0,40% do NAV de MM daquele
+   trader** (`_RF_CCY_MIN_PCT` no router), então imprimir só o USD daria um número que muda de
+   trader para trader e de dia para dia sem a mesa conseguir reconstituí-lo — e ela confere
+   estes tooltips contra o próprio livro.
+   ⚠️ Sem piso (falta o NAV de MM) sai "não afirmada", nunca "US$ 0": zero se leria como
+   "tudo passa", que é o oposto do que a ausência de piso significa. */
+/* ⚠️ **Duas casas, e não o `fmtPct` global (1 casa).** O piso é 0,40% e sai "0.4%" por
+   ali — passa hoje e mente no dia em que a mesa recalibrar para 0,35%, que imprimiria
+   "0.4%" também. Aqui o número é a RÉGUA: ela tem de ser legível exatamente. */
+const _pct2 = v => (v * 100).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+
+function _reguaMm(c) {
+  if (c?.min_usd == null) return 'régua não afirmada (sem NAV de MM)';
+  return 'US$ ' + Math.round(c.min_usd).toLocaleString('en-US')
+    + (c.min_pct != null ? ' = ' + _pct2(c.min_pct) + ' do NAV de MM' : '');
+}
 
 function _bucketCell(bk, target) {
   const cls = allocClass(target != null ? bk.pct - target : null);
@@ -704,7 +768,7 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
        que sustenta o "foi conferido no agregado" da frase de cima. */
     const _aggTxt = uteis.map(l => {
       // ⚠ "zerada" seria forte demais: o critério é estar abaixo do piso dos DOIS lados
-      // (hoje US$ 200 mil no MM e US$ 8.883 no RF), e o AUD tem 3,7 mil lá — é resíduo.
+      // (0,40% do NAV de MM e 0,04% do NAV do RF), e o AUD tem 3,7 mil lá — é resíduo.
       const v = l.veredito === 'ok_residuo' ? '✓ resíduo nos dois lados — nada a espelhar'
         : l.veredito === 'rf_sem_par'       ? '⛔ o RF carrega e o MM não'
         : l.ratio == null                   ? '— sem denominador'
@@ -814,11 +878,16 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
   /* ⚠️ **Piso de materialidade.** Sem ele, cada resíduo de rolagem do livro de câmbio (um
      USD/JPY de 25 mil num NAV de 74 MM) viraria uma linha vermelha por não ter contraparte
      no RF — e uma coluna com dez vermelhos imateriais não é lida. Mesmo corte do agregado
-     por moeda (`_RF_CCY_MIN_USD`, US$ 200 mil), medido sobre a exposição da linha no MM. */
-  const minUsd = cfg?.min_usd ?? 200000;
+     por moeda, medido sobre a exposição da linha no MM.
+     ☠️ **O `?? 200000` saiu em 23/11/2026**: o piso virou `0,40% × NAV de MM` (relativo, e
+     por trader), e um literal de rede aqui ressuscitaria o número absoluto exatamente no caso
+     em que o payload não soube dizer qual é o piso — afirmando "abaixo do piso" com um piso
+     que não é o da tela. Sem piso o teste não é aplicado: a célula cai nos ramos seguintes e
+     o check é afirmado, que é errar para o lado de mostrar demais. */
+  const minUsd = cfg?.min_usd ?? null;
   const expUsd = (row && row.pl != null && row.pl_type === 'pct' && row.nav)
     ? Math.abs(row.pl * row.nav) : null;
-  if (!Math.abs(rfQty ?? 0) && expUsd != null && expUsd < minUsd) {
+  if (!Math.abs(rfQty ?? 0) && expUsd != null && minUsd != null && expUsd < minUsd) {
     return muted('—', `Exposição de ${fmtMoneyTxt(expUsd)} no MM — abaixo do piso de `
       + `${fmtMoneyTxt(minUsd)}. Espelhar ${fmtPct(e.allocTarget)} disso seria `
       + `${fmtMoneyTxt(expUsd * (e.allocTarget ?? 0))}: não é afirmado como desvio.`);
@@ -1623,7 +1692,7 @@ function _rfCcyCheckCard(cfg, tabId) {
       chkTip = 'EXPOSIÇÃO PEQUENA NOS DOIS LADOS — não há o que espelhar, e a razão ao lado não '
         + 'decide nada (com denominador perto de zero ela oscila muito).' + _AL_NL + _AL_NL
         + 'MM: US$ ' + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')
-        + '  (régua de resíduo: US$ ' + Number(c.min_usd).toLocaleString('en-US') + ')' + _AL_NL
+        + '  (régua de resíduo: ' + _reguaMm(c) + ')' + _AL_NL
         + 'RF: US$ ' + Math.abs(Math.round(l.rf_usd)).toLocaleString('en-US')
         + '  (régua: US$ ' + Math.round(c.rf_min_usd ?? 0).toLocaleString('en-US') + ' — a do MM '
         + 'trazida pela proporção, porque o RF é menor e espelha uma fração)' + _AL_NL + _AL_NL
@@ -1632,7 +1701,7 @@ function _rfCcyCheckCard(cfg, tabId) {
       chkTxt = '⛔ s/ par';
       chkTip = 'O RF CARREGA E O MM NÃO.' + _AL_NL + _AL_NL
         + 'MM: US$ ' + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US')
-        + '  (abaixo da régua de resíduo, US$ ' + Number(c.min_usd).toLocaleString('en-US') + ')'
+        + '  (abaixo da régua de resíduo, ' + _reguaMm(c) + ')'
         + _AL_NL
         + 'RF: US$ ' + Math.abs(Math.round(l.rf_usd)).toLocaleString('en-US')
         + '  (acima da dele, US$ ' + Math.round(c.rf_min_usd ?? 0).toLocaleString('en-US') + ')'
@@ -1658,8 +1727,8 @@ function _rfCcyCheckCard(cfg, tabId) {
     const selo = (l.ratio != null && l.mm_pequeno && l.veredito == null)
       ? ' <span style="font-size:9px;font-weight:600;color:var(--text-muted)" title="'
         + _escHtml('A perna do MM tem US$ '
-          + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US') + ', abaixo da régua de US$ '
-          + Number(c.min_usd).toLocaleString('en-US') + ': o denominador é pequeno, então a razão '
+          + Math.abs(Math.round(l.mm_usd)).toLocaleString('en-US') + ', abaixo da régua de '
+          + _reguaMm(c) + ': o denominador é pequeno, então a razão '
           + 'mexe muito com pouco.') + '">peq.</span>'
       : '';
     const rTxt = l.ratio != null ? pct(l.ratio) + selo
@@ -2531,7 +2600,8 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
      dos checks, mesmo que não tenha posição que seja em relação àquele check"*).
 
      Era `mainRows.some(r => r.is_rf_sleeve)` — o que sobrou DEPOIS DOS FILTROS. A tabela de
-     Posição corta FX pequeno por padrão (`no_fx_tiny`, 0,20 % do NAV) e o sleeve é 1/10 da
+     Posição corta FX pequeno por padrão (`no_fx_tiny`, 0,40 % do NAV — a régua única
+     `FX_RESIDUO_PCT`) e o sleeve é 1/10 da
      exposição do MM **por definição**, então quase nunca passa desse piso (medido em
      18/11/2026: 0,006-0,013 %). A coluna inteira sumia da aba do RF.
      ⚠️ **E a correção NÃO é deixar a linha pequena aparecer** — foi a 1ª tentativa, e a mesa
@@ -2554,7 +2624,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   const mirrorCfg  = (typeof rfMirrorCfg === 'function') ? rfMirrorCfg(currentRenderTab()) : null;
   const mirrorCols = !!mirrorCfg;
   const lookupMmRf   = (rfSleeveCols && rfCfg.mm_rows?.length)
-    ? makeMirrorLookup(rfCfg.mm_rows) : null;
+    ? makeMirrorLookupPorTrader(rfCfg.mm_rows) : null;
 
   /* ⚠️ **A ordem das colunas é a do `pnl_fund_tables`, não alfabética** (30/10/2026). Com
      DOIS fundos o `sort()` por acaso dava a mesma ordem dos blocos do modo "Por fundo"; com

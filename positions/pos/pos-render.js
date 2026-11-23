@@ -291,7 +291,7 @@ function renderOptionsAnalysis() {
       // Hover do preço: QUAL campo da BBG (com overrides) produziu este número.
       const priceTip = m.src === 'manual'
         ? 'Marreta manual (★) — sobrepõe o preço da BBG · clique para editar'
-        : `Fonte: ${srcLbl} — ${priceSrcLabel(m.src, r.price_live_kind)} · clique para editar`;
+        : `Fonte: ${srcLbl} — ${priceSrcLabel(m.src, r.price_live_kind, r.cds)} · clique para editar`;
       // ⚠️ A coluna se chama "(mid)", mas a cadeia do backend cai p/ PX_LAST quando a BBG não
       // tem mid two-sided (ilíquido/OTM/pré-abertura) — e aí a conta NÃO saiu de um mid. Marca
       // essas linhas com * em vez de deixar o rótulo da coluna mentir em silêncio.
@@ -1090,7 +1090,16 @@ function renderTable(rows, tbodyId) {
       <td class="col-detail" ${d}>${r.area     ?? '—'}</td>
       <td class="col-detail" ${d}>${r.subarea  ?? '—'}</td>
       <td class="col-detail" ${d}>${r.strategy ?? '—'}</td>
-      <td class="col-detail num" ${d}>${r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price)}</td>
+      <!-- ⭐ **CDS: aqui também vai o SPREAD** (23/11/2026). Com a coluna "Price Live" em bp e
+           esta em upfront %, duas colunas de PREÇO vizinhas imprimiam unidades diferentes
+           (3,31 ao lado de 173,31 bp) — e a leitura natural, "o preço caiu de 3,31 para
+           173", não existe. Em bp o par vira o que de fato aconteceu: 181,38 → 173,31, um
+           fechamento de 8 bp, que é o movimento que produz o resultado da linha.
+           ⚠️ O upfront de D-1 **não some** — vai no hover, que é de onde sai o financeiro. -->
+      <td class="col-detail num" ${d}${(r.cds && r.cds.spread_d1_bp != null)
+          ? ` title="${_escHtml(`Spread de fechamento de ${r.cds.asof_d1 || 'D-1'} · upfront do gerencial naquela data: ${fmtPrice(r.price)}% do nocional`)}"`
+          : ''}>${(r.cds && r.cds.spread_d1_bp != null) ? fmtCdsSpread(r.cds.spread_d1_bp)
+            : (r.option_subtype === 'fx' ? fmtPricePct(r.price) : fmtPrice(r.price))}</td>
       <td class="col-final"${swapAttr}>${(isOvr || plOverrides.has(ovrKey(r)) || priceOverrides.has(instKey(r)) || deltaOverrides.has(instKey(r))) ? `<span ${IMG_SKIP} style="color:var(--accent);font-size:10px">★ </span>` : ''}${simMark}${r.instrument_name ?? '—'}</td>
       <!-- fmtOptMaturity, e nao fmtDate(r.maturity): a coluna tem de mostrar a MESMA data que
            ORDENA a linha (sortMaturityKey). Sem isso as opcoes abertas hoje, que chegam sem
@@ -1103,12 +1112,54 @@ function renderTable(rows, tbodyId) {
       ${(() => {
         const isFxOpt       = r.option_subtype === 'fx';
         const dispPriceLive = effectivePrice(r);
-        const priceStr      = isFxOpt ? fmtPricePct(dispPriceLive) : fmtPrice(dispPriceLive);
-        return `<td class="num" style="cursor:pointer"${tipAttr}${!tip ? ' title="Clique para editar preço"' : ''}
+        /* ⭐ **CDS: a coluna mostra o SPREAD, a conta segue no UPFRONT** (23/11/2026, pedido
+           da mesa: *"queria que na coluna de price da tabela de posição mostrasse o spread,
+           apesar de no cálculo usar esse preço do gerencial, que é o que dá o financeiro da
+           posição"*). O spread é o número que a mesa negocia e acompanha; o upfront % é o que
+           multiplica pelo nocional e vira o financeiro — são a mesma informação em duas
+           unidades, e a coluna de preço de uma tabela de POSIÇÃO é lida como "o mercado está
+           onde?", não como "quanto vale a fee".
+           ☠️ **A célula é EDITÁVEL, e é por isso que a exibição não pode ser só exibição**:
+           mostrar bp e gravar % faria a marreta ler 180 como 180 % de upfront — numa posição
+           de 6 MM, **US$ 10,8 milhões** em vez de 0,18. A conversão é nos DOIS sentidos (ver
+           `posPriceStartEdit`/`posPriceApplyEdit` em pos-edit.js), exatamente como já era
+           para a opção de FX, que exibe % e guarda fração.
+           ⭐ A régua da conversão é a **anuidade** que a linha já publica (o DV01 ao lado é
+           ela × nocional): `Δpreço = Δspread/1e4 × anuidade × 100`. O JS NÃO refaz a âncora
+           de D-1 — ele só estende a reta a partir do par (spread, preço) que o backend
+           mandou, para não existir uma 2ª definição do preço do CDS. */
+        const cds = r.cds || null;
+        const cdsOn = !!(cds && cds.annuity && cds.spread_bp != null);
+        const spreadNow = cdsOn
+          ? cds.spread_bp + ((dispPriceLive != null && cds.price != null)
+              ? (dispPriceLive - cds.price) / (cds.annuity * 100) * 1e4 : 0)
+          : null;
+        const priceStr = cdsOn ? fmtCdsSpread(spreadNow)
+          : (isFxOpt ? fmtPricePct(dispPriceLive) : fmtPrice(dispPriceLive));
+        const cdsTip = cdsOn
+          ? `Spread do CDS em bp (${cds.name || cds.ticker}) — clique para marretar o SPREAD.`
+            + `
+
+O cálculo usa o UPFRONT, que é o que vira financeiro:`
+            + `
+  preço ${fmtPrice(dispPriceLive)}% do nocional`
+            + (r.final_qty ? `
+  fee de ${fmtFinalQty(r.final_qty, 1)} MM = `
+                + `US$ ${Math.round(Math.abs(dispPriceLive / 100 * r.final_qty * 1e6))
+                    .toLocaleString('pt-BR')}` : '')
+            + `
+  anuidade ${cds.annuity.toFixed(4)} anos ⇒ `
+            + `US$ ${Math.round(cds.dv01_usd_contrato).toLocaleString('pt-BR')} por bp por MM`
+          : null;
+        const _t = cdsTip ? ` title="${_escHtml(cdsTip)}"`
+                          : (tipAttr || (!tip ? ' title="Clique para editar preço"' : ''));
+        return `<td class="num" style="cursor:pointer"${cdsTip ? '' : tipAttr}${_t}
           data-instkey="${safeIk}" data-rowkey="${safeKey}"
           data-cf="${rPrice.calc_factor ?? ''}" data-nav="${rPrice.nav ?? ''}"
           data-fq="${rPrice.final_qty ?? ''}" data-plt="${rPrice.pl_type ?? ''}"
           data-isfx="${isFxOpt ? 1 : 0}" data-isopt="${r.is_option ? 1 : 0}"
+          data-iscds="${cdsOn ? 1 : 0}" data-cdsann="${cdsOn ? cds.annuity : ''}"
+          data-cdss0="${cdsOn ? cds.spread_bp : ''}" data-cdsp0="${cdsOn ? cds.price : ''}"
           onclick="event.stopPropagation();posPriceStartEdit(this)">
           ${priceStr}</td>`;
       })()}
