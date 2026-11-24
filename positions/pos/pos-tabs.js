@@ -685,7 +685,14 @@ function _renderSectionsForTab(tabId, allRows) {
     // ☠️ O NAV do card do sleeve NÃO é o do trader (o `navMap` traria o NAV de MM dele, ~2×
     // maior) nem o do veículo (duas ordens de grandeza menor): é o do FUNDO que detém o veículo,
     // o mesmo denominador que o backend usou no #PL daquelas linhas. Ver funds.RF_SLEEVE_*.
-    const nav      = isRfSleeve ? (rfCfg?.nav ?? null) : navMap[s.trader];
+    /* ⭐ **As bases de #PL desta seção, lidas das LINHAS** (24/11/2026) — ver
+       `rfSleeveBasesDe`. Com dois veículos a seção do sleeve mistura denominadores (câmbio só
+       no `-N`; juros nos dois), e o `rfCfg.nav` é só o de REFERÊNCIA. */
+    const _slvBases = isRfSleeve && typeof rfSleeveBasesDe === 'function'
+      ? rfSleeveBasesDe(sectionRows(s)) : [];
+    const nav      = isRfSleeve
+      ? (_slvBases.length === 1 ? _slvBases[0].nav : (_slvBases.length ? null : (rfCfg?.nav ?? null)))
+      : navMap[s.trader];
     const effDate  = isRfSleeve ? (rfCfg?.nav_date ?? null)
                                 : (tabId === 'portfoliorf' ? pnlNavDate : navDate);
     /* O NAV do título é o do trader da aba. As linhas do sleeve têm o do fundo que detém o
@@ -742,6 +749,57 @@ function _renderSectionsForTab(tabId, allRows) {
        o alvo do print é `width: fit-content`, e uma tira mais larga que a tabela DITARIA o
        `fit-content` do pai — a imagem sairia com faixa branca morta à direita e a tira nunca
        quebraria de linha. É a mesma trava do `.jgp-tbl-note`, pelo mesmo motivo. */
+    /* ── Rótulos do cabeçalho do sleeve (24/11/2026) ────────────────────────────────
+       Nomeiam o que a SEÇÃO contém, não a config de referência — ver `rfSleeveVeiculosDe`.
+       ⚠️ Sem linha nenhuma (seção vazia por filtro) cai no veículo de referência, que é o
+       comportamento anterior: é melhor nomear um do que nomear nenhum. */
+    const _slvVeics = isRfSleeve && typeof rfSleeveVeiculosDe === 'function'
+      ? rfSleeveVeiculosDe(sectionRows(s), rfCfg) : [];
+    const _slvLista = (_slvVeics.length ? _slvVeics : [rfCfg?.fund]).filter(Boolean);
+    const _slvCurto = v => String(v).replace(/^JGP /, '');
+    /* ⭐ **Prefixo comum sai UMA vez** (24/11/2026): com dois veículos o título imprimia
+       "via Offshore Segregated Portfolio-N · Offshore Segregated Portfolio-I" — 58 chars para
+       dizer que a diferença é uma letra. O nome inteiro fica no hover, com o dono de cada um.
+       ⚠️ Só colapsa quando os nomes de fato compartilham o prefixo até o hífen final; veículo
+       de outra família sai inteiro, em vez de virar um sufixo sem contexto. */
+    const _slvVeicTxt = (() => {
+      const curtos = _slvLista.map(_slvCurto);
+      if (curtos.length < 2) return curtos.join('') || '—';
+      const base = curtos[0].replace(/-[A-Za-z0-9]+$/, '');
+      return curtos.every(c => c.startsWith(base + '-'))
+        ? base + curtos.map(c => c.slice(base.length)).join(' · ')
+        : curtos.join(' · ');
+    })();
+    const _slvDono = v => (rfCfg?.owner_label_by_fund || {})[v] || 'dono não cadastrado';
+    const _slvVeicTip = !isRfSleeve ? '' : [
+      /* ⚠️ Na aba do PRÓPRIO dono a frase era circular — "boletada pelo PAbinader … separadas
+         das do PAbinader". O que elas são separadas ali é do book de MM dele. */
+      `Posição boletada pelo ${s.trader} dentro ${_slvLista.length > 1 ? 'dos veículos' : 'do veículo'}`
+        + ` de RF. Linhas SEPARADAS d${s.trader === (tab?.trader ?? '') ? 'o book de MM dele'
+            : `as do ${tab?.trader ?? 'book da aba'}`} — não somam.`,
+      ..._slvLista.map(v => `  · ${_slvCurto(v)}  →  ${_slvDono(v)}`),
+      ...(_slvLista.length > 1
+        ? ['Linha de JUROS espelha nos dois veículos; CÂMBIO só no Juros e Moeda — por isso o'
+           + ' veículo varia dentro da mesma seção.']
+        : []),
+    ].join('\n');
+    /* ☠️ **Com mais de uma base o título NÃO imprime um NAV** — ele afirmaria um denominador
+       errado para parte das linhas (em 24/11/2026: 26,35 MM nas 5 de câmbio e 34,82 MM nas 2
+       de juros, que somam os dois donos). O número de cada linha segue no hover dela e no
+       chip da tira NET, que é onde ele vale. */
+    const _slvNavAlt = (isRfSleeve && _slvBases.length > 1)
+      ? `NAV: ${_slvBases.length} bases` : '';
+    const _slvNavTip = !isRfSleeve ? '' : (_slvBases.length > 1
+      ? ['As linhas desta seção têm DENOMINADORES DIFERENTES — cada uma é dividida pelo NAV'
+         + ' dos fundos cujo(s) veículo(s) ela toca:',
+         ..._slvBases.map(b => `  · ${b.dono || '—'}: US$ `
+           + `${Math.round(b.nav).toLocaleString('pt-BR')}  (${b.n} linha${b.n > 1 ? 's' : ''})`),
+         'Por isso o título não afirma um NAV só. O de cada linha está no hover dela.',
+        ].join('\n')
+      : `NAV do fundo que detém o veículo (${_slvBases[0]?.dono || rfCfg?.nav_fund_label
+          || rfCfg?.nav_fund || '—'}) — é ele o denominador do #PL destas linhas, não o NAV do`
+        + ' veículo.');
+
     if (simAqui) simPosto = true;
     mainCards.push(`
     ${hasFund && typeof fundSplitBarHtml === 'function'
@@ -774,9 +832,9 @@ function _renderSectionsForTab(tabId, allRows) {
         <div class="section-copy-target" style="flex-shrink:0">
           <div class="section-title" ${titleId} style="padding:8px 0 10px 0;display:flex;align-items:baseline;gap:16px">
             <span>${s.group} <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${s.trader}</span>${
-              isRfSleeve ? `<span style="font-weight:400;color:var(--text-muted);font-size:11px" title="Posição boletada pelo ${s.trader} dentro do veículo de RF. Linhas SEPARADAS das do ${tab?.trader ?? 'book da aba'} — não somam.">&nbsp;· via ${(rfCfg?.fund ?? '').replace(/^JGP /, '')}</span>` : ''}</span>
-            ${navStr ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr}${
-              isRfSleeve ? ` <span title="NAV do fundo que detém o veículo (${rfCfg?.nav_fund ?? '—'}) — é ele o denominador do #PL destas linhas, não o NAV do veículo.">ⓘ</span>` : ''}</span>` : ''}
+              isRfSleeve ? `<span style="font-weight:400;color:var(--text-muted);font-size:11px" title="${_escHtml(_slvVeicTip)}">&nbsp;· via ${_slvVeicTxt}</span>` : ''}</span>
+            ${(navStr || _slvNavAlt) ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">${navStr || _slvNavAlt}${
+              isRfSleeve ? ` <span title="${_escHtml(_slvNavTip)}">ⓘ</span>` : ''}</span>` : ''}
             <!-- Ferramentas do card, SEMPRE encostadas à direita: o margin-left:auto fica no GRUPO,
                  não num botão — os dois primeiros alternam display:none, e com o auto num deles o
                  que sobrava ficava solto no meio do título (era o sintoma reportado pela mesa).

@@ -498,6 +498,44 @@ function rfCfgDoTrader(cfg, trader) {
   };
 }
 
+/* ── O que a SEÇÃO do sleeve de fato contém (24/11/2026) ──────────────────────────────
+   ☠️ **O cabeçalho da seção nomeava UM veículo e UM NAV, e desde 04/11/2026 são dois**
+   (mesa: *"aqui só está considerando o Portfolio-N, não entrou o novo fundo offshore do RF"*).
+   O `rf_sleeve.fund` e o `rf_sleeve.nav` do payload são o veículo e o NAV **de referência** —
+   fixos no `Juros e Moeda` —, e o título os imprimia como se fossem os da seção inteira.
+   ⭐ **A resposta sai das PRÓPRIAS LINHAS, não da config**: cada linha carrega
+   `rf_sleeve_funds` (os veículos que ela toca), `nav` (o denominador que o backend USOU no
+   #PL dela) e `rf_sleeve_owner_label`. Derivar do que foi pintado é o único jeito de o
+   cabeçalho não poder contradizer a coluna de #PL logo abaixo — e de ele acompanhar sozinho
+   o dia em que entrar um 3º veículo.
+   ⚠️ Veículo que a linha toca mas que o payload não lista **não some**: ele entra no fim, em
+   vez de ser descartado por não estar na ordem conhecida. */
+function rfSleeveVeiculosDe(rows, cfg) {
+  const ordem  = (cfg && cfg.funds) || [];
+  const vistos = new Set();
+  for (const r of (rows || [])) for (const v of (r.rf_sleeve_funds || [])) vistos.add(v);
+  return ordem.filter(v => vistos.has(v))
+    .concat([...vistos].filter(v => !ordem.includes(v)));
+}
+
+/* As BASES de #PL da seção: um item por denominador distinto, com o dono e quantas linhas o
+   usam. ⚠️ Mais de um item é o estado NORMAL quando a seção mistura linha de câmbio (só o
+   `-N`) com linha de juros (os dois veículos) — não é erro, e por isso o título diz
+   "N bases" em vez de escolher uma. */
+function rfSleeveBasesDe(rows) {
+  const por = new Map();
+  for (const r of (rows || [])) {
+    const nav = r.nav;
+    if (nav == null) continue;
+    const k = String(nav);
+    const at = por.get(k) || { nav, dono: r.rf_sleeve_owner_label || null, n: 0 };
+    at.n += 1;
+    if (!at.dono && r.rf_sleeve_owner_label) at.dono = r.rf_sleeve_owner_label;
+    por.set(k, at);
+  }
+  return [...por.values()].sort((a, b) => b.nav - a.nav);
+}
+
 /* Traders que a coluna de check do sleeve CONFERE — os cadastrados, tenham linha hoje ou
    não. ⚠️ Isto mudou em 18/11/2026 junto com a coluna virar permanente: ela nasceu lendo
    só quem tinha linha, para "não prometer um veredito que não existe" — mas com a coluna

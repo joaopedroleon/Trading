@@ -889,8 +889,14 @@ function renderPnlSummaryByFund(mainRows) {
       ? `NAV: USD ${nav.toLocaleString('en-US', {maximumFractionDigits:0})}${_pnlNavSourceChip(t.fund)}`
       : `<span style="color:var(--red)">⚠ NAV indisponível — bps em branco</span>`;
     const sleeves = t.includes.filter(fl => fl !== t.fund);
+    /* ☠️ **A CLASSE do veículo NÃO pode ser apagada** (24/11/2026). O `.replace(/-[A-Z]$/,'')`
+       serve ao nome do FUNDO ("JGP RF Ativa Master-A" → "… Master"), onde o `-A` é ruído de
+       cadastro — mas num VEÍCULO a classe é a identidade. Com os dois veículos no ar (desde
+       04/11/2026) as duas tabelas imprimiam **"+ JGP Offshore Segregated Portfolio"**, a MESMA
+       string, e nada na tela dizia qual delas era o `-N` e qual era o `-I`.
+       ⚠️ O prefixo "JGP " sai (como em todo rótulo de veículo da tela); a classe fica. */
     const sleeveStr = sleeves.length
-      ? ` <span style="font-weight:400;color:var(--text-muted);font-size:10px" title="Veículo sem NAV próprio; suas posições entram nesta tabela">+ ${sleeves.map(s => s.replace(/-[A-Z]$/, '')).join(', ')}</span>`
+      ? ` <span style="font-weight:400;color:var(--text-muted);font-size:10px" title="Veículo sem NAV próprio; suas posições entram nesta tabela">+ ${sleeves.map(s => s.replace(/^JGP /, '')).join(', ')}</span>`
       : '';
     return `<div class="card" style="flex:0 0 auto">
       <div class="section-copy-target" style="background:var(--bg-card)">
