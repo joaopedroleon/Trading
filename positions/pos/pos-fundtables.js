@@ -693,6 +693,39 @@ function rfCheckCell(cfg, { mmQty, rfQty, row, mmRow } = {}) {
   const _vere = (pct, marca) => pct == null ? marca
     : `${fmtPct(_semZeroNegativo(pct))} ${marca}`;
 
+  /* ⚠️ **SWAP DE JUROS: análise à parte — só ALERTA, nunca veredito** (25/11/2026, regra da
+     mesa: *"por mais que sejam de JUROS, nesses casos vai ser sempre uma análise à parte,
+     talvez entre e talvez não, e não vai ser na proporção de 10%; quero que os checks
+     somente apontem um alerta amarelo para verificar"*).
+     ⛔ **Nem ✓ nem ⛔.** Os dois afirmariam sobre a régua dos 10%, que a mesa acabou de dizer
+     que não vale aqui — e o verde é o pior dos dois, porque um swap NÃO espelhado sairia
+     aprovado. Hoje o `SWAP_CLP_CAM` do LAguiar imprimia `⚠ nada no RF`, que se lê como
+     *"faltou espelhar"*; e um swap espelhado em proporção qualquer sairia ⛔ vermelho por
+     não bater 10%. Amarelo "verificar" é o único veredito honesto para uma decisão que é
+     caso a caso.
+     ⚠️ **Vem ANTES de todos os ramos** — inclusive do escopo e do câmbio — porque a questão
+     não é o tamanho nem a área: é que esta família não tem alvo. Vale nas DUAS colunas (o
+     `Check Abi · LAg` da aba do RF e o `Check RF` da aba de cada espelhador), que é
+     exatamente o que a mesa pediu, e sai de graça porque as duas são esta função.
+     ⭐ Os números seguem no tooltip: eles é que sustentam a análise à parte. */
+  if (typeof isSwapJuros === 'function' && isSwapJuros(row)) {
+    const _rf = Math.abs(rfQty ?? 0) > 0;
+    const _pc = _share(rfQty ?? 0, mmQty);
+    return `<td class="check-cell alloc-warn" title="${_tt(
+      'SWAP DE JUROS — verificar caso a caso.' + _AL_NL + _AL_NL
+      + 'Swap de juros não segue o alvo de ' + (alvoExp != null ? fmtPct(alvoExp) : '10%')
+      + ' do espelho: a decisão de levar (ou não) a posição para o RF é analisada operação a '
+      + 'operação, e a proporção não é a da regra. Por isso esta coluna não dá veredito aqui '
+      + '— nem ✓ nem ⛔ — e só pede conferência.' + _AL_NL + _AL_NL
+      + '  MM: ' + fmtFinalQtyTxt(mmQty) + _AL_NL
+      + '  RF: ' + (_rf ? fmtFinalQtyTxt(rfQty) : 'zero')
+      + (_pc != null ? '   (' + fmtPct(_semZeroNegativo(_pc)) + ' do MM)' : '')
+      + _AL_NL + _AL_NL
+      + (_rf ? 'Há posição no RF: conferir se o tamanho é o combinado para ESTA operação.'
+             : 'Não há posição no RF: pode ser o certo — swap não entra por regra.'))
+      }">⚠ verificar</td>`;
+  }
+
   /* ⭐ **Ativo que NÃO pode ir para o RF: zero lá é o CERTO, e o check diz OK** (pedido da
      mesa, 08/10/2026). O veículo carrega só os books de juros e moedas — numa linha de bolsa
      ou de commodity, o RF estar zerado é a regra sendo cumprida, não desvio de alocação.
@@ -2183,7 +2216,7 @@ function dolarFundoErros(mainRows, fundRows, fundNavs, offshoreFund) {
   const _labelsDe = fl => _incl[fl] ?? [fl];
   const fundIndex  = {};
   for (const fr of fundRows) {
-    const k = `${fr.instrument_reference}||${fr.area}||${fr.subarea}||${fr.strategy}||${fr.maturity ?? ''}`;
+    const k = fundBreakKey(fr);   // instrumento+área+sub+estratégia+vencto+TRADER
     (fundIndex[k] ??= {})[fr.fund_label] = fr;
   }
   const out = [];
@@ -2200,7 +2233,7 @@ function dolarFundoErros(mainRows, fundRows, fundNavs, offshoreFund) {
        Todo fundo tem caixa em BRL e todo caixa precisa de hedge — acusar isso seria uma
        faixa vermelha diária sobre o que está certo. Ver `funds.PORTFOLIORF_SUBAREAS_CAIXA`. */
     if (!r.dollar_kind || r.is_rf_sleeve || r.dolar_caixa) continue;
-    const k    = `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
+    const k    = fundBreakKey(r);
     const errs = dolarFundoErrado(fundIndex[k] ?? {}, fundLabels, offFund, _labelsDe);
     if (errs) out.push({ row: r, errs });
   }
@@ -2452,8 +2485,27 @@ function renderRfFaltantes(data, mainRows) {
           + `\n  ${b.label}: ${expoTxt(x.pl_mm, x.pl_type)}`
           + `\n  equivalente no RF: ${expoTxt(x.pl_eq, x.pl_type)}`
           + `\n  fonte: ${_SRC_TXT[x.pl_src] ?? x.pl_src ?? '—'} — a MESMA cadeia da coluna #PL da tabela.`;
+      /* ⚠️ **SWAP DE JUROS não tem ALVO** (25/11/2026) — mesma regra do `rfCheckCell`: a
+         entrada no RF é analisada operação a operação e não sai da proporção do espelho.
+         ☠️ O `→ RF <qtd>` desta linha **É** o alvo calculado por aquela proporção; imprimi-lo
+         num swap afirma um número que a mesa acabou de dizer que não se aplica — e a faixa
+         inteira passa a se ler como *"falta boletar isto"*. O equivalente FICA, mas no
+         `title` e nomeado como REFERÊNCIA, que é o que ele é.
+         ⛔ **Só no bloco do SLEEVE** (`via === 'sleeve'`, o PAbinader e o LAguiar) — a mesa
+         escopou a regra a eles. O bloco do **EMota** é outro espelho: ali o PortfolioRF segue
+         a MESMA exposição de juros, **1:1**, e um swap que falta lá é falta de verdade, com
+         alvo definido. Aplicar a regra aos dois apagaria o alvo de um espelho que tem alvo. */
+      const _eSwap = b.via === 'sleeve'
+        && (typeof isSwapJuros === 'function') && isSwapJuros(x);
       const tip = `${x.area ?? '—'}${x.subarea ? ' · ' + x.subarea : ''}`
         + tipExp
+        + (_eSwap
+            ? _AL_NL + _AL_NL
+              + 'SWAP DE JUROS — análise à parte: a decisão de levar a posição para o RF é '
+              + 'caso a caso e não segue a proporção do espelho, então não há alvo aqui. '
+              + `(Pela proporção o equivalente seria ${fmtFinalQtyTxt(x.qty_eq, dec)} — `
+              + 'referência, não meta.)'
+            : '')
         + (porFundo ? `\n\nNo RF: ${porFundo}` : '')
         + (x.estado === 'zerada'
             ? '\n\nA linha EXISTE na tabela acima, zerada — o check da auxiliar já a marca.'
@@ -2463,7 +2515,10 @@ function renderRfFaltantes(data, mainRows) {
             ? ' <span style="font-size:10px;color:var(--text-muted)">zerada</span>' : '')
         + ` <span style="color:var(--text-muted)">—</span> ${_escHtml(b.label)}`
         + ` <b>${fmtFinalQtyTxt(x.qty_mm, dec)}</b>${expo(x.pl_mm, x.pl_type)}`
-        + ` <span style="color:var(--text-muted)">→ RF</span> <b>${fmtFinalQtyTxt(x.qty_eq, dec)}</b></li>`;
+        + ` <span style="color:var(--text-muted)">→ RF</span> `
+        + (_eSwap
+            ? '<span style="color:var(--text-muted)">⚠ verificar (sem alvo)</span>'
+            : `<b>${fmtFinalQtyTxt(x.qty_eq, dec)}</b>`) + `</li>`;
     }).join('');
     /* ⭐ Na moeda o "quanto é isso de exposição" já existia dos dois lados (`mm_pct` vem do
        agregado por moeda) — só não estava na LINHA. Aqui o % é do NAV do gestor, a mesma
@@ -2659,7 +2714,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
   // Index fund rows by key -> {fund_label -> row}
   const fundIndex = {};
   for (const fr of fundRows) {
-    const k = `${fr.instrument_reference}||${fr.area}||${fr.subarea}||${fr.strategy}||${fr.maturity ?? ''}`;
+    const k = fundBreakKey(fr);   // instrumento+área+sub+estratégia+vencto+TRADER
     (fundIndex[k] ??= {})[fr.fund_label] = fr;
   }
 
@@ -2678,7 +2733,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     prevArea    = r.area;
     prevSubarea = r.subarea;
 
-    const k           = `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}||${r.maturity ?? ''}`;
+    const k           = fundBreakKey(r);
     const byFund      = fundIndex[k] ?? {};
     /* Fundos que de fato CARREGAM a linha — a entrada do `_checkNaoRateada` nos dois ramos
        de linha não rateada (offshore e dólar).
@@ -2689,7 +2744,27 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
        linha que esteve em dois fundos e hoje está num só saía de "concentrada" para
        "rateada entre dois" por causa de uma linha de qty 0, perdendo o veredito e caindo
        no rótulo mudo. O `dolarFundoErrado` ao lado já media por quantidade (com eps). */
-    const _ondeQtd    = fundLabels.filter(fl => _frSum(byFund, fl, 'final_qty') !== 0);
+    /* ☠️ **`final_qty` NÃO mede tamanho num SWAP CONSOLIDADO — ele é a quantidade PONDERADA
+       POR DV01, e vale 0 quando o DV01 daquela família não existe** (25/11/2026, a mesa
+       pegou: *"está dando ERRO nos swaps dizendo que está em um fundo só, mas isso é
+       mentira, está nos dois fundos"*). O `_consolidate_swaps` faz
+       `final_qty = Σ DV01 × qty` e o DV01 vem da `ODS.RISK_QUOTE`, que **não cobre todas as
+       famílias** (ver §"ODS.RISK_QUOTE NÃO cobre…" no CLAUDE.md da raiz). Medido no dia: o
+       `SWAP_MXN_FTIIE` tinha 276 MM no `-N` e 89 MM no `-I` — nocional REAL, nos DOIS fundos,
+       na proporção dos NAVs (75,6 % / 24,4 % contra 75,7 % / 24,3 %) — e `final_qty` era
+       **0,0 em todos**, então o `_ondeQtd` saía VAZIO e a linha era acusada de concentrada.
+       ⭐ O tamanho real está no `swap_detail`, que o break por fundo já traz fundo a fundo.
+       ⚠️ **Só entra quando `final_qty` é zero**: com DV01 publicado ele é a medida certa (é
+       a unidade em que o resto da linha fala), e trocá-la mudaria linha que hoje está certa.
+       ⚠️ Soma LÍQUIDA, não de módulos — perna zerada continua valendo zero, que é a regra de
+       09/11/2026 ("é por QUANTIDADE, não por existir linha no break"). */
+    const _frTam = (bf, fl) => {
+      const q = _frSum(bf, fl, 'final_qty');
+      if (q !== 0 || !Array.isArray(r.swap_detail)) return q;
+      return _labelsDe(fl).reduce((a, x) => a
+        + ((bf?.[x]?.swap_detail ?? []).reduce((t, d) => t + (d?.qty || 0), 0)), 0);
+    };
+    const _ondeQtd    = fundLabels.filter(fl => _frTam(byFund, fl) !== 0);
     const isSleeve    = !!r.is_rf_sleeve;
     const totalQty    = r.final_qty || 0;
     const totalNavSum = fundLabels.reduce((s, fl) => s + (fundNavs[fl] ?? 0), 0);
@@ -2831,6 +2906,27 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
        por exposição não podem divergir, porque o #PL de cada fundo É derivado da fatia de
        quantidade (`groupPl × fund_qty/totalQty × refNav/navF`, logo abaixo). Duas colunas
        para o mesmo veredito custavam largura numa tabela auxiliar que já é larga. */
+    /* ☠️ **O `!r.is_offshore` AQUI DEIXAVA A LINHA OFFSHORE RATEADA SEM #PL POR FUNDO E SEM
+       CHECK** (25/11/2026, reportado pela mesa: *"não tá funcionando na aba do RF o check PL
+       para o FFF7, mostra a qtd mas não mostra os PLs por fundo"*). A guarda é da era de UM
+       veículo offshore: ali a linha offshore morava 100% no `-N`, não havia rateio a conferir
+       e o veredito era o rótulo de "só no fundo X". **Com o 2º veículo (`-I`, 04/11/2026) uma
+       linha offshore passou a poder ser RATEADA entre dois fundos** — e aí o #PL de cada um e
+       o desvio entre eles são exatamente tão definidos quanto numa linha local. Medido no
+       FFF7: 21 contratos no Juros Global e 64 no Juros e Moeda, com as seis células de #PL em
+       traço e o Check #PL em `—`. É o mesmo modo de falha SILENCIOSO que o 2º veículo já
+       produziu nas queries (§"SÃO DOIS VEÍCULOS"): nada erra, só falta.
+       ⭐ **E o escopo entra na conta.** `prf_funds_ok` diz quais fundos PODEM carregar a linha
+       (mandato, praça, metal); fundo fora dele tem quantidade zero **por desenho** e o #PL
+       dele não é "zero", é inexistente — daí o traço, igual ao da coluna de quantidade ao
+       lado. ☠️ Sem isso o Juros Local entraria no FFF7 com `#PL = 0` e o check mediria
+       `|0 − (−1,0089)|` = **1,0089**, isto é, acusaria a posição INTEIRA como desvio de
+       rateio. ⚠️ Para as linhas que os TRÊS fundos podem carregar — que são todas as que
+       chegavam aqui antes (aferido no payload de 25/11) — isto é **no-op**: lá fundo com
+       quantidade zero continua valendo 0 e continua acusando, que é o alarme certo. */
+    const _podem   = (Array.isArray(r.prf_funds_ok) && r.prf_funds_ok.length) ? r.prf_funds_ok : null;
+    const _podeFl  = fl => !_podem || _podem.indexOf(fl) >= 0;
+    const fundInfo = [];
     const cells = fundLabels.map(fl => {
       // Soma o fundo-cabeça E os veículos dele (ver `_labelsDe`): posição offshore chega
       // pelo nome do veículo e sairia como traço na coluna do dono.
@@ -2838,15 +2934,37 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
       const navF     = fundNavs[fl];
 
       let fundPl = null;
-      if (!r.is_offshore && groupPl != null && totalQty !== 0 && navF && refNav) {
+      if (_podeFl(fl) && groupPl != null && totalQty !== 0 && navF && refNav) {
         fundPl = groupPl * (fund_qty / totalQty) * (refNav / navF);
       }
       fundPlArr.push(fundPl);
+      /* ⚠️ `lote` = quanto UM contrato move o #PL DESTE fundo. É a tolerância mínima do
+         check (ver `_tolDe`): o rateio por NAV quase nunca cai em número inteiro, e exigir
+         precisão abaixo de um lote é pedir o que a boleta não tem como entregar. */
+      fundInfo.push({ fl: fl, pl: fundPl, qty: fund_qty, navF: navF, pode: _podeFl(fl),
+        lote: (groupPl != null && totalQty !== 0 && navF && refNav)
+          ? Math.abs(groupPl) * (1 / Math.abs(totalQty)) * (refNav / navF) : 0 });
 
       const qtyCell = `<td class="num">${fund_qty !== 0 ? fmtFinalQty(fund_qty, qtyDec(r)) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
       const plCell  = `<td class="num">${fundPl != null ? fmtPL(fundPl, r.pl_type) : '<span style="color:var(--text-muted)">—</span>'}</td>`;
       return qtyCell + plCell;
     }).join('');
+    // Só os fundos que PODEM carregar a linha entram no veredito de rateio.
+    const _emEscopo = fundInfo.filter(x => x.pode && x.pl != null);
+    /* Veredito de linha NÃO RATEADA (toda a quantidade num fundo só), calculado uma vez:
+       `✓ só no X` quando é o único que pode carregá-la, `⛔ ERRO` quando outros podiam.
+       `null` = a linha está repartida (ou em nenhum fundo) e quem responde é o check de
+       rateio lá embaixo. */
+    /* ☠️ **Sem quantidade medida em lugar nenhum, NÃO se afirma concentração.** O fallback
+       era `[r.alloc_fund || offFund]` — uma lista de UM fundo —, e com ela o
+       `_checkNaoRateada` dizia *"está 100% no Juros e Moeda e os outros podiam carregá-la"*
+       sobre uma linha cuja quantidade ele não viu em fundo nenhum. Foi o que imprimiu
+       ⛔ ERRO nos swaps. ⭐ `r.alloc_fund` FICA porque é uma DECLARAÇÃO do backend (a linha
+       foi desenhada para morar ali); o `offFund` sai porque é palpite — o fundo do dólar não
+       diz nada sobre um swap. Sem os dois, a linha cai no check de rateio, que responde `—`
+       quando não há o que conferir. É a regra de "check não acusa o que não dá para saber". */
+    const _soUm = _checkNaoRateada(r,
+      _ondeQtd.length ? _ondeQtd : (r.alloc_fund ? [r.alloc_fund] : []));
 
     // Check #PL: #PL individual de cada fundo vs #PL do grupo
     // (o "Check Qtd" que ficava aqui saiu em 27/10/2026 — ver a nota no `cells` acima)
@@ -2857,7 +2975,7 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
     } else if (escopoErro) {
       checkPlCell = `<td class="check-cell alloc-bad" title="${_escHtml(
         _escopoErroTip(r, escopoErro))}">⛔ ERRO</td>`;
-    } else if (r.is_offshore) {
+    } else if (r.is_offshore && _soUm) {
       /* ☠️ **Era o rótulo mudo "offshore · ‹fundo›"** — dizia de que VEÍCULO a linha veio, que
          é vocabulário interno, em vez de responder se a repartição está certa. Hoje vai pelo
          mesmo veredito das linhas do espelho (ver `_checkNaoRateada`): ✓ quando só aquele
@@ -2867,11 +2985,12 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
          `_checkNaoRateada` nunca via uma linha offshore RATEADA entre os dois veículos —
          ela saía ⛔ ERRO mesmo repartida certo. Com os donos reais, linha em mais de um
          fundo cai no check normal (desvio em pp), que é o veredito dela. */
-      checkPlCell = _checkNaoRateada(r, _ondeQtd.length ? _ondeQtd : [r.alloc_fund || offFund])
-        ?? `<td style="color:var(--text-muted);text-align:right;font-size:11px"${
-          r.alloc_fund ? ` title="${_escHtml('100% no ' + fundLabelMesa(r.alloc_fund, true)
-            + '. O #PL é calculado sobre o NAV desse fundo, não sobre a soma dos três.')}"` : ''
-          }>${r.alloc_fund ? 'só no ' + fundSigla(r.alloc_fund) : '—'}</td>`;
+      /* ⚠️ **O ramo só entra HAVENDO veredito.** Quando o `_soUm` é `null` a linha está
+         RATEADA entre 2+ veículos, e aí ela cai no check de rateio lá embaixo, que é o
+         veredito dela — era por NÃO cair que o FFF7 imprimia `—`. O fallback de rótulo mudo
+         ("só no X") morreu junto: ele só aparecia sem `prf_funds_ok`, e nesse caso o check de
+         rateio também responde. */
+      checkPlCell = _soUm;
     } else if (offOnly && r.dolar_caixa) {
       /* ☠️ **Dólar de CAIXA não tem alvo de rateio** (03/11/2026). Ele é o hedge do caixa em
          BRL de CADA fundo — medido no dia: −50 no Juros Global e −41 no Juros e Moeda —, e o
@@ -2928,7 +3047,15 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
             _dCls === 'alloc-ok' ? '✓'
               : '±' + _mirrorDiffTxt(devPl, r.pl_type).replace('+', '')}</td>`;
       }
-    } else if (groupPl != null && fundPlArr.every(p => p != null)) {
+    } else if (_emEscopo.length === 1 && _soUm) {
+      /* ⚠️ Linha que **um fundo só pode carregar** e que não é offshore nem dólar — commodity
+         (ouro/prata, mandato do Juros e Moeda), por exemplo. Antes ela caía no check de
+         rateio e o desvio era medido contra os dois fundos que NÃO podem tê-la, cada um com
+         `#PL = 0`: saía VERMELHO com o tamanho da posição inteira, num rateio que não existe.
+         Hoje responde o mesmo `✓ só no X` das offshore. ⚠️ Caso latente — não há linha assim
+         no livro de 25/11/2026 —, mas o ramo é o mesmo e custa duas linhas. */
+      checkPlCell = _soUm;
+    } else if (groupPl != null && _emEscopo.length > 1) {
       /* ⭐ **MESMA RÉGUA DO CHECK EMOTA** (09/11/2026) — ver `rfExpoClass` em pos-helpers.js.
          ☠️ Esta coluna vivia em 0,02/0,04 (o `ALLOC_TOL`, que é de outra grandeza: fatia em
          pp) enquanto o EMota mede **diferença de #PL**. Resultado medido em 09/11: o
@@ -2939,22 +3066,57 @@ function renderFundBreakTable(mainRows, fundRows, fundNavs, filterFn, offshoreFu
          percentuais), falso em PL por 100 bps, que não é fração: 0,0051 saía como
          **±0,51pp**, que não é meio ponto de nada. O `_mirrorDiffTxt` resolve os dois casos
          porque decide o sufixo pelo `pl_type`. */
-      const maxDev = Math.max(...fundPlArr.map(fp => Math.abs(fp - groupPl)));
-      const _plCls = rfExpoClass(maxDev, r);
-      const _tolPl = rfMirrorTol(r);
+      /* ☠️ **A TOLERÂNCIA NÃO PODE SER MENOR QUE UM LOTE** (25/11/2026). O rateio por NAV
+         quase nunca cai em número inteiro de contratos, e exigir precisão abaixo de um lote é
+         cobrar o que a boleta não tem como entregar. Medido no FFF7 de 25/11: o alvo por NAV
+         é **20,67 / 64,33** e a mesa boletou **21 / 64** — o melhor arredondamento possível —,
+         e ainda assim o desvio de #PL (0,0159) é **3,2× a tolerância** de 0,005, porque UM
+         contrato daquela linha vale **0,0488** de #PL no Juros Global. Sem o piso, a coluna
+         nasceria VERMELHA num rateio exato, que é o jeito mais rápido de ensinar a mesa a não
+         ler a coluna. É a mesma correção que o Check EMota já carrega ("nunca menor que 1
+         contrato").
+         ⚠️ O piso é **por fundo**: um contrato pesa mais no fundo pequeno (0,0488 no Global
+         contra 0,0157 no Juros e Moeda), então uma tolerância única usaria a régua de um
+         fundo para julgar o outro. Daí o veredito sair do PIOR `desvio ÷ tolerância`, não do
+         maior desvio absoluto.
+         ⭐ E o desvio em LOTES é o mesmo em todos os fundos por construção (eles somam zero):
+         no FFF7 são **0,33 lote** nos dois. É o número acionável, e vai no tooltip. */
+      const _tolDe = x => Math.max(rfMirrorTol(r), x.lote || 0);
+      const _pior  = _emEscopo.reduce((a, x) =>
+        (Math.abs(x.pl - groupPl) / _tolDe(x)) > (Math.abs(a.pl - groupPl) / _tolDe(a)) ? x : a);
+      const maxDev = Math.abs(_pior.pl - groupPl);
+      const _tolPl = _tolDe(_pior);
+      const _plCls = maxDev <= _tolPl ? 'alloc-ok'
+                   : maxDev <= 2 * _tolPl ? 'alloc-warn' : 'alloc-bad';
       const _un    = r.pl_type === 'pct' ? '% do NAV' : '% do NAV por 100 bps';
       /* A célula não tinha TOOLTIP nenhum: imprimia o maior desvio sem dizer de QUAL fundo,
-         nem quanto era cada um. Agora lista os três contra o grupo. */
-      const _det = fundLabels.map((fl, i) => `  ${fundLabelMesa(fl, true)}: `
-        + `${_mirrorExpTxt(fundPlArr[i], r.pl_type)}  `
-        + `(${_mirrorDiffTxt(fundPlArr[i] - groupPl, r.pl_type)})`).join('\n');
+         nem quanto era cada um. Agora lista os que podem carregar a linha, contra o grupo. */
+      const _det = _emEscopo.map(x => `  ${fundLabelMesa(x.fl, true)}: `
+        + `${_mirrorExpTxt(x.pl, r.pl_type)}  `
+        + `(${_mirrorDiffTxt(x.pl - groupPl, r.pl_type)})`
+        + (totalQty ? `   ·  ${fmtFinalQty(x.qty, qtyDec(r))} de alvo `
+            + `${(totalQty * (x.navF / refNav)).toLocaleString('en-US', {maximumFractionDigits: 2})}` : '')).join("\n");
+      const _fora = fundInfo.filter(x => !x.pode).map(x => fundLabelMesa(x.fl, true));
       const _tip = `RATEIO ENTRE OS FUNDOS — o #PL de cada um contra o do livro `
         + `(${_mirrorExpTxt(groupPl, r.pl_type)}, ${_un}). Linha rateada na proporção dos NAVs `
-        + `dá o MESMO #PL nos três, então qualquer diferença é desvio de rateio.\n\n`
-        + _det + `\n\nMaior divergência: ${_mirrorDiffTxt(maxDev, r.pl_type, true)}.\n`
+        + `dá o MESMO #PL em todos, então qualquer diferença é desvio de rateio.\n\n`
+        + _det
+        + (_fora.length ? `\n\nFora do veredito (não podem carregar esta linha): `
+            + _fora.join(' · ') + '.' : '')
+        /* ⚠️ Não é "a maior divergência": é a PIOR contra a tolerância do próprio fundo —
+           um contrato pesa mais no fundo pequeno, então 0,016 no Juros Global e 0,005 no
+           Juros e Moeda são o MESMO desvio (0,33 lote) e o pior dos dois é indiferente.
+           Chamar isso de "maior" faria o balão contradizer a lista logo acima. */
+        + `\n\nPior caso contra a própria tolerância: `
+        + `${_mirrorDiffTxt(maxDev, r.pl_type, true)} (${fundLabelMesa(_pior.fl, true)}).\n`
         + `Verde até ${_mirrorDiffTxt(_tolPl, r.pl_type, true).replace('+', '')}, amarelo até `
-        + `${_mirrorDiffTxt(2 * _tolPl, r.pl_type, true).replace('+', '')}, vermelho além — `
-        + `a MESMA faixa do Check EMota, porque é a mesma grandeza.`;
+        + `${_mirrorDiffTxt(2 * _tolPl, r.pl_type, true).replace('+', '')}, vermelho além`
+        + (_tolPl > rfMirrorTol(r)
+            ? ` — a faixa é UM CONTRATO daquele fundo, que aqui vale mais do que a régua `
+              + `padrão de ${_mirrorDiffTxt(rfMirrorTol(r), r.pl_type, true).replace('+', '')}: `
+              + `o rateio por NAV não cai em número inteiro e abaixo de um lote não há boleta `
+              + `que corrija.`
+            : ` — a MESMA faixa do Check EMota, porque é a mesma grandeza.`);
       checkPlCell = `<td class="check-cell ${_plCls}" title="${_escHtml(_tip)}">${
         _plCls === 'alloc-ok' ? '✓'
           : '±' + _mirrorDiffTxt(maxDev, r.pl_type).replace('+', '')}</td>`;

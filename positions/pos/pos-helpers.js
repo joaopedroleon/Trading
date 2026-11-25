@@ -1243,3 +1243,46 @@ function updateBbgBanner() {
 }
 
 /* ── Formatters ──────────────────────────────────────────────────────────── */
+
+/* ── Chave do BREAK POR FUNDO — a linha principal ↔ as linhas de `fund_rows` ──────────
+   ☠️ **`trader` TEM de entrar, e a falta dele fazia DUAS LINHAS lerem o break DA MESMA**
+   (25/11/2026). A chave era instrumento+área+sub-área+estratégia+vencimento, e o índice é
+   `{chave: {fund_label: linha}}` — ou seja, com dois traders no mesmo instrumento e fundo,
+   o último sobrescreve o primeiro e AS DUAS linhas principais passam a apontar para ele.
+   Medido na aba do PortfolioRF: as linhas do `FFF7 Comdty` do PortfolioRF (85) e do sleeve
+   do PAbinader (9) imprimiam as MESMAS colunas por fundo — `21` no Juros Global e `64` no
+   Juros e Moeda, que são as do PortfolioRF —, e com elas o `Check Abi · LAg` media a
+   proporção contra a quantidade do outro livro.
+   ⚠️ **Fora da aba do PortfolioRF é no-op**: toda aba de trader tem UM livro só, então
+   `trader` é constante e a chave não muda de comportamento. É a mesma razão pela qual o
+   `trader` entrou no `_NONFX_JOIN_KEYS`/`_FX_JOIN_KEYS` do backend no mesmo dia.
+   ⛔ **Não é o `rowKey`**, que leva `group` — `fund_rows` não tem essa coluna.
+   ⚠️ Mora aqui, no `pos-helpers.js`, porque os consumidores estão em DOIS arquivos
+   (`pos-fundtables.js`, publicado no snapshot, e `pos-fundsplit.js`, que não é) e duas
+   cópias divergiriam caladas — foi exatamente assim que este defeito nasceu, com a mesma
+   expressão escrita à mão em 4 lugares. O `pos-helpers.js` está na lista do
+   `snapshot/viewer/index.html`, então o viewer publicado continua de pé. */
+function fundBreakKey(r) {
+  return `${r.instrument_reference}||${r.area}||${r.subarea}||${r.strategy}`
+       + `||${r.maturity ?? ''}||${r.trader ?? ''}`;
+}
+
+/* ── SWAP DE JUROS: o espelho no RF é ANÁLISE À PARTE (25/11/2026) ───────────────────
+   Regra da mesa: *"por mais que sejam de JUROS (o Abinader e o Lucas operam e deveriam
+   alocar no RF nos 10%), nesses casos vai ser sempre uma análise à parte — talvez entre e
+   talvez não, e não vai ser na proporção de 10%. Então quero que os checks somente apontem
+   um alerta amarelo para verificar."*
+   ⛔ Por isso o swap NÃO recebe veredito de proporção em `rfCheckCell` (nem ✓ nem ⛔): o
+   alvo de 10% não vale para ele, e tanto o verde quanto o vermelho afirmariam sobre uma
+   régua que a mesa acabou de dizer que não se aplica. ⚠ amarelo é o veredito honesto.
+   ⚠️ Identidade por DUAS vias porque a linha chega de dois jeitos: **consolidada** (com
+   `swap_detail`, que é como ela aparece na tabela de Posição) e **crua**, com o nome da
+   perna (`SWAP_COP_IBR_12.190_20271117`), que é como o backend a manda na faixa
+   `rf_faltantes`. Só uma das duas deixaria metade dos caminhos sem a regra. */
+const _SWAP_RX = /^SWAP[_ ]/i;
+function isSwapJuros(r) {
+  if (!r) return false;
+  if (r.swap_detail != null) return true;
+  return _SWAP_RX.test(String(r.instrument_name ?? ''))
+      || _SWAP_RX.test(String(r.instrument_reference ?? ''));
+}

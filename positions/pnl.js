@@ -524,12 +524,25 @@ const _pnlGroupLabel = e => (e.subarea ?? '—')
 
 // Agrega as rows por (sub-área, estratégia, instrumento, vencimento). `pnlFn` calcula o PnL
 // de cada row: `pnlFor` no consolidado, `_pnlForFund` nas tabelas por fundo do PortfolioRF.
+/* ☠️ **`trader` entra na chave — sem ele o PnL por fundo somava DOIS LIVROS numa linha**
+   (25/11/2026). Na aba do PortfolioRF o card de cada fundo lista o que está DENTRO daquele
+   fundo, e lá convivem o livro do RF e o sleeve do PAbinader/LAguiar (que boletam no mesmo
+   veículo). Medido: o `FFF7 Comdty` do `Segregated Portfolio-I` imprimia **23** — 21 do
+   PortfolioRF + 2 do PAbinader — numa linha só, sem nada dizer que eram dois donos. As
+   linhas sintéticas já chegavam separadas (o `pnlRowKey` tem trader); quem fundia era esta
+   agregação de EXIBIÇÃO.
+   ⭐ **O total do card NÃO muda** — a soma é a mesma, só passa a ter duas linhas. É isso que
+   mantém o card sendo a P&L do FUNDO (que de fato carrega os dois) e ao mesmo tempo
+   separado por dono, como a mesa pediu.
+   ⚠️ **Fora da aba do PortfolioRF é no-op**: toda outra aba tem um trader só. Mesma razão
+   do `trader` no `_NONFX_JOIN_KEYS` do backend e no `fundBreakKey` do break por fundo. */
 function _pnlAggregate(rows, pnlFn = pnlFor) {
   const map = new Map();
   for (const r of rows) {
-    const key = `${r.subarea ?? ''}||${r.strategy ?? ''}||${r.instrument_name ?? ''}||${r.maturity ?? ''}`;
+    const key = `${r.subarea ?? ''}||${r.strategy ?? ''}||${r.instrument_name ?? ''}||${r.maturity ?? ''}||${r.trader ?? ''}`;
     if (!map.has(key)) {
       map.set(key, { subarea: r.subarea, strategy: r.strategy, instrument_name: r.instrument_name,
+                     trader: r.trader ?? null, is_rf_sleeve: !!r.is_rf_sleeve,
                      opening_qty: 0, buy_qty: 0, sell_qty: 0,
                      buy_price_sum: 0, sell_price_sum: 0,
                      final_qty: 0, total_usd: 0, result_bps: 0,
@@ -553,6 +566,18 @@ function _pnlAggregate(rows, pnlFn = pnlFor) {
     if (!e.rowKeys.includes(pnlRowKey(r))) e.rowKeys.push(pnlRowKey(r));
   }
   return map;
+}
+
+/* Selo do DONO numa linha de sleeve — o par visual da tira azul da tabela de Posição.
+   ⚠️ Existe porque a chave de agregação passou a ter `trader`: sem ele, o mesmo instrumento
+   pode aparecer DUAS vezes no mesmo bloco do card (uma do RF, uma do sleeve) e as duas
+   linhas ficariam idênticas na tela. Silêncio fora do sleeve — nas demais abas nada muda. */
+function _pnlDonoBadge(e) {
+  if (!e.is_rf_sleeve || !e.trader) return '';
+  return ` <span style="font-weight:400;color:var(--text-muted);font-size:10px"` +
+         ` title="Linha do sleeve de RF — book de ${_escHtml(e.trader)} dentro do veículo deste` +
+         ` fundo. Entra no total do FUNDO (é posição dele), mas não é do livro do PortfolioRF.">` +
+         `${_escHtml(e.trader)}</span>`;
 }
 
 // Corpo da tabela de resumo a partir das entries agregadas: blocos de sub-área+estratégia
@@ -610,7 +635,7 @@ function _pnlSummaryBody(map) {
         avgPriceCell = e.option_subtype === 'fx' ? fmtPricePct4(avgPrice) : fmtPrice4(avgPrice);
       }
       tbody += `<tr onclick="hidePnlRow('${sk}')" title="Clique para ocultar" style="cursor:pointer">
-        <td style="padding-left:16px"${swapAttr}>${e.instrument_name ?? '—'}</td>
+        <td style="padding-left:16px"${swapAttr}>${e.instrument_name ?? '—'}${_pnlDonoBadge(e)}</td>
         <td class="num">${fmtQtySummary(e.opening_qty, qtyDec(e))}</td>
         <td class="num">${fmtQtySummary(tradedQty, qtyDec(e))}</td>
         <td class="num">${fmtQtySummary(e.final_qty, qtyDec(e))}</td>
