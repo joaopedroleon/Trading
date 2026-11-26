@@ -185,6 +185,7 @@ const ROLAGEM_TAB_ID      = 'rolagem';       // Hedge Cambial → Rolagem Dol (p
 const HEDGE_TAB_ID        = 'controle';      // Hedge Cambial → Controle    (pos-hedge.js)
 const BOLETAS_TAB_ID      = 'boletas';       // Boletas do Dia      (pos-boletas.js)
 const MARGEM_TAB_ID       = 'margem';        // Impar / Vista       (pos-margem.js)
+const CALC_TAB_ID         = 'calc';          // Calculadora PL      (pos-calc.js)
 
 /* ── Check Enquadramento (aba id 'dolar': dólar prev + derivativos RF) ────── */
 const DOLAR_TAB_ID        = 'dolar';

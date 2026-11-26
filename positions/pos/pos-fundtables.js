@@ -3280,4 +3280,114 @@ function _alignFsHeads(mainBody, auxBody) {
   b.forEach((tr, i) => { tr.style.height = hs[i] + 'px'; });
 }
 
+/* ── CONFERÊNCIA do DV01 de swap contra o risco ──────────────────────────────────────────
+   ⭐ Desde 26/11/2026 o DV01 de swap sai do NOSSO cálculo (`positions/swap_dv01.py`) e o
+   `ODS.RISK_QUOTE` virou CONFERÊNCIA (pedido da mesa: *"prefiro usar sempre o nosso cálculo,
+   usa o do risco somente como conferência. Se estiver muito diferente você aponta um flag
+   sutil, fora da tabela, abaixo dela"*). Esta é a faixa.
+
+   ⛔ **Sutil de propósito, e ABAIXO da tabela**: não é erro de posição nem desvio de
+   alocação — é duas fontes discordando sobre a mesma perna. Acima da Posição a mesa só quer
+   ERRO (a regra do `rfAlertas`), e a faixa âmbar do `rf_faltantes` já é um degrau acima
+   disto. Aqui é uma linha de texto apagada, sem moldura e sem cor de alerta.
+   ⭐ **Silêncio é o estado normal** — sem divergência não renderiza nada.
+
+   ☠️ **O número da faixa é o da EXPOSIÇÃO DA LINHA, não o do DV01 da perna**, e a diferença
+   não é cosmética: um cluster pode ter 2 pernas em sentidos opostos e só uma divergente, e
+   aí o % da perna não diz nada sobre o que a linha carrega. Aqui se reconstrói a `final_qty`
+   pelos dois lados — `Σ qty × dv01` com o nosso número e com o do risco (caindo no nosso
+   onde ele não publicou) — e compara. É a MESMA soma que o `_consolidate_swaps` faz, com os
+   mesmos insumos que já viajam na linha (`swap_detail` + `dv01_conf`).
+   ⚠️ O #PL escala com a `final_qty`, então o impacto em #PL sai da mesma razão, sem fórmula
+   nova — e ele só é impresso quando a linha TEM #PL (opção sem delta e papel do Tesouro saem
+   sem o parêntese, nunca com número inventado).
+   ⛔ E o piso de materialidade de PERNA (DV01 degenerado) já veio podado do backend; o que o
+   JS acrescenta é a régua de LINHA, que só ele tem. */
+function renderSwapDv01Conf(data, mainRows) {
+  const tol = Number(data?.swap_dv01?.tol_pct);
+  if (!(tol > 0)) return '';
+  const itens = [];
+  for (const r of (mainRows || [])) {
+    const div = r?.dv01_div, conf = r?.dv01_conf;
+    if (!div || !Array.isArray(conf) || !conf.length) continue;
+    /* Reconstrói os dois lados da `final_qty` com as pernas da PRÓPRIA linha. */
+    const byName = {};
+    conf.forEach(c => { byName[c.name] = c; });
+    let qc = 0, qr = 0, temRisco = false;
+    for (const leg of (r.swap_detail || [])) {
+      const q = Number(leg?.qty) || 0, c = byName[leg?.name];
+      const dvC = c ? Number(c.calc) : null;
+      const dvR = c ? Number(c.risco) : null;
+      /* ⚠️ Perna sem conferência entra IGUAL dos dois lados: ela não é fonte de divergência,
+         e tirá-la mudaria o denominador inventando diferença onde não há. */
+      qc += q * (dvC ?? 0);
+      qr += q * (dvR ?? dvC ?? 0);
+      if (dvR != null) temRisco = true;
+    }
+    if (!temRisco || !isFinite(qc) || !isFinite(qr) || Math.abs(qr) < 1e-12) continue;
+    const difLinha = (qc / qr - 1) * 100;
+    /* ☠️ A linha pode diluir a perna: 2 pernas, uma divergente, e o cluster quase não anda.
+       A régua da FAIXA é a da linha — se a exposição não se move, não há o que mostrar. */
+    if (!(Math.abs(difLinha) >= tol)) continue;
+    const pl = Number(r.pl);
+    const plRisco = isFinite(pl) ? pl / (qc / qr) : null;
+    itens.push({ r, difLinha, pl, plRisco, div, conf });
+  }
+  if (!itens.length) return '';
+
+  const _NL = String.fromCharCode(10);
+  const linhas = itens.map(it => {
+    /* ☠️ O nome da linha CONSOLIDADA não identifica a linha: um cluster de swap é agregado
+       por família (`SWAP_CLP_CAM`), então duas pernas de vencimentos diferentes em dois
+       fundos saem com QUATRO rótulos idênticos. Aferido na tela em 26/11/2026 — a faixa
+       listava 4× "SWAP_CLP_CAM" e não dava para saber qual era qual. Desambigua-se pelo que
+       de fato difere: o VENCIMENTO da perna pior e o GRUPO/fundo da linha. */
+    /* ⚠️ DIA, mês e ano — não só mês: as duas pernas de CLP do livro vencem em 10/07 e
+       16/07/2031, então a precisão de mês devolvia dois rótulos iguais (aferido na tela). */
+    const _m = /_(\d{4})(\d{2})(\d{2})$/.exec(it.div.pior || '');
+    const venc = _m ? `${_m[3]}/${_m[2]}/${_m[1].slice(2)}` : '';
+    const grp = it.r.fund_label || it.r.group || '';
+    const nome = _escHtml(it.r.instrument_name || it.r.instrument_reference || '—')
+      + (venc ? ` <span style="color:var(--text-muted);font-weight:400">${venc}</span>` : '')
+      + (grp ? ` <span style="font-size:10px;color:var(--text-muted)">${_escHtml(grp)}</span>` : '');
+    const sinal = it.difLinha > 0 ? '+' : '';
+    const dif = sinal + it.difLinha.toFixed(1).replace('.', ',') + '%';
+    /* O #PL dos dois lados só quando a linha tem #PL — senão sai sem o parêntese. */
+    const plTxt = (it.pl != null && isFinite(it.pl) && it.plRisco != null && isFinite(it.plRisco))
+      ? ` <span style="color:var(--text-muted)">(#PL ${fmtFinalQtyTxt(it.pl, 2)} contra `
+        + `${fmtFinalQtyTxt(it.plRisco, 2)} pelo risco)</span>`
+      : '';
+    /* O PORQUÊ no tooltip — a linha diz o fato (regra do `rf_faltantes`). */
+    const det = it.conf.map(c => {
+      const d = (c.dif_pct > 0 ? '+' : '') + Number(c.dif_pct).toFixed(2).replace('.', ',');
+      return '• ' + c.name + '  ' + Number(c.dias) + 'd  nosso ' + Number(c.calc).toExponential(3)
+           + '  risco ' + Number(c.risco).toExponential(3) + '  (' + d + '%)'
+           + (c.aprox ? '  [freq. de cupom não conhecida]' : '');
+    }).join(_NL);
+    const tip = 'O DV01 em uso é o NOSSO (calculado da curva); o do risco (ODS.RISK_QUOTE, '
+      + 'batch de D-1) entra só como conferência.' + _NL
+      + 'Limiar de aviso: ' + String(tol).replace('.', ',') + '% na exposição da linha.' + _NL + _NL
+      + det;
+    return `<div style="margin:2px 0" title="${_escHtml(tip)}">`
+      + `<span style="opacity:.55">◦</span> <b>${nome}</b> `
+      + `<span style="color:var(--text-muted)">exposição</span> <b>${dif}</b> `
+      + `<span style="color:var(--text-muted)">vs. risco</span>${plTxt}`
+      + (it.div.n < it.div.de
+          ? ` <span style="font-size:10px;color:var(--text-muted)">${it.div.n} de ${it.div.de} pernas</span>`
+          : '')
+      + `</div>`;
+  });
+
+  /* ⚠️ `data-html2canvas-ignore` como na faixa do `rf_faltantes`: o `⎘ Copiar` da seção é um
+     print da POSIÇÃO, e nota de reconciliação não entra nele. (De brinde isto isenta o bloco
+     da armadilha do `color-mix()`, que estoura o html2canvas — §4.3 do CLAUDE.md da raiz.) */
+  return `<div class="card" data-html2canvas-ignore="true"
+       style="flex:0 0 auto;padding:8px 12px;background:transparent;border:1px dashed var(--border);opacity:.85">
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">
+      DV01 de swap — conferência contra o risco
+    </div>
+    <div style="font-size:12px;line-height:1.5">${linhas.join('')}</div>
+  </div>`;
+}
+
 /* ── Tab switching ───────────────────────────────────────────────────────── */

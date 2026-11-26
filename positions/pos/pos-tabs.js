@@ -30,6 +30,9 @@ function activateTab(key) {
     case MARGEM_TAB_ID:
       if (typeof showMargemTab === 'function') showMargemTab();       // IMPAR / VISTA (pos-margem.js)
       break;
+    case CALC_TAB_ID:
+      if (typeof showCalcTab === 'function') showCalcTab();            // Calculadora PL (pos-calc.js)
+      break;
     default:            showTraderTab(key);   break;   // emota/ecotrim/portfoliorf/other
   }
   // Chip do USD/BRL: só nas abas que saem do /reference (trader + Análise de Opções).
@@ -370,6 +373,9 @@ async function loadPositionsForTab(tabId, opts = {}) {
     // Apelido da mesa por fundo — global como o acima, e pelo mesmo motivo: o Check
     // Enquadramento é outra aba e pode carregar antes do PortfolioRF. Ver pos-format.js.
     if (typeof rememberFundLabels === 'function') rememberFundLabels(data);
+    // NAV por trader + USD/BRL + tickers com DV01 para a Calculadora PL, que não carrega
+    // nada por conta própria (pos-calc.js). Mesma porta e mesmo motivo do `rememberFundLabels`.
+    if (typeof calcNoteNavs === 'function') calcNoteNavs(data);
     if (tabId === activeTraderTab) {
       positionsData = data;
       status.textContent = '';
@@ -915,8 +921,14 @@ function _renderSectionsForTab(tabId, allRows) {
      Ver `renderRfFaltantes` (pos-fundtables.js). */
   const rfFalt = (typeof renderRfFaltantes === 'function')
     ? renderRfFaltantes(data, displayRows) : '';
+  /* ◦ CONFERÊNCIA do DV01 de swap contra o risco — faixa discreta, também abaixo da tabela
+     (26/11/2026). ⚠️ Ao contrário do `rfFalt`, que é do PortfolioRF, esta vale em TODA aba:
+     o livro de swap é de vários traders. Silêncio é o estado normal.
+     Ver `renderSwapDv01Conf` (pos-fundtables.js). */
+  const swapConf = (typeof renderSwapDv01Conf === 'function')
+    ? renderSwapDv01Conf(data, displayRows) : '';
 
-  container.innerHTML = rfBanner + mainCards.join('') + rfFalt + rfCcy;
+  container.innerHTML = rfBanner + mainCards.join('') + swapConf + rfFalt + rfCcy;
   if (prevContainer) prevContainer.innerHTML = prevCards.join('');
 
   /* ⭐ O "+" e o chip de simulação são nós NOVOS a cada render — é só aqui que dá para ligar
