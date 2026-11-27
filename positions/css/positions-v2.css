@@ -391,19 +391,27 @@ html.theme-v2 .jgp-tbl tbody tr.grp:hover td { background: var(--bg); }
    desmarcado recua para contorno tracejado sem fundo.
    ⚠️ Escopo no `#rolagemControls` de propósito, e não no `.filter-chip.on` global: aquela
    classe também veste BADGES que não são botão (`🚫 N ocultos`, as áreas excluídas — ambos
-   `cursor:default`) e o seletor de conversão do resumo. Pintar todos de verde diria que
-   são clicáveis e que estão "ativos", que é o oposto do que aqueles dois informam. */
+   `cursor:default`). Pintar todos de verde diria que são clicáveis e que estão "ativos",
+   que é o oposto do que aqueles dois informam. */
+/* ⭐ `.rolagem-conv-sel` entrou no escopo (nov/2026): o seletor de Conversão do resumo
+   ficava de fora — e ele É clicável, ao contrário dos badges. Aguentava-se enquanto era
+   UMA fileira de 3 chips; com o <b>escopo</b> ("só quem neta" × "todos os fundos") são
+   DUAS fileiras, e ler qual está marcado nos ~2% de luminância do `.on` global passou a
+   decidir que boleta sai. A classe é do wrapper de cada fileira, então os badges seguem
+   fora. */
 /* ⭐ `#boletasCheck` entrou no escopo (set/2026): a conferência boleta × execução ganhou
    pareamento MANUAL, com chips próprios de executor (tradebook) e de livro (JDS) dentro do
    card. São a mesma interação dos chips de trader do topo e têm de se vestir igual — sem
    isso o marcado ficaria nos ~2% de luminância do `.on` global, que é o problema descrito
    logo acima. */
 html.theme-v2 #rolagemControls .filter-chip.on,
+html.theme-v2 .rolagem-conv-sel .filter-chip.on,
 html.theme-v2 #boletasCheck .filter-chip.on,
 html.theme-v2 #boletasControls .filter-chip.on {
   background: var(--green); color: #fff; border-color: var(--green-dark); font-weight: 600;
 }
 html.theme-v2 #rolagemControls .filter-chip.off,
+html.theme-v2 .rolagem-conv-sel .filter-chip.off,
 html.theme-v2 #boletasCheck .filter-chip.off,
 html.theme-v2 #boletasControls .filter-chip.off {
   background: transparent; color: var(--text-muted); border-style: dashed; font-weight: 400;
@@ -423,6 +431,7 @@ html.theme-v2 #boletasControls .filter-chip.chip-act:hover {
   background: var(--accent); color: var(--bg-card);
 }
 html.theme-v2 #rolagemControls .filter-chip:hover,
+html.theme-v2 .rolagem-conv-sel .filter-chip:hover,
 html.theme-v2 #boletasCheck .filter-chip:hover,
 html.theme-v2 #boletasControls .filter-chip:hover { opacity: 1; filter: brightness(1.08); }
 

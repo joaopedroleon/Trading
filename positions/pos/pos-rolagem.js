@@ -291,26 +291,45 @@ const ROLAGEM_ASSET_SIZE = { mini: 1, cheio: ROLAGEM_MINIS_POR_CHEIO };   // em 
 // Lote de NEGOCIAÇÃO: o cheio só é operado de 5 em 5 (o TOTAL que vai a mercado; a
 // alocação por fundo pode ser de 1 em 1). O mini não tem lote.
 const ROLAGEM_LOT = { mini: 1, cheio: 5 };
-// Modo de conversão: 'off' (cada ativo rola no seu) · 'cheio' (quem neta rola tudo em UC)
-// · 'mini' (quem neta rola tudo em WDO). Vale para o resumo E para as boletas.
+// Modo de conversão: 'off' (cada ativo rola no seu) · 'cheio' (rola em UC) · 'mini' (rola
+// em WDO). Vale para o resumo E para as boletas.
+// ESCOPO (nov/2026, pedido da mesa): dentro do modo, QUEM converte —
+//   'neta'  = só o fundo com mini e cheio em lados OPOSTOS (regra original de ago/2026);
+//   'todos' = todo fundo com posição na ORIGEM, mesmo sem nada no alvo ("rolar tudo no X").
 const LS_ROLAGEM_CONV = 'jgp_rolagem_conv_v1';
+const LS_ROLAGEM_CONV_SCOPE = 'jgp_rolagem_conv_scope_v1';
 let rolagemConvMode = 'off';
+let rolagemConvScope = 'neta';
 try { rolagemConvMode = localStorage.getItem(LS_ROLAGEM_CONV) || 'off'; } catch (_) {}
+try { rolagemConvScope = localStorage.getItem(LS_ROLAGEM_CONV_SCOPE) || 'neta'; } catch (_) {}
+if (rolagemConvScope !== 'neta' && rolagemConvScope !== 'todos') rolagemConvScope = 'neta';
 
-function setRolagemConvMode(m) {
-  rolagemConvMode = m;
-  try { localStorage.setItem(LS_ROLAGEM_CONV, m); } catch (_) {}
+function _rolagemConvChanged() {
   rolagemBoletas = null;               // boletas foram geradas noutro modo → obsoletas
   const data = posDataByTab[ROLAGEM_TAB_ID];
   if (data) _rolagemRenderSummary(_rolagemFilteredRows(data));
   _renderBoletaPreview();              // limpa a prévia sem remontar o painel de config
 }
 
+function setRolagemConvMode(m) {
+  rolagemConvMode = m;
+  try { localStorage.setItem(LS_ROLAGEM_CONV, m); } catch (_) {}
+  _rolagemConvChanged();
+}
+
+function setRolagemConvScope(sc) {
+  rolagemConvScope = sc;
+  try { localStorage.setItem(LS_ROLAGEM_CONV_SCOPE, sc); } catch (_) {}
+  _rolagemConvChanged();
+}
+
 /* ── Plano de conversão mini↔cheio — ESPELHO de `_plan_rolagem_conversion` do
    backend (positions/router.py). As duas contas precisam bater: o resumo mostra o
    que vai a mercado e as boletas são geradas com a MESMA regra no servidor.
    Regras (mesa, ago/2026):
-     1. converte só quem NETA — fundo com mini e cheio em lados OPOSTOS;
+     1. QUEM converte sai do `scope`: 'neta' = só fundo com mini e cheio em lados
+        OPOSTOS (regra de ago/2026); 'todos' = todo fundo com posição na ORIGEM, mesmo
+        sem nada no alvo (nov/2026). Daí para baixo a mecânica é a mesma nos dois;
      2. quem converte rola num instrumento só (net_alvo + net_origem ÷5 ou ×5);
      3. o lote de 5 vale só para o TOTAL OPERADO no cheio, não para a alocação;
      4. a sobra do arredondamento cai na MAIOR linha do lado (a que menos sente). */
@@ -327,15 +346,20 @@ function _fitToTotal(vals, total) {
   }
   return ints;
 }
-function _rolagemPlan(nets, mode) {
-  const off = { mode: 'off', converting: new Set(), qty: {}, exact: {}, residual: {}, sides: [] };
+function _rolagemPlan(nets, mode, scope) {
+  const off = { mode: 'off', scope: 'neta', converting: new Set(), qty: {}, exact: {},
+                residual: {}, sides: [] };
   if (mode !== 'mini' && mode !== 'cheio') return off;
+  if (scope !== 'neta' && scope !== 'todos') scope = 'neta';
   const tgt = mode, src = tgt === 'mini' ? 'cheio' : 'mini';
   const lot = ROLAGEM_LOT[tgt];
   const fac = ROLAGEM_ASSET_SIZE[src] / ROLAGEM_ASSET_SIZE[tgt];
   const funds = Object.keys(nets);
-  const converting = new Set(funds.filter(f =>
-    nets[f][src] && nets[f][tgt] && (nets[f][src] > 0) !== (nets[f][tgt] > 0)));
+  // ⚠️ Em 'todos' a condição é só TER posição na origem: quem já está inteiro no alvo não
+  // entra (não há o que converter).
+  const converting = new Set(scope === 'todos'
+    ? funds.filter(f => nets[f][src])
+    : funds.filter(f => nets[f][src] && nets[f][tgt] && (nets[f][src] > 0) !== (nets[f][tgt] > 0)));
   const exact = {};
   for (const f of funds) exact[f] = converting.has(f) ? nets[f][tgt] + nets[f][src] * fac : nets[f][tgt];
 
@@ -361,7 +385,7 @@ function _rolagemPlan(nets, mode) {
     if (!converting.has(f)) rolled += nets[f][src] * ROLAGEM_ASSET_SIZE[src];
     residual[f] = rolled - pos;
   }
-  return { mode, src, tgt, lot, converting, qty, exact, residual, sides };
+  return { mode, scope, src, tgt, lot, converting, qty, exact, residual, sides };
 }
 
 // Quantidade de contrato com casas decimais SÓ quando não deu inteiro (o net convertido
@@ -388,7 +412,7 @@ function _rolagemRenderSummary(rows) {
     nets[f].cheio = Math.round(nets[f].cheio);
   }
   const funds = Object.keys(nets).sort((a, b) => a.localeCompare(b));
-  const plan = _rolagemPlan(nets, rolagemConvMode);
+  const plan = _rolagemPlan(nets, rolagemConvMode, rolagemConvScope);
   const conv = plan.mode !== 'off';
   const tgt = plan.tgt, src = plan.src;
   const aLabel = { mini: 'mini (WDO)', cheio: 'cheio (UC)' };
@@ -408,10 +432,26 @@ function _rolagemRenderSummary(rows) {
     if (q > 0) exec[a].buy += q; else exec[a].sell += -q;
   }
   const residTotal = conv ? funds.reduce((a, f) => a + (plan.residual[f] || 0), 0) : 0;
+  // ☠️ Lado fino + lote de 5 do cheio = ZERO: um lado que soma menos de 2,5 cheios
+  // (12,5 minis) arredonda p/ 0 e o fundo NÃO ROLA NADA — a posição fica em aberto. Existe
+  // desde sempre, mas o escopo 'todos' o torna provável (arrasta fundo pequeno só-mini
+  // para um lado que antes ele não ocupava). Posição não rolada é o pior defeito desta
+  // tela: sai em vermelho, nomeando o fundo, e não só como um resíduo amarelo.
+  // ⚠️ Piso de UM contrato do alvo, e não "tem alguma perna": fundo cuja posição líquida é
+  // de ±1 a 2 minis não tem boleta possível no cheio **por construção** — medido na carteira
+  // real, 4 fundos caem aí TODO dia, já no escopo 'neta'. Acusá-los seria alarme diário
+  // sobre o que o resíduo já diz, e é assim que a mesa aprende a não ler a faixa vermelha.
+  const posMinis = f => nets[f].mini + nets[f].cheio * ROLAGEM_MINIS_POR_CHEIO;
+  const naoRola = !conv ? [] : funds.filter(f =>
+    Math.abs(posMinis(f)) >= ROLAGEM_ASSET_SIZE[tgt] &&
+    !(plan.qty[f] || 0) && !(rolls[f][src] || 0));
 
   const body = funds.map(f => {
     const c = conv && plan.converting.has(f);
-    const mark = c ? ` <span title="mini e cheio em lados opostos — rola tudo em ${aLabel[tgt]}" style="color:var(--green);font-weight:700">⇄</span>` : '';
+    const why = plan.scope === 'todos'
+      ? `posição em ${aLabel[src]} convertida — rola tudo em ${aLabel[tgt]}`
+      : `mini e cheio em lados opostos — rola tudo em ${aLabel[tgt]}`;
+    const mark = c ? ` <span title="${why}" style="color:var(--green);font-weight:700">⇄</span>` : '';
     const res = conv ? (plan.residual[f] || 0) : 0;
     return `<tr${c ? ' style="background:var(--bg-row-alt)"' : ''}>
       <td>${f}${mark}</td>
@@ -425,13 +465,27 @@ function _rolagemRenderSummary(rows) {
 
   const chip = (m, txt, tip) =>
     `<span class="filter-chip ${rolagemConvMode === m ? 'on' : 'off'}" title="${tip}" onclick="setRolagemConvMode('${m}')">${txt}</span>`;
-  const toggle = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+  // O ESCOPO é a 2ª pergunta e só existe quando há conversão: "quem" converte dentro do
+  // instrumento escolhido. Dois chips em vez de quatro modos para o rótulo de cada um
+  // continuar dizendo uma coisa só.
+  const schip = (sc, txt, tip) =>
+    `<span class="filter-chip ${rolagemConvScope === sc ? 'on' : 'off'}" title="${tip}" onclick="setRolagemConvScope('${sc}')">${txt}</span>`;
+  const srcLabel = conv ? aLabel[src] : '';
+  const tgtLabel = conv ? aLabel[tgt] : '';
+  const toggle = `<div class="rolagem-conv-sel" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-size:12px;color:var(--text-muted);font-weight:600">Conversão:</span>
       ${chip('off',   'Sem conversão', 'Cada ativo rola no seu instrumento (visão padrão)')}
-      ${chip('cheio', 'Netar no cheio (UC)', 'Fundo com mini e cheio em lados opostos rola tudo no cheio: mini ÷ 5 entra no cheio')}
-      ${chip('mini',  'Netar no mini (WDO)', 'Fundo com mini e cheio em lados opostos rola tudo no mini: cheio × 5 entra no mini')}
-      ${conv ? `<span style="font-size:11px;color:var(--text-muted)">${plan.converting.size} fundo(s) netam · as boletas seguem esta escolha</span>` : ''}
-    </div>`;
+      ${chip('cheio', 'Cheio (UC)', 'Converte mini → cheio (÷ 5). Quem converte sai no chip Converter, ao lado')}
+      ${chip('mini',  'Mini (WDO)', 'Converte cheio → mini (× 5). Quem converte sai no chip Converter, ao lado')}
+    </div>
+    ${conv ? `<div class="rolagem-conv-sel" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text-muted);font-weight:600">Converter:</span>
+      ${schip('neta',  'Só quem neta',
+        `Só o fundo com mini e cheio em lados OPOSTOS. Quem tem os dois do mesmo lado, ou só ${srcLabel}, continua rolando o que tem`)}
+      ${schip('todos', 'Todos os fundos',
+        `TODO fundo com posição em ${srcLabel} rola em ${tgtLabel}, mesmo sem nada no alvo — mais resíduo de arredondamento`)}
+      <span style="font-size:11px;color:var(--text-muted)">${plan.converting.size} fundo(s) convertem · as boletas seguem esta escolha</span>
+    </div>` : ''}`;
 
   const execCells = (key, wrap, color) => {
     const cell = a => {
@@ -469,13 +523,22 @@ function _rolagemRenderSummary(rows) {
         </tbody>
       </table>
       ${conv ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">
-        <b>⇄ ${plan.converting.size} fundo(s) netam</b> — mini e cheio em lados opostos, então rolam num instrumento só
-        (1 cheio = ${ROLAGEM_MINIS_POR_CHEIO} minis). Quem tem os dois do mesmo lado continua rolando os dois:
-        ali converter não pouparia execução.
+        <b>⇄ ${plan.converting.size} fundo(s) convertem</b> — ${plan.scope === 'todos'
+          ? `todo fundo com posição em ${aLabel[src]} rola em ${aLabel[tgt]}, mesmo sem nada no alvo`
+          : 'mini e cheio em lados opostos, então rolam num instrumento só'}
+        (1 cheio = ${ROLAGEM_MINIS_POR_CHEIO} minis). ${plan.scope === 'todos'
+          ? `Quem já está inteiro em ${aLabel[tgt]} não tem o que converter.`
+          : 'Quem tem os dois do mesmo lado, ou só um deles, continua rolando o que tem: ali converter não pouparia execução — use <b>Todos os fundos</b> para converter assim mesmo.'}
         ${plan.sides.map(s => s.lot > 1
           ? `<br>· <b>${s.side}</b> em ${aLabel[tgt]}: ${_fmtRolQty(s.exact_total, { plain: true })} exatos → <b>${fmtQty(s.target_total)}</b>
              (múltiplo de ${s.lot}, que é o lote de negociação do cheio); a diferença entrou na maior linha do lado, <b>${s.absorbed_by}</b>.`
           : '').join('')}
+        ${naoRola.length ? `<br>· <span style="color:var(--red);font-weight:700">⚠ ${naoRola.length} fundo(s) NÃO rolam nada</span>
+             — ${naoRola.map(f => {
+               const aberto = posMinis(f);   // minis-equivalentes
+               return `<b>${f}</b> (${aberto > 0 ? '+' : ''}${aberto} minis em aberto)`;
+             }).join(', ')}:
+             o lado ficou fino e o lote de ${ROLAGEM_LOT.cheio} do cheio arredondou para zero. Role no mini ou ajuste a execução à mão.` : ''}
         ${residTotal ? `<br>· <span style="color:var(--red)">Resíduo total ${residTotal > 0 ? '+' : ''}${residTotal} minis</span>
              (US$ ${(Math.abs(residTotal) * 10).toLocaleString('en-US')} mil de nocional — 1 mini = US$ 10 mil) — é o arredondamento; a coluna Resíduo diz de quem é.`
           : '<br>· Resíduo zero: a conversão fechou em contratos inteiros.'}
@@ -694,7 +757,7 @@ async function gerarBoletas() {
     filters,
     // O modo de conversão vive fora do rolagemConfig (que é a config de boleta e persiste
     // noutra chave) — vai carona no `config` porque é lá que o backend lê.
-    config: { ...rolagemConfig, convert: { mode: rolagemConvMode } },
+    config: { ...rolagemConfig, convert: { mode: rolagemConvMode, scope: rolagemConvScope } },
   };
   PosBusy.on('boletas');
   status.textContent = 'Gerando boletas...';
@@ -785,13 +848,25 @@ function _renderBoletaPreview() {
   const convTable = !cv ? '' : (() => {
     const nc = cv.funds.filter(f => f.converted);
     const resid = cv.residual_minis_total || 0;
+    // ☠️ O escopo é NOVO (nov/2026): servidor sem restart ignora o campo e devolve boleta
+    // em 'neta' enquanto o resumo mostra 'todos' — a boleta certa para a tela errada, sem
+    // erro nenhum. Comparar o que voltou com o que foi pedido é o que denuncia isso.
+    const scopeServidor = cv.scope || 'neta';
+    const scopeAviso = scopeServidor !== rolagemConvScope
+      ? `<div style="color:var(--red);font-weight:700;font-size:11px;margin-bottom:4px">
+           ⚠ O servidor aplicou o escopo <b>${scopeServidor === 'todos' ? 'todos os fundos' : 'só quem neta'}</b>,
+           mas a tela está em <b>${rolagemConvScope === 'todos' ? 'todos os fundos' : 'só quem neta'}</b> —
+           estas boletas NÃO são o que o resumo acima mostra. Reinicie o servidor (o campo é novo) e gere de novo.
+         </div>` : '';
     const sideTxt = (cv.sides || []).map(s =>
       `${s.side} em ${s.asset}: ${s.exact_total.toFixed(2).replace(/\.00$/, '')} exatos → <b>${fmtQty(s.target_total)}</b>` +
       (s.lot > 1 ? ` (múltiplo de ${s.lot}; sobra na maior linha, <b>${s.absorbed_by}</b>)` : '')).join(' &nbsp;·&nbsp; ');
     return `<div style="margin-bottom:8px;border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+      ${scopeAviso}
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">
-        Conversão <b>${cv.mode === 'cheio' ? 'mini → cheio' : 'cheio → mini'}</b> aplicada às boletas —
-        ${nc.length} fundo(s) netaram. ${sideTxt}
+        Conversão <b>${cv.mode === 'cheio' ? 'mini → cheio' : 'cheio → mini'}</b> aplicada às boletas
+        (${cv.scope === 'todos' ? 'todos os fundos com posição na origem' : 'só quem neta'}) —
+        ${nc.length} fundo(s) converteram. ${sideTxt}
       </div>
       ${nc.length ? `<table class="data-table" style="font-size:12px;width:auto">
         <thead><tr><th style="text-align:left">Fundo</th><th class="num">Net mini</th><th class="num">Net cheio</th>
